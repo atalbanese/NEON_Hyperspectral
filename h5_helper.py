@@ -68,6 +68,10 @@ def pre_processing(file_location, wavelength_ranges, mosaic=True, merging=True):
         #plt.imshow(zenith)
         #plt.show()
         spectral_bands = meta_data['Spectral_Data']['Wavelength']
+        meta_data = {"map_info": meta_data['Coordinate_System']['Map_Info'][()].decode("utf-8"),
+                     "proj": meta_data['Coordinate_System']['Proj4'][()].decode("utf-8"),
+                     "epsg": meta_data['Coordinate_System']['EPSG Code'][()].decode("utf-8")}
+
         if merging:
             #Get masks to select specific bands as defined by wavelength_ranges
             band_ranges = {band: get_filter_range(spectral_bands, band_range["lower"], band_range["upper"]) 

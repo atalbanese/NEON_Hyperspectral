@@ -3,3 +3,6 @@
 *.las
 *.laz
 *.png
+__pycache__/*
+.vscode/*
+deps/*
