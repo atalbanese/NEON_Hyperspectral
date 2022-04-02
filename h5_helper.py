@@ -58,11 +58,14 @@ def pre_processing(file_location, wavelength_ranges, mosaic=True, merging=True):
         if mosaic:
             zenith = meta_data['to-sensor_zenith_angle']
             spectral = meta_data['Spectral_Data']
-            angles = get_solar_stats(meta_data)
-            angles['sensor_zenith'] = meta_data['to-sensor_zenith_angle'][:]
-            angles['azimuth'] = np.abs(meta_data['to-sensor_azimuth_angle'][:]-180.0-angles['azimuth'])
+            #TODO: FIx Missing angles (-1)
+            # angles = get_solar_stats(meta_data)
+            # angles['sensor_zenith'] = meta_data['to-sensor_zenith_angle'][:]
+            # angles['azimuth'] = np.abs(meta_data['to-sensor_azimuth_angle'][:]-180.0-angles['azimuth'])
         else:
             angles = 'Getting angle metadata from flightline files still in development'
+        
+        angles = 'Getting angles still in dev'
 
         #angles['azimuth'] = np.ones_like(angles['sensor_zenith']) *10
         #plt.imshow(zenith)
