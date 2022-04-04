@@ -1,31 +1,17 @@
 import torch
 import torch.nn as nn
 from torchvision import models
+import net_gen
 
 # Adapated from https://github.com/facebookresearch/simsiam/blob/main/simsiam/builder.py
-class SimSiamResNet(nn.Module):
-    def __init__(self, num_channels=4, dim=1000, pred_dim=512):
-        super(SimSiamResNet, self).__init__()
-        self.encoder = models.resnet18()
-        # Adapt to work with whatever number of channels
-        # Need to adjust prediction dimensions as well
-        self.encoder.conv1 = nn.Conv2d(num_channels, 64, kernel_size=7, stride=2, padding=3, bias = False)
-        prev_dim = self.encoder.fc.weight.shape[1]
-        self.encoder.fc = nn.Sequential(nn.Linear(prev_dim, prev_dim, bias=False),
-                                        nn.BatchNorm1d(prev_dim),
-                                        nn.ReLU(inplace=True), # first layer
-                                        nn.Linear(prev_dim, prev_dim, bias=False),
-                                        nn.BatchNorm1d(prev_dim),
-                                        nn.ReLU(inplace=True), # second layer
-                                        self.encoder.fc,
-                                        nn.BatchNorm1d(dim, affine=False)) # output layer
-        self.encoder.fc[6].bias.requires_grad = False # hack: not use bias as it is followed by BN
 
-        # build a 2-layer predictor
-        self.predictor = nn.Sequential(nn.Linear(dim, pred_dim, bias=False),
-                                        nn.BatchNorm1d(pred_dim),
-                                        nn.ReLU(inplace=True), # hidden layer
-                                        nn.Linear(pred_dim, dim)) # output layer
+class SimSiamUNetFC(nn.Module):
+    def __init__(self, num_channels=4, num_classes=10):
+        super(SimSiamUNetFC, self).__init__()
+        self.encoder = net_gen.UnetGenerator(num_channels, num_classes, 3)
+        self.predictor = Predictor(num_classes)
+        # Need to adjust prediction dimensions as well
+        
 
     def forward(self, x1, x2):
         """
@@ -49,3 +35,37 @@ class SimSiamResNet(nn.Module):
     def predict(self, inp):
         inp = self.encoder(inp)
         return self.predictor(inp)
+
+
+
+class Predictor(nn.Module):
+    def __init__(self, num_classes):
+        super(Predictor, self).__init__()
+        self.conv1 = nn.Conv2d(num_classes, num_classes//2, kernel_size=3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(num_classes//2)
+        self.relu1 = nn.ReLU()
+        self.conv2 = nn.Conv2d(num_classes//2, 1, kernel_size=3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(1)
+        self.relu2 = nn.ReLU()
+        self.conv3 = nn.Conv2d(1, num_classes//2, kernel_size=3, padding=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(num_classes//2)
+        self.relu3 = nn.ReLU()
+        self.conv4 = nn.Conv2d(num_classes//2, num_classes, kernel_size=3, padding=1)
+        #self.linear1 = nn.Linear(64*64, 64*64, bias=False)
+        # self.bn2 = nn.BatchNorm1d(60*60*2)
+        # self.relu2 = nn.ReLU()
+        # self.linear2 = nn.Linear(60*60*2, 60*60)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = self.relu2(x)
+        x = self.conv3(x)
+        x = self.bn3(x)
+        x = self.relu3(x)
+        x = self.conv4(x)
+
+        return x
