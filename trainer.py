@@ -13,7 +13,7 @@ if __name__ == "__main__":
                     "nir": 865}
 
     dataset = HyperDataset(h5_fold, waves=wavelengths, augment="wavelength", batch_size=64)
-    train_loader = DataLoader(dataset, batch_size=1, num_workers = 30)
+    train_loader = DataLoader(dataset, batch_size=1, num_workers = 10)
     model = models.HyperSimSiamWaveAugment(num_channels=4)
     trainer = pl.Trainer(accelerator="cpu", max_epochs=20)
     trainer.fit(model, train_loader)

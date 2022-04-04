@@ -84,6 +84,13 @@ class HyperDataset(Dataset):
         selected = set([value for value in selected.values()])
         to_select = list(possible_bands - selected)
         return self.rng.choice(to_select, size=self.num_bands, replace=False)
+
+    def semi_rand_band_select(self, selected, width=5):
+        possible_bands = set(range(0,423))
+        selected = [value for value in selected.values()]
+        change_window = list(range(-width, width))
+        changes = self.rng.choice(change_window, size=self.num_bands)
+        return [selected[i] + changes[i] for i in range(0,self.num_bands)]
     
     def __len__(self):
         return len(self.files)
@@ -99,7 +106,8 @@ class HyperDataset(Dataset):
         to_return["viz"] = viz_h5
 
         if self.augment_type == "wavelength":
-            random_bands = self.random_band_select(selected)
+            #random_bands = self.random_band_select(selected)
+            random_bands = self.semi_rand_band_select(selected)
             random_bands = {i: random_bands[i] for i in range(0, len(random_bands))}
 
             rand_h5, _, _ = self.process_h5(f, select_bands=random_bands)

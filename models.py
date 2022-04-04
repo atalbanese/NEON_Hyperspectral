@@ -55,8 +55,8 @@ class HyperSimSiamWaveAugment(pl.LightningModule):
         self.kwargs = kwargs
         self.network = networks.SimSiamUNetFC(num_channels=kwargs['num_channels'])
         #self.loss = nn.CosineSimilarity(dim=1)
-        #self.loss = nn.CrossEntropyLoss()
-        self.loss=nn.BCEWithLogitsLoss()
+        self.loss = nn.CrossEntropyLoss()
+        #self.loss=nn.BCEWithLogitsLoss()
 
     #TODO: Integrate LR with KWARGS
     def configure_optimizers(self):
@@ -71,7 +71,7 @@ class HyperSimSiamWaveAugment(pl.LightningModule):
         sample_imgs = viz[:6]
         self.save_grid(sample_imgs, 'rgb')
         
-        p1, p2, z1, z2 = self.network(inp, inp_aug)
+        p1, p2, z1, z2 = self.network(inp, inp_aug)    
 
         sample_pred = p1[:6]
         sample_pred = self.get_classifications(sample_pred)
