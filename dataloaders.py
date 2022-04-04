@@ -6,11 +6,18 @@ import random
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
+import h5py
 #from torch_geometric.data import Data
 
 class HyperDataset(Dataset):
     def __init__(self, hyper_folder, **kwargs):
+        self.viz_bands = {"red": 654,
+                        "green": 561, 
+                        "blue": 482}
         self.kwargs = kwargs
+        self.rng = np.random.default_rng()
+        self.augment_type = kwargs["augment"] if "augment" in kwargs else "wavelength"
+        self.num_bands = kwargs["num_bands"] if "num_bands" in kwargs else 4
         self.h5_location = hyper_folder
         self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 32
         self.crop_size = kwargs["crop_size"] if "crop_size" in kwargs else 64
@@ -24,10 +31,10 @@ class HyperDataset(Dataset):
         self.files = list(self.h5_dict.keys())
     
 
-    def process_h5(self, h5_file):
-        waves = self.kwargs['waves']
-        bands, meta, _ = hp.pre_processing(h5_file, waves)
-        return bands, meta
+    def process_h5(self, h5_file, waves=None, select_bands=None):
+        waves = waves if waves is not None else self.kwargs['waves']
+        bands, meta, _, selected = hp.pre_processing(h5_file, wavelength_ranges=waves, select_bands=select_bands)
+        return bands, meta, selected
 
 
     def make_crops(self):
@@ -71,19 +78,63 @@ class HyperDataset(Dataset):
 
         return torch.stack(h5_tensor_list)
 
+    def random_band_select(self, selected):
+        #TODO: fix magic number here
+        possible_bands = set(range(0, 423))
+        selected = set([value for value in selected.values()])
+        to_select = list(possible_bands - selected)
+        return self.rng.choice(to_select, size=self.num_bands, replace=False)
     
     def __len__(self):
         return len(self.files)
 
     def __getitem__(self, idx):
+        to_return = {}
         coords = self.files[idx]
         h5 = self.h5_dict[coords]
-        h5, h5_meta = self.process_h5(os.path.join(self.h5_location, h5))
+        f = h5py.File(os.path.join(self.h5_location, h5))
+        base_h5, h5_meta, selected = self.process_h5(f)
+        to_return["base"] = base_h5
+        viz_h5, _, _ = self.process_h5(f, waves=self.viz_bands)
+        to_return["viz"] = viz_h5
+
+        if self.augment_type == "wavelength":
+            random_bands = self.random_band_select(selected)
+            random_bands = {i: random_bands[i] for i in range(0, len(random_bands))}
+
+            rand_h5, _, _ = self.process_h5(f, select_bands=random_bands)
+            to_return["rand"] = rand_h5
+
         
         crops = self.make_crops()
-                
-        return self.make_h5_stack(h5, crops)
+
+        f.close()
+
+        to_return = {key: self.make_h5_stack(value, crops) for key, value in to_return.items()}
+
+        return to_return
     
+
+
+if __name__ == "__main__":
+    #test = pylas.read('/data/shared/src/aalbanese/datasets/lidar/NEON_lidar-point-cloud-line/NEON.D16.WREF.DP1.30003.001.2021-07.basic.20220330T163527Z.PROVISIONAL/NEON_D16_WREF_DP1_L001-1_2021071815_unclassified_point_cloud.las')    
+    #print(test)
+
+    #las_fold = "/data/shared/src/aalbanese/datasets/lidar/NEON_lidar-point-cloud-line/NEON.D16.WREF.DP1.30003.001.2021-07.basic.20220330T192134Z.PROVISIONAL"
+    h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
+
+    wavelengths = {"red": 654,
+                    "green": 561, 
+                    "blue": 482,
+                    "nir": 865}
+
+
+    #test = MixedDataset(h5_fold, las_fold, waves=wavelengths)
+    test = HyperDataset(h5_fold, waves=wavelengths, augment="wavelength")
+    test_item = test.__getitem__(69)
+    print(test_item)
+
+
 #WIP - COME BACK TO WHEN WORKING ON LIDAR
 # class MixedDataset(Dataset):
 #     def __init__(self, hyper_folder, las_folder, **kwargs):
@@ -194,18 +245,3 @@ class HyperDataset(Dataset):
 
 
 
-if __name__ == "__main__":
-    #test = pylas.read('/data/shared/src/aalbanese/datasets/lidar/NEON_lidar-point-cloud-line/NEON.D16.WREF.DP1.30003.001.2021-07.basic.20220330T163527Z.PROVISIONAL/NEON_D16_WREF_DP1_L001-1_2021071815_unclassified_point_cloud.las')    
-    #print(test)
-
-    las_fold = "/data/shared/src/aalbanese/datasets/lidar/NEON_lidar-point-cloud-line/NEON.D16.WREF.DP1.30003.001.2021-07.basic.20220330T192134Z.PROVISIONAL"
-    h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
-
-    wavelengths = {"blue": {"lower": 452, "upper": 512},
-                     "green": {"lower": 533, "upper": 590},
-                     "red": {"lower": 636, "upper": 673},
-                     "nir": {"lower": 851, "upper": 879}}
-
-    #test = MixedDataset(h5_fold, las_fold, waves=wavelengths)
-    test = HyperDataset(h5_fold, waves=wavelengths)
-    print(test.__getitem__(0))

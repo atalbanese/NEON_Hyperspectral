@@ -1,3 +1,4 @@
+from select import select
 import h5py as hp
 import numpy as np
 import matplotlib.pyplot as plt
@@ -46,47 +47,56 @@ def stack_all(band_dict, axis=2):
     to_stack = [value for value in band_dict.values()]
     return np.stack(to_stack, axis=axis)
 
+#TODO: this is getting unwieldy. Split it up
 #Open hyperspectral file, get the supplied wavelengths, merge them into bands, and return them along with metadata for the file
-def pre_processing(file_location, wavelength_ranges, mosaic=True, merging=True):
-    with hp.File(file_location, 'r') as f:
-        #Get sitename
-        group_key = list(f.keys())[0]
+def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select_bands=None):
+    was_str = False
+    if isinstance(f, str):
+        was_str = True
+        f = hp.File(f, 'r')
+    #Get sitename
+    group_key = list(f.keys())[0]
 
-        #Get values out of h5
-        meta_data = f[group_key]["Reflectance"]["Metadata"]
-        refl_values = f[group_key]["Reflectance"]["Reflectance_Data"]
-        if mosaic:
-            zenith = meta_data['to-sensor_zenith_angle']
-            spectral = meta_data['Spectral_Data']
-            #TODO: FIx Missing angles (-1)
-            # angles = get_solar_stats(meta_data)
-            # angles['sensor_zenith'] = meta_data['to-sensor_zenith_angle'][:]
-            # angles['azimuth'] = np.abs(meta_data['to-sensor_azimuth_angle'][:]-180.0-angles['azimuth'])
-        else:
-            angles = 'Getting angle metadata from flightline files still in development'
-        
-        angles = 'Getting angles still in dev'
+    #Get values out of h5
+    meta_data = f[group_key]["Reflectance"]["Metadata"]
+    refl_values = f[group_key]["Reflectance"]["Reflectance_Data"]
+    if mosaic:
+        zenith = meta_data['to-sensor_zenith_angle']
+        spectral = meta_data['Spectral_Data']
+        #TODO: FIx Missing angles (-1)
+        # angles = get_solar_stats(meta_data)
+        # angles['sensor_zenith'] = meta_data['to-sensor_zenith_angle'][:]
+        # angles['azimuth'] = np.abs(meta_data['to-sensor_azimuth_angle'][:]-180.0-angles['azimuth'])
+    else:
+        angles = 'Getting angle metadata from flightline files still in development'
+    
+    angles = 'Getting angles still in dev'
 
-        #angles['azimuth'] = np.ones_like(angles['sensor_zenith']) *10
-        #plt.imshow(zenith)
-        #plt.show()
-        spectral_bands = meta_data['Spectral_Data']['Wavelength']
-        meta_data = {"map_info": meta_data['Coordinate_System']['Map_Info'][()].decode("utf-8"),
-                     "proj": meta_data['Coordinate_System']['Proj4'][()].decode("utf-8"),
-                     "epsg": meta_data['Coordinate_System']['EPSG Code'][()].decode("utf-8")}
+    #angles['azimuth'] = np.ones_like(angles['sensor_zenith']) *10
+    #plt.imshow(zenith)
+    #plt.show()
+    spectral_bands = meta_data['Spectral_Data']['Wavelength']
+    meta_data = {"map_info": meta_data['Coordinate_System']['Map_Info'][()].decode("utf-8"),
+                    "proj": meta_data['Coordinate_System']['Proj4'][()].decode("utf-8"),
+                    "epsg": meta_data['Coordinate_System']['EPSG Code'][()].decode("utf-8")}
 
-        if merging:
-            #Get masks to select specific bands as defined by wavelength_ranges
-            band_ranges = {band: get_filter_range(spectral_bands, band_range["lower"], band_range["upper"]) 
-                            for band, band_range in wavelength_ranges.items()}
+    if merging:
+        #Get masks to select specific bands as defined by wavelength_ranges
+        band_ranges = {band: get_filter_range(spectral_bands, band_range["lower"], band_range["upper"]) 
+                        for band, band_range in wavelength_ranges.items()}
 
-            #Filter and merge hyperspectral bands into blue, gree, red, nir bands
-            band_data = {band: filter_and_merge(refl_values, band_range) for band, band_range in band_ranges.items()}
-        else:
+        #Filter and merge hyperspectral bands into blue, gree, red, nir bands
+        band_data = {band: filter_and_merge(refl_values, band_range) for band, band_range in band_ranges.items()}
+    else:
+        if select_bands is None:
             select_bands = {band: find_nearest(spectral_bands, wavelength) for band, wavelength in wavelength_ranges.items()}
-            band_data = {band: get_band(refl_values, band_index) for band, band_index in select_bands.items()}
-
-    return band_data, meta_data, angles
+        band_data = {band: get_band(refl_values, band_index) for band, band_index in select_bands.items()}
+    to_return = [band_data, meta_data, angles]
+    if select_bands is not None:
+        to_return.append(select_bands)
+    if was_str:
+        f.close()
+    return to_return
 
 
 def get_solar_stats(metadata):
