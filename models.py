@@ -60,6 +60,7 @@ class DenseSimSiam(pl.LightningModule):
         pix_loss = (-(self.softmax(p1).mean() * self.logmax(z2_stop).mean())-(self.softmax(p2).mean() * self.logmax(z1_stop).mean())) * 0.5
         region_loss = self.loss(u1, v2)
         loss = (pix_loss + region_loss) * 0.5
+        self.log('train_loss', loss)
         return loss
 
     def log_images(self, viz, proj, pred):
