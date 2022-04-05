@@ -6,7 +6,7 @@ import net_gen
 # Adapated from https://github.com/facebookresearch/simsiam/blob/main/simsiam/builder.py
 
 class SimSiamUNetFC(nn.Module):
-    def __init__(self, num_channels=4, num_classes=10):
+    def __init__(self, num_channels=12, num_classes=10):
         super(SimSiamUNetFC, self).__init__()
         self.encoder = net_gen.UnetGenerator(num_channels, num_classes, 3)
         self.predictor = Predictor(num_classes)

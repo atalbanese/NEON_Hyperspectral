@@ -56,11 +56,12 @@ class HyperSimSiamWaveAugment(pl.LightningModule):
         self.network = networks.SimSiamUNetFC(num_channels=kwargs['num_channels'])
         #self.loss = nn.CosineSimilarity(dim=1)
         self.loss = nn.CrossEntropyLoss()
+        #self.loss = nn.NLLLoss2d()
         #self.loss=nn.BCEWithLogitsLoss()
 
     #TODO: Integrate LR with KWARGS
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=5e-4)
+        optimizer = torch.optim.Adam(self.parameters(), lr=5e-3)
         return optimizer
 
     def training_step(self, x, batch_idx):
@@ -81,10 +82,11 @@ class HyperSimSiamWaveAugment(pl.LightningModule):
         sample_proj = self.get_classifications(sample_proj)
         self.save_grid(sample_proj, 'projected')
 
-        loss = (self.loss(p1, z2).mean() + self.loss(p2, z1).mean()) *0.5
+        #loss = (self.loss(p1, z2).mean() + self.loss(p2, z1).mean()) *0.5
+        loss = (self.loss(p1,z2.softmax(dim=1)) + self.loss(p2, z1.softmax(dim=1)))*.05
         self.log('train_loss', loss)
         return loss
-
+    
     def save_grid(self, inp, name):
         tb = self.logger.experiment
         img_grid = tv.utils.make_grid(inp, normalize=True, scale_each=True)
@@ -96,10 +98,16 @@ class HyperSimSiamWaveAugment(pl.LightningModule):
     # def validation_step(self, x, batch_idx):
     #     return None
 
+    #TODO: make 3 channel color image
     def get_classifications(self, x):
         norms = torch.nn.functional.softmax(x, dim=1)
         masks = norms.argmax(1).float()
-        return torch.unsqueeze(masks, 1)
+
+        masks = torch.unsqueeze(masks, 1) * 255.0/9
+        masks = torch.cat((masks, masks, masks), dim=1)
+        return masks
+
+
 
     
     def forward(self, x):
