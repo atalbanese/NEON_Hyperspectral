@@ -69,3 +69,88 @@ class Predictor(nn.Module):
         x = self.conv4(x)
 
         return x
+
+
+#Projector g from https://arxiv.org/pdf/2203.11075.pdf
+class DenseProjector(nn.Module):
+    def __init__(self, num_channels = 512, num_classes= 10):
+        super(DenseProjector, self).__init__()
+        self.layer1 = nn.Sequential(nn.Conv2d(num_channels, num_channels, kernel_size=1),
+                                    nn.BatchNorm2d(num_channels),
+                                    nn.ReLU()
+                                    )
+        self.layer2 = nn.Sequential(nn.Conv2d(num_channels, num_channels, kernel_size=1),
+                                    nn.BatchNorm2d(num_channels),
+                                    nn.ReLU()
+                                    )
+        self.layer3 = nn.Sequential(nn.Conv2d(num_channels, num_channels, kernel_size=1),
+                                    nn.BatchNorm2d(num_channels, affine=False),
+                                    nn.ReLU()
+                                    )
+    
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+
+        return x
+
+#Predictor h - just guessing as to whats this is supposed to be like
+class DensePredictor(nn.Module):
+    def __init__(self, num_classes =10):
+        super(DensePredictor, self).__init__()
+        self.layer1 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1),
+                                    nn.BatchNorm2d(num_classes),
+                                    nn.ReLU()
+                                    )
+        self.layer2 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False),
+                                    nn.BatchNorm2d(num_classes),
+                                    nn.ReLU()
+                                    )
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+
+        return x
+
+class DenseProjectorMLP(nn.Module):
+    def __init__(self, num_channels=512):
+        super(DenseProjectorMLP, self).__init__()
+        self.layer1 = nn.Sequential(nn.Linear(4096, 512, bias=False),
+                                    nn.BatchNorm1d(10),
+                                    nn.ReLU())
+        self.layer2 = nn.Sequential(nn.Linear(512, 512, bias=False),
+                                    nn.BatchNorm1d(10),
+                                    nn.ReLU())
+        self.layer3 = nn.Sequential(nn.Linear(512, 512, bias=False),
+                                    nn.BatchNorm1d(10),
+                                    nn.ReLU())
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+
+        return x
+
+class DensePredictorMLP(nn.Module):
+    def __init__(self):
+        super(DensePredictorMLP, self).__init__()
+        self.layer1 = nn.Sequential(nn.Linear(512, 512, bias=False),
+                                    nn.BatchNorm1d(10),
+                                    nn.ReLU())
+        self.layer2 = nn.Sequential(nn.Linear(512, 512, bias=False),
+                                    nn.BatchNorm1d(10, affine=False),
+                                    nn.ReLU())
+
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+
+        return x
+
+ 
+
+
+
