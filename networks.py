@@ -8,7 +8,7 @@ import net_gen
 class SimSiamUNetFC(nn.Module):
     def __init__(self, num_channels=12, num_classes=10):
         super(SimSiamUNetFC, self).__init__()
-        self.encoder = net_gen.UnetGenerator(num_channels, num_classes, 3)
+        self.encoder = net_gen.ResnetGenerator(num_channels, num_classes)
         self.predictor = Predictor(num_classes)
         # Need to adjust prediction dimensions as well
         
@@ -117,13 +117,13 @@ class DenseProjectorMLP(nn.Module):
     def __init__(self, num_channels=512):
         super(DenseProjectorMLP, self).__init__()
         self.layer1 = nn.Sequential(nn.Linear(4096, 512, bias=False),
-                                    nn.BatchNorm1d(10),
+                                    nn.BatchNorm1d(20),
                                     nn.ReLU())
         self.layer2 = nn.Sequential(nn.Linear(512, 512, bias=False),
-                                    nn.BatchNorm1d(10),
+                                    nn.BatchNorm1d(20),
                                     nn.ReLU())
         self.layer3 = nn.Sequential(nn.Linear(512, 512, bias=False),
-                                    nn.BatchNorm1d(10),
+                                    nn.BatchNorm1d(20),
                                     nn.ReLU())
 
     def forward(self, x):
@@ -137,10 +137,10 @@ class DensePredictorMLP(nn.Module):
     def __init__(self):
         super(DensePredictorMLP, self).__init__()
         self.layer1 = nn.Sequential(nn.Linear(512, 512, bias=False),
-                                    nn.BatchNorm1d(10),
+                                    nn.BatchNorm1d(20),
                                     nn.ReLU())
         self.layer2 = nn.Sequential(nn.Linear(512, 512, bias=False),
-                                    nn.BatchNorm1d(10, affine=False),
+                                    nn.BatchNorm1d(20, affine=False),
                                     nn.ReLU())
 
 

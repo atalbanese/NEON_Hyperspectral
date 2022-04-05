@@ -13,7 +13,7 @@ def get_classifications(x):
     norms = torch.nn.functional.softmax(x, dim=1)
     masks = norms.argmax(1).float()
 
-    masks = torch.unsqueeze(masks, 1) * 255.0/9
+    masks = torch.unsqueeze(masks, 1) * 255.0/19
     masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
@@ -22,9 +22,9 @@ class DenseSimSiam(pl.LightningModule):
         super().__init__()
         self.kwargs = kwargs
         #self.encoder = net_gen.ResnetEncoder(kwargs["num_channels"], 512, use_dropout=True)
-        self.encoder = net_gen.ResnetGenerator(kwargs["num_channels"], 10)
-        self.projector_1 = networks.DenseProjector(num_channels=10)
-        self.predictor_1 = networks.DensePredictor(num_classes=10)
+        self.encoder = net_gen.ResnetGenerator(kwargs["num_channels"], 20)
+        self.projector_1 = networks.DenseProjector(num_channels=20)
+        self.predictor_1 = networks.DensePredictor(num_classes=20)
         self.projector_2 = networks.DenseProjectorMLP()
         self.predictor_2 = networks.DensePredictorMLP()
         self.loss = nn.CrossEntropyLoss()
@@ -79,10 +79,14 @@ class DenseSimSiam(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=5e-3)
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+        
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.projector_1(x)
+        return x
     
-    def grid_sample(self, x):
-        return None
 
 
 # class HyperSimSiam(pl.LightningModule):

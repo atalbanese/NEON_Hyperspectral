@@ -17,7 +17,7 @@ if __name__ == "__main__":
     dataset = HyperDataset(h5_fold, waves=wavelengths, augment="wavelength", batch_size=64, num_bands=12)
     train_loader = DataLoader(dataset, batch_size=1, num_workers = 20)
     #model = models.HyperSimSiamWaveAugment(num_channels=12)
-    model = models.DenseSimSiam(num_channels=12, num_classes = 10)
+    model = models.DenseSimSiam(num_channels=12, num_classes = 20)
     trainer = pl.Trainer(accelerator="cpu", max_epochs=50)
     trainer.fit(model, train_loader)
 
