@@ -13,8 +13,8 @@ def get_classifications(x):
     norms = torch.nn.functional.softmax(x, dim=1)
     masks = norms.argmax(1).float()
 
-    # masks = torch.unsqueeze(masks, 1) * 255.0/9
-    # masks = torch.cat((masks, masks, masks), dim=1)
+    masks = torch.unsqueeze(masks, 1) * 255.0/9
+    masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
 class DenseSimSiam(pl.LightningModule):
