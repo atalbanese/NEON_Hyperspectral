@@ -18,7 +18,7 @@ class HyperDataset(Dataset):
                         "blue": 482}
         self.kwargs = kwargs
         self.rng = np.random.default_rng()
-        self.pca = kwargs["pca"] if "pca" in kwargs else True
+        #self.pca = kwargs["pca"] if "pca" in kwargs else True
         self.augment_type = kwargs["augment"] if "augment" in kwargs else "wavelength"
         self.num_bands = kwargs["num_bands"] if "num_bands" in kwargs else 4
         self.h5_location = hyper_folder
@@ -37,7 +37,7 @@ class HyperDataset(Dataset):
 
         self.files = list(self.h5_dict.keys())
 
-        self.clear_nans()
+        #self.clear_nans()
     
 
 
@@ -57,9 +57,6 @@ class HyperDataset(Dataset):
 
         print(f"removed {count} files from file list since they were >10% missing values")
 
-
-
-        
 
     def make_crops(self):
         #There is definitely a faster way to do this but it works
@@ -112,6 +109,7 @@ class HyperDataset(Dataset):
         h5_tensor_list = []
         for sample in h5_samples:
             sample[sample != sample] = -1
+            sample = sample.astype(np.float32)
             h5_tensor_list.append(torch.from_numpy(sample))
 
         return torch.stack(h5_tensor_list)
@@ -149,8 +147,8 @@ class HyperDataset(Dataset):
         all_data = hp.pre_processing(f, get_all=True)
         base_h5 = self.pca(all_data["bands"])
         to_return["base"] = base_h5
-        viz_h5, _, _ = hp.pre_processing(f, wavelength_ranges=self.viz_bands)
-        to_return["viz"] = viz_h5
+        viz_h5= hp.pre_processing(f, wavelength_ranges=self.viz_bands)
+        to_return["viz"] = viz_h5["bands"]
 
         #Deprecated - random wavelength augmentation, switching to PCA based augmentation
         # if self.augment_type == "wavelength":

@@ -116,7 +116,7 @@ class DensePredictor(nn.Module):
 class DenseProjectorMLP(nn.Module):
     def __init__(self, num_channels=512):
         super(DenseProjectorMLP, self).__init__()
-        self.layer1 = nn.Sequential(nn.Linear(4096, 512, bias=False),
+        self.layer1 = nn.Sequential(nn.Linear(729, 512, bias=False),
                                     nn.BatchNorm1d(20),
                                     nn.ReLU())
         self.layer2 = nn.Sequential(nn.Linear(512, 512, bias=False),
