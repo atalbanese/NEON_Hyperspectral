@@ -22,11 +22,13 @@ class DenseSimSiam(pl.LightningModule):
         super().__init__()
         self.kwargs = kwargs
         #self.encoder = net_gen.ResnetEncoder(kwargs["num_channels"], 512, use_dropout=True)
-        self.encoder = net_gen.ResnetGenerator(kwargs["num_channels"], 20)
+        self.encoder = net_gen.ResnetGenerator(kwargs["num_channels"], 20, n_blocks =9)
         self.projector_1 = networks.DenseProjector(num_channels=20)
         self.predictor_1 = networks.DensePredictor(num_classes=20)
-        self.projector_2 = networks.DenseProjectorMLP()
-        self.predictor_2 = networks.DensePredictorMLP()
+        #self.projector_2 = networks.DenseProjectorMLP()
+        self.projector_2 = networks.DenseProjector(num_channels=20)
+        #self.predictor_2 = networks.DensePredictorMLP()
+        self.predictor_2 = networks.DensePredictor(num_classes=20)
         self.loss = nn.CrossEntropyLoss()
         self.softmax = torch.nn.Softmax(dim=1)
         self.logmax = torch.nn.LogSoftmax(dim=1)
@@ -46,8 +48,8 @@ class DenseSimSiam(pl.LightningModule):
         z1_stop = z1.detach()
         z2_stop = z2.detach()
 
-        e1 = torch.matmul(x1, z1).flatten(start_dim=2)
-        e2 = torch.matmul(x2, z2).flatten(start_dim=2)
+        e1 = torch.matmul(x1, z1) #.flatten(start_dim=2)
+        e2 = torch.matmul(x2, z2) #.flatten(start_dim=2)
 
 
         v1 = self.projector_2(e1)
@@ -55,15 +57,15 @@ class DenseSimSiam(pl.LightningModule):
 
         v2 = self.projector_2(e2)
 
-        self.log_images(viz,z1,p1)
+        self.log_images(viz,z1,p1, inp, inp_aug)
 
         pix_loss = (-(self.softmax(p1).mean() * self.logmax(z2_stop).mean())-(self.softmax(p2).mean() * self.logmax(z1_stop).mean())) * 0.5
-        region_loss = self.loss(u1, v2)
-        loss = (pix_loss + region_loss) * 0.5
+        region_loss = self.loss(u1, v2) *.25
+        loss = (pix_loss + region_loss) #* 0.5
         self.log('train_loss', loss)
         return loss
 
-    def log_images(self, viz, proj, pred):
+    def log_images(self, viz, proj, pred, x, x1):
         tb = self.logger.experiment
         sample_imgs = viz[:6]
         save_grid(tb, sample_imgs, 'rgb', self.current_epoch)
@@ -76,10 +78,16 @@ class DenseSimSiam(pl.LightningModule):
         sample_pred = get_classifications(sample_pred)
         save_grid(tb, sample_proj, 'predicted', self.current_epoch)
 
+        sample_x = x[:6, 3:6]
+        save_grid(tb, sample_x, 'sample_x', self.current_epoch)
+
+        sample_x1 = x1[:6, 3:6]
+        save_grid(tb, sample_x1, 'sample_x1', self.current_epoch)
+
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=5e-3)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=1, verbose=True)
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
         
     def forward(self, x):

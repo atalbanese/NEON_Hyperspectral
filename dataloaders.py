@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import torch
 import numpy as np
 import h5py
+import transforms as tr
+import torchvision.transforms as tt
 #from torch_geometric.data import Data
 
 class HyperDataset(Dataset):
@@ -16,11 +18,16 @@ class HyperDataset(Dataset):
                         "blue": 482}
         self.kwargs = kwargs
         self.rng = np.random.default_rng()
+        self.pca = kwargs["pca"] if "pca" in kwargs else True
         self.augment_type = kwargs["augment"] if "augment" in kwargs else "wavelength"
         self.num_bands = kwargs["num_bands"] if "num_bands" in kwargs else 4
         self.h5_location = hyper_folder
         self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 32
-        self.crop_size = kwargs["crop_size"] if "crop_size" in kwargs else 64
+        self.crop_size = kwargs["crop_size"] if "crop_size" in kwargs else 27
+        self.transforms = tt.Compose([tt.RandomHorizontalFlip(),
+                                    tt.RandomVerticalFlip(),
+                                    tr.RandomPointMask(),
+                                    tr.RandomRectangleMask()])
         h5_files = [file for file in os.listdir(self.h5_location) if ".h5" in file]
         
         def make_dict(file_list, param_1, param_2):
@@ -29,13 +36,30 @@ class HyperDataset(Dataset):
         self.h5_dict = make_dict(h5_files, -3, -2)
 
         self.files = list(self.h5_dict.keys())
+
+        self.clear_nans()
     
 
-    def process_h5(self, h5_file, waves=None, select_bands=None):
-        waves = waves if waves is not None else self.kwargs['waves']
-        bands, meta, _, selected = hp.pre_processing(h5_file, wavelength_ranges=waves, select_bands=select_bands)
-        return bands, meta, selected
 
+    def clear_nans(self):
+        band = {'b1': 500}
+        count = 0
+        to_remove = []
+        for key, value in self.h5_dict.items():
+            bands, _, _, _ = hp.pre_processing(os.path.join(self.h5_location, value), wavelength_ranges=band)
+            if np.isnan(bands['b1']).sum() > (1000*1000*.10):
+                to_remove.append(key)
+                count += 1
+
+        for remove in to_remove:
+            del self.h5_dict[remove]
+            self.files.remove(remove)
+
+        print(f"removed {count} files from file list since they were >10% missing values")
+
+
+
+        
 
     def make_crops(self):
         #There is definitely a faster way to do this but it works
@@ -57,6 +81,19 @@ class HyperDataset(Dataset):
                 crops.append(crop_dims)
         return crops
 
+    def make_crops_det(self):
+        crops = []
+        start = random.randint(0, self.crop_size-1)
+        for i in range(start, 1000-self.crop_size, self.crop_size):
+            min_x = i
+            max_x = i + self.crop_size
+            for j in range(start, 1000-self.crop_size, self.crop_size):
+                min_y = j
+                max_y = j +self.crop_size
+                crops.append((min_x, min_y, max_x, max_y))
+        crops = random.sample(crops, k =self.batch_size)
+        return crops
+
     # Just for debugging
     def plot_crops(self):
         crops = self.make_crops()
@@ -67,7 +104,8 @@ class HyperDataset(Dataset):
         plt.show()
 
     def make_h5_stack(self, h5, crops):
-        h5 = hp.stack_all(h5, axis=0)
+        if isinstance(h5, dict):
+            h5 = hp.stack_all(h5, axis=0)
 
         h5_samples = [h5[:, crop[0]:crop[2], crop[1]:crop[3]] for crop in crops]
         # Convert any NAN values to -1
@@ -78,6 +116,14 @@ class HyperDataset(Dataset):
 
         return torch.stack(h5_tensor_list)
 
+    def pca(self, data, **kwargs):
+        data = hp.get_features(data)
+        #data = stack_all(data)
+        data = hp.pca(data, n_components=30, whiten=True)
+        data = np.swapaxes(data, 0, 1)
+        return data.reshape((30, 1000, 1000))
+
+
     def random_band_select(self, selected):
         #TODO: fix magic number here
         possible_bands = set(range(0, 423))
@@ -86,7 +132,7 @@ class HyperDataset(Dataset):
         return self.rng.choice(to_select, size=self.num_bands, replace=False)
 
     def semi_rand_band_select(self, selected, width=5):
-        possible_bands = set(range(0,423))
+
         selected = [value for value in selected.values()]
         change_window = list(range(-width, width))
         changes = self.rng.choice(change_window, size=self.num_bands)
@@ -100,25 +146,29 @@ class HyperDataset(Dataset):
         coords = self.files[idx]
         h5 = self.h5_dict[coords]
         f = h5py.File(os.path.join(self.h5_location, h5))
-        base_h5, h5_meta, selected = self.process_h5(f)
+        all_data = hp.pre_processing(f, get_all=True)
+        base_h5 = self.pca(all_data["bands"])
         to_return["base"] = base_h5
-        viz_h5, _, _ = self.process_h5(f, waves=self.viz_bands)
+        viz_h5, _, _ = hp.pre_processing(f, wavelength_ranges=self.viz_bands)
         to_return["viz"] = viz_h5
 
-        if self.augment_type == "wavelength":
-            #random_bands = self.random_band_select(selected)
-            random_bands = self.semi_rand_band_select(selected)
-            random_bands = {i: random_bands[i] for i in range(0, len(random_bands))}
+        #Deprecated - random wavelength augmentation, switching to PCA based augmentation
+        # if self.augment_type == "wavelength":
+        #     random_bands = self.random_band_select(selected)
+        #     #random_bands = self.semi_rand_band_select(selected)
+        #     random_bands = {i: random_bands[i] for i in range(0, len(random_bands))}
 
-            rand_h5, _, _ = self.process_h5(f, select_bands=random_bands)
-            to_return["rand"] = rand_h5
+        #     rand_h5, _, _ = self.process_h5(f, select_bands=random_bands)
+        #     to_return["rand"] = rand_h5
 
         
-        crops = self.make_crops()
+        #crops = self.make_crops()
+        crops = self.make_crops_det()
 
         f.close()
 
         to_return = {key: self.make_h5_stack(value, crops) for key, value in to_return.items()}
+        to_return["rand"] = self.transforms(to_return["base"])
 
         return to_return
     

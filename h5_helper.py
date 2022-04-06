@@ -4,6 +4,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from skimage import exposure
 import matplotlib.patches as mpatches
+from sklearn.decomposition import PCA, IncrementalPCA
+
+
+def pca(band_arr, **kwargs):
+    pca = PCA(**kwargs)
+    pca.fit(band_arr)
+    return pca.transform(band_arr)
+
+def get_features(inp, feature_band=2):
+    return np.reshape(inp, (-1,inp.shape[feature_band]))
+
 
 #Finds index of nearest wavelength
 def find_nearest(dataset, search_val):
@@ -49,8 +60,9 @@ def stack_all(band_dict, axis=2):
 
 #TODO: this is getting unwieldy. Split it up
 #Open hyperspectral file, get the supplied wavelengths, merge them into bands, and return them along with metadata for the file
-def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select_bands=None):
+def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select_bands=None, get_all=False):
     was_str = False
+    to_return = {}
     if isinstance(f, str):
         was_str = True
         f = hp.File(f, 'r')
@@ -60,6 +72,7 @@ def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select
     #Get values out of h5
     meta_data = f[group_key]["Reflectance"]["Metadata"]
     refl_values = f[group_key]["Reflectance"]["Reflectance_Data"]
+
     if mosaic:
         zenith = meta_data['to-sensor_zenith_angle']
         spectral = meta_data['Spectral_Data']
@@ -79,21 +92,29 @@ def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select
     meta_data = {"map_info": meta_data['Coordinate_System']['Map_Info'][()].decode("utf-8"),
                     "proj": meta_data['Coordinate_System']['Proj4'][()].decode("utf-8"),
                     "epsg": meta_data['Coordinate_System']['EPSG Code'][()].decode("utf-8")}
+    to_return["meta"] = meta_data
+    if not get_all:
+        if merging:
+            #Get masks to select specific bands as defined by wavelength_ranges
+            band_ranges = {band: get_filter_range(spectral_bands, band_range["lower"], band_range["upper"]) 
+                            for band, band_range in wavelength_ranges.items()}
 
-    if merging:
-        #Get masks to select specific bands as defined by wavelength_ranges
-        band_ranges = {band: get_filter_range(spectral_bands, band_range["lower"], band_range["upper"]) 
-                        for band, band_range in wavelength_ranges.items()}
+            #Filter and merge hyperspectral bands into blue, gree, red, nir bands
+            band_data = {band: filter_and_merge(refl_values, band_range) for band, band_range in band_ranges.items()}
+        else:
+            if select_bands is None:
+                select_bands = {band: find_nearest(spectral_bands, wavelength) for band, wavelength in wavelength_ranges.items()}
+            band_data = {band: get_band(refl_values, band_index) for band, band_index in select_bands.items()}
+        #to_return = [band_data, meta_data, angles]
+        to_return["bands"] = band_data
+        
+        if select_bands is not None:
+            to_return["selected"] =select_bands
 
-        #Filter and merge hyperspectral bands into blue, gree, red, nir bands
-        band_data = {band: filter_and_merge(refl_values, band_range) for band, band_range in band_ranges.items()}
     else:
-        if select_bands is None:
-            select_bands = {band: find_nearest(spectral_bands, wavelength) for band, wavelength in wavelength_ranges.items()}
-        band_data = {band: get_band(refl_values, band_index) for band, band_index in select_bands.items()}
-    to_return = [band_data, meta_data, angles]
-    if select_bands is not None:
-        to_return.append(select_bands)
+        refl_values = refl_values[:]/10000
+        refl_values[refl_values<0] = np.nan
+        to_return["bands"] = refl_values
     if was_str:
         f.close()
     return to_return
@@ -152,5 +173,15 @@ def skip_downsample(inp, step_size):
 
 def down_all(inp, step_size):
     return {key: skip_downsample(value, step_size) for key, value in inp.items()}
+
+if __name__ == "__main__":
+    select_bands = {"i":i for i in range(0,426)}
+    h5_file = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL/NEON_D16_WREF_DP3_590000_5077000_reflectance.h5"
+
+    data,_,_ = pre_processing(h5_file, get_all=True)
+    data = get_features(data)
+    #data = stack_all(data)
+    lower_dim, var = pca(data, n_components=30, whiten=True)
+    print(lower_dim)
 
 
