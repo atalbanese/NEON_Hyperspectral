@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 from skimage import exposure
 import matplotlib.patches as mpatches
 from sklearn.decomposition import PCA, IncrementalPCA
+from sklearn.neighbors import kneighbors_graph
+from sklearn.feature_extraction import image
+from sklearn import cluster
 
 
 def pca(band_arr, **kwargs):
@@ -173,6 +176,25 @@ def skip_downsample(inp, step_size):
 
 def down_all(inp, step_size):
     return {key: skip_downsample(value, step_size) for key, value in inp.items()}
+
+#TODO: add dask support for speed up/bulk images
+def ward_cluster(inp, n_clusters, mask=None, n_neighbors=10):
+    print('getting connectivity graph')
+    connectivity = kneighbors_graph(
+        inp, n_neighbors=n_neighbors, include_self=False
+    )
+
+    connectivity = 0.5 * (connectivity + connectivity.T)
+
+    ward = cluster.AgglomerativeClustering(
+        n_clusters=n_clusters, linkage="ward", connectivity=connectivity
+    )
+
+    print('fitting ward')
+
+    ward.fit(inp)
+
+    return ward.labels_.astype(int)
 
 if __name__ == "__main__":
     select_bands = {"i":i for i in range(0,426)}

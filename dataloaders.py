@@ -37,7 +37,7 @@ class HyperDataset(Dataset):
 
         self.files = list(self.h5_dict.keys())
 
-        #self.clear_nans()
+        self.clear_nans()
     
 
 
@@ -46,8 +46,8 @@ class HyperDataset(Dataset):
         count = 0
         to_remove = []
         for key, value in self.h5_dict.items():
-            bands, _, _, _ = hp.pre_processing(os.path.join(self.h5_location, value), wavelength_ranges=band)
-            if np.isnan(bands['b1']).sum() > (1000*1000*.10):
+            bands = hp.pre_processing(os.path.join(self.h5_location, value), wavelength_ranges=band)
+            if np.isnan(bands["bands"]['b1']).sum() > (1000*1000*.10):
                 to_remove.append(key)
                 count += 1
 
