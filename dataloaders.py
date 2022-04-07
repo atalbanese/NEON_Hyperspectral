@@ -6,6 +6,7 @@ import random
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
+import utils
 import h5py
 import transforms as tr
 import torchvision.transforms as tt
@@ -37,6 +38,7 @@ class HyperDataset(Dataset):
 
         self.files = list(self.h5_dict.keys())
 
+        #TODO: Test mode to enable/disable this
         self.clear_nans()
     
 
@@ -114,13 +116,6 @@ class HyperDataset(Dataset):
 
         return torch.stack(h5_tensor_list)
 
-    def pca(self, data, **kwargs):
-        data = hp.get_features(data)
-        #data = stack_all(data)
-        data = hp.pca(data, n_components=30, whiten=False)
-        data = np.swapaxes(data, 0, 1)
-        return data.reshape((30, 1000, 1000))
-
 
     def random_band_select(self, selected):
         #TODO: fix magic number here
@@ -145,7 +140,7 @@ class HyperDataset(Dataset):
         h5 = self.h5_dict[coords]
         f = h5py.File(os.path.join(self.h5_location, h5))
         all_data = hp.pre_processing(f, get_all=True)
-        base_h5 = self.pca(all_data["bands"])
+        base_h5 = utils.pca(all_data["bands"], True, n_components=30, whiten=False)
         to_return["base"] = base_h5
         viz_h5= hp.pre_processing(f, wavelength_ranges=self.viz_bands)
         to_return["viz"] = viz_h5["bands"]
