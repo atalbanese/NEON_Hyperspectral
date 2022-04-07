@@ -86,7 +86,7 @@ class DenseSimSiam(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=5e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=5e-4)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=1, verbose=True)
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
         

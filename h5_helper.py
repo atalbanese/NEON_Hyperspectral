@@ -178,7 +178,7 @@ def down_all(inp, step_size):
     return {key: skip_downsample(value, step_size) for key, value in inp.items()}
 
 #TODO: add dask support for speed up/bulk images
-def ward_cluster(inp, n_clusters, mask=None, n_neighbors=10):
+def ward_cluster(inp, n_clusters, mask=None, n_neighbors=4):
     print('getting connectivity graph')
     connectivity = kneighbors_graph(
         inp, n_neighbors=n_neighbors, include_self=False

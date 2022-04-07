@@ -14,10 +14,10 @@ if __name__ == "__main__":
 
     wavelengths = {f"{i}": i for i in range(50, 1200, 100)}
 
-    dataset = HyperDataset(h5_fold, waves=wavelengths, augment="wavelength", batch_size=128, num_bands=30, crop_size=27)
+    dataset = HyperDataset(h5_fold, waves=wavelengths, batch_size=256, num_bands=30, crop_size=27)
     train_loader = DataLoader(dataset, batch_size=1, num_workers = 20)
-    model = models.HyperSimSiamWaveAugment(num_channels=30)
-    #model = models.DenseSimSiam(num_channels=30, num_classes = 20)
+    #model = models.HyperSimSiamWaveAugment(num_channels=30)
+    model = models.DenseSimSiam(num_channels=30, num_classes = 20)
     trainer = pl.Trainer(accelerator="cpu", max_epochs=50)
     trainer.fit(model, train_loader)
 

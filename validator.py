@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import h5_helper as hp
@@ -60,24 +61,28 @@ def pca(data):
     data = hp.get_features(data)
     #data = stack_all(data)
     print("doing pca")
-    data = hp.pca(data, n_components=30, whiten=True)
+    data = hp.pca(data, n_components=8, whiten=False)
     return data
 
 
 
 
 if __name__ == "__main__":
+    NUM_CLUSTERS = 4
     h5_file = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL/NEON_D16_WREF_DP3_580000_5075000_reflectance.h5"
     coords = "580000,5075000"
-    valid = Validator(file="/data/shared/src/aalbanese/datasets/neon_wref.csv", img_dir="", num_clusters=20)
+    valid = Validator(file="/data/shared/src/aalbanese/datasets/neon_wref.csv", img_dir="", num_clusters=NUM_CLUSTERS)
 
     opened = hp.pre_processing(h5_file, get_all=True)["bands"]
     reduce_dim = pca(opened)
-    clustered = hp.ward_cluster(reduce_dim, 20)
+    clustered = hp.ward_cluster(reduce_dim, NUM_CLUSTERS, n_neighbors=8)
     clustered = clustered.reshape((1000,1000))
 
-    np.save("test_cluster.npy", clustered)
+    np.save("test_cluster_580000_5075000_4.npy", clustered)
 
-    valid.validate(coords, "test_cluster.npy")
+    
+    plt.imshow(np.load("test_cluster_580000_5075000_4.npy"))
+    plt.show()
+    valid.validate(coords, "test_cluster_580000_5075000_4.npy")
     print(valid.cluster_dict)
     print("here")

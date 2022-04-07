@@ -117,7 +117,7 @@ class HyperDataset(Dataset):
     def pca(self, data, **kwargs):
         data = hp.get_features(data)
         #data = stack_all(data)
-        data = hp.pca(data, n_components=30, whiten=True)
+        data = hp.pca(data, n_components=30, whiten=False)
         data = np.swapaxes(data, 0, 1)
         return data.reshape((30, 1000, 1000))
 
@@ -167,6 +167,8 @@ class HyperDataset(Dataset):
 
         to_return = {key: self.make_h5_stack(value, crops) for key, value in to_return.items()}
         to_return["rand"] = self.transforms(to_return["base"])
+        #DOUBLE AUGMENT
+        to_return["base"] = self.transforms(to_return["base"])
 
         return to_return
     
