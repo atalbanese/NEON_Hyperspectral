@@ -54,3 +54,8 @@ def get_classifications(x):
     # masks = torch.unsqueeze(masks, 1) * 255.0/19
     # masks = torch.cat((masks, masks, masks), dim=1)
     return masks
+
+def get_viz_bands():
+    return {"red": 654,
+            "green": 561, 
+            "blue": 482}

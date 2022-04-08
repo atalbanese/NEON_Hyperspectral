@@ -27,7 +27,7 @@ if __name__ == "__main__":
     train_loader = DataLoader(dataset, batch_size=1, num_workers = 20)
     #model = models.HyperSimSiamWaveAugment(num_channels=30)
     model = models.DenseSimSiam(num_channels=30, num_classes = 20)
-    trainer = pl.Trainer(accelerator="cpu", max_epochs=50, callbacks=[checkpoint_callback])
+    trainer = pl.Trainer(accelerator="cpu", max_epochs=10, callbacks=[checkpoint_callback])
     trainer.fit(model, train_loader)
 
     

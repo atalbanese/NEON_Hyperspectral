@@ -9,3 +9,5 @@ deps/*
 lightning_logs/*
 *.yaml
 *.npy
+*.ckpt
+*.csv
