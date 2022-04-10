@@ -44,7 +44,7 @@ class HyperDataset(Dataset):
         self.files = list(self.h5_dict.keys())
 
         #TODO: Test mode to enable/disable this
-        #self.clear_nans()
+        self.clear_nans()
     
 
 

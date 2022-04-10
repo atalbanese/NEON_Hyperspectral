@@ -158,7 +158,7 @@ class BYOLLinear(nn.Module):
         self.layer1 = nn.Sequential(nn.Linear(start_dims, 1024),
                                     nn.BatchNorm1d(82),
                                     nn.ReLU(),
-                                    nn.Linear(1024, 64))
+                                    nn.Linear(1024, 270))
     
     def forward(self, x):
         return self.layer1(x)
@@ -187,7 +187,43 @@ class PatchEmbedding(nn.Module):
         x += self.positions
         return x
 
- 
+class TProjector(nn.Module):
+    def __init__(self, num_channels=30, num_classes=60):
+        super(TProjector, self).__init__()
+        self.layer1 = Rearrange('b (h w) (s1 s2 c) -> b c (h s1) (w s2)', s1=3, s2=3, h=9, w=9)
+        self.layer2 = nn.Sequential(nn.Conv2d(num_channels, num_classes, kernel_size=1),
+                                    nn.BatchNorm2d(num_classes),
+                                    nn.ReLU()
+                                    )
+
+        self.layer3 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=3, stride=3),
+                        nn.BatchNorm2d(num_classes),
+                        nn.ReLU())
+
+    def forward(self, x):
+        shape = x.shape
+        z = x[:,shape[1]-1, :].unsqueeze(1)
+        x = x[:,0:shape[1]-1, :]
+        x= x+z
+        x = self.layer1(x)
+        x= self.layer2(x)
+        x= self.layer3(x)
+        return x
+
+class TPredictor(nn.Module):
+    def __init__(self):
+        super(TPredictor, self).__init__()
+        self.layer1 = nn.Sequential(nn.Conv2d(60, 60, kernel_size=1),
+                                    nn.BatchNorm2d(60),
+                                    nn.ReLU()
+                                    )
+        self.layer2 = nn.Sequential(nn.Conv2d(60, 60, kernel_size=1),
+                                    nn.BatchNorm2d(60, affine=False))
+    
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        return x
 
 
 

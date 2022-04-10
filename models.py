@@ -20,35 +20,53 @@ def get_classifications(x):
 class BYOLTransformer(pl.LightningModule):
     def __init__(self, **kwargs):
         super().__init__()
-        self.patch_embed = networks.PatchEmbedding(in_channels=30, patch_size=3, emb_size=256, img_size=27)
-        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=256, nhead=16, dim_feedforward=512, batch_first=True)
-        self.online_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
-        self.target_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
-        self.online_proj = networks.BYOLLinear(256)
-        self.online_pred = networks.BYOLLinear(64)
-        self.target_proj = networks.BYOLLinear(256)
+        self.patch_embed = networks.PatchEmbedding(in_channels=30, patch_size=3, emb_size=270, img_size=27)
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=270, nhead=15, dim_feedforward=512, batch_first=True)
+        self.online_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=6)
+        #self.target_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
+        self.proj = networks.TProjector()
+        self.pred = networks.TPredictor()
+        #self.online_proj = networks.BYOLLinear(270)
+        self.loss = nn.BCEWithLogitsLoss()
+        self.scale_up = nn.Upsample(scale_factor=3)
+        #self.online_pred = networks.BYOLLinear(270)
+        #self.target_proj = networks.BYOLLinear(270)
 
     
     def training_step(self, x, idx):
         viz, inp, inp_aug = x["viz"].squeeze(), x["base"].squeeze(), x["rand"].squeeze()
 
         x_1 = self.patch_embed(inp)
+        #x_d = self.decoder(x_1)
         x_2 = self.patch_embed(inp_aug)
 
-        x_1 = self.online_enc(x_1)
-        x_2 = self.target_enc(x_2)
+        z_1 = self.online_enc(x_1)
+        z_1 = self.proj(z_1)
+        p_1 = self.pred(z_1)
 
-        x_1 = self.online_proj(x_1)
-        x_2 = self.target_proj(x_2)
+        z_2 = self.online_enc(x_2)
+        z_2 = self.proj(z_2)
+        p_2 = self.pred(z_2)
 
-        z_1 = self.online_pred(x_1)
+        self.log_images(viz, p_1)
+        z_1, z_2 = z_1.detach(), z_2.detach()
 
-        x_2_detach = x_2.detach()
+        loss = (self.loss(p_2, z_1) + self.loss(p_1, z_2)) * 0.5
+        self.log('train_loss', loss)
+        return loss
 
-        
+    def log_images(self, viz, pred):
+        tb = self.logger.experiment
+        sample_imgs = viz[:6]
+        save_grid(tb, sample_imgs, 'rgb', self.current_epoch)
+           
+
+        sample_pred = pred[:6]
+        sample_pred = self.scale_up(sample_pred)
+        sample_pred = get_classifications(sample_pred)
+        save_grid(tb, sample_pred, 'predicted', self.current_epoch)
 
 
-        return None
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=5e-4)
@@ -56,8 +74,11 @@ class BYOLTransformer(pl.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
         
     def forward(self, x):
-        x = self.encoder(x)
-        x = self.projector_1(x)
+        x = self.online_enc(x)
+        x = self.proj(x)
+        x = self.pred(x)
+        x = self.scale_up(x)
+
         return x
     
 
