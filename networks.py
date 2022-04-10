@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from torchvision import models
 import net_gen
+from einops import rearrange, reduce, repeat
+from einops.layers.torch import Rearrange, Reduce
 
 # Adapated from https://github.com/facebookresearch/simsiam/blob/main/simsiam/builder.py
 
@@ -148,6 +150,41 @@ class DensePredictorMLP(nn.Module):
         x = self.layer1(x)
         x = self.layer2(x)
 
+        return x
+
+class BYOLLinear(nn.Module):
+    def __init__(self, start_dims):
+        super(BYOLLinear, self).__init__()
+        self.layer1 = nn.Sequential(nn.Linear(start_dims, 1024),
+                                    nn.BatchNorm1d(82),
+                                    nn.ReLU(),
+                                    nn.Linear(1024, 64))
+    
+    def forward(self, x):
+        return self.layer1(x)
+
+#From https://towardsdatascience.com/implementing-visualttransformer-in-pytorch-184f9f16f632
+class PatchEmbedding(nn.Module):
+    def __init__(self, in_channels: int = 3, patch_size: int = 16, emb_size: int = 768, img_size: int = 224):
+        self.patch_size = patch_size
+        super().__init__()
+        self.projection = nn.Sequential(
+            # using a conv layer instead of a linear one -> performance gains
+            nn.Conv2d(in_channels, emb_size, kernel_size=patch_size, stride=patch_size),
+            Rearrange('b e (h) (w) -> b (h w) e'),
+        )
+        self.cls_token = nn.Parameter(torch.randn(1,1, emb_size))
+        self.positions = nn.Parameter(torch.randn((img_size // patch_size) **2 + 1, emb_size))
+
+        
+    def forward(self, x):
+        b, _, _, _ = x.shape
+        x = self.projection(x)
+        cls_tokens = repeat(self.cls_token, '() n e -> b n e', b=b)
+        # prepend the cls token to the input
+        x = torch.cat([cls_tokens, x], dim=1)
+        # add position embedding
+        x += self.positions
         return x
 
  

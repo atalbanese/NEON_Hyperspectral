@@ -20,15 +20,35 @@ def get_classifications(x):
 class BYOLTransformer(pl.LightningModule):
     def __init__(self, **kwargs):
         super().__init__()
-        self.sequencer = networks.Sequencer()
-        self.fcn = torch.nn.Linear()
-        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=256, nhead=16, dim_feedforward=512)
-        self.online = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
-        self.target = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
-        
+        self.patch_embed = networks.PatchEmbedding(in_channels=30, patch_size=3, emb_size=256, img_size=27)
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=256, nhead=16, dim_feedforward=512, batch_first=True)
+        self.online_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
+        self.target_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
+        self.online_proj = networks.BYOLLinear(256)
+        self.online_pred = networks.BYOLLinear(64)
+        self.target_proj = networks.BYOLLinear(256)
+
     
     def training_step(self, x, idx):
         viz, inp, inp_aug = x["viz"].squeeze(), x["base"].squeeze(), x["rand"].squeeze()
+
+        x_1 = self.patch_embed(inp)
+        x_2 = self.patch_embed(inp_aug)
+
+        x_1 = self.online_enc(x_1)
+        x_2 = self.target_enc(x_2)
+
+        x_1 = self.online_proj(x_1)
+        x_2 = self.target_proj(x_2)
+
+        z_1 = self.online_pred(x_1)
+
+        x_2_detach = x_2.detach()
+
+        
+
+
+        return None
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=5e-4)
