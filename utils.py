@@ -1,9 +1,10 @@
 import h5_helper as hp
 import numpy as np
-
+import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.neighbors import kneighbors_graph
 from sklearn import cluster
+import os
 
 import torch
 import torchvision as tv
@@ -59,3 +60,14 @@ def get_viz_bands():
     return {"red": 654,
             "green": 561, 
             "blue": 482}
+
+def plot_output_files(dir):
+    for file in os.listdir(dir):
+        if ".npy" in file:
+            y = np.load(os.path.join(dir,file))
+            plt.imshow(y)
+            plt.show()
+
+if __name__ == '__main__':
+    plot_output_files('ckpts/saved/harv_40_classes/validation/harv_densesimsiam_40_classes_epoch=12')
+

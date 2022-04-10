@@ -21,14 +21,19 @@ class HyperDataset(Dataset):
         self.rng = np.random.default_rng()
         #self.pca = kwargs["pca"] if "pca" in kwargs else True
         self.augment_type = kwargs["augment"] if "augment" in kwargs else "wavelength"
-        self.num_bands = kwargs["num_bands"] if "num_bands" in kwargs else 4
+        self.num_bands = kwargs["num_bands"] if "num_bands" in kwargs else 30
         self.h5_location = hyper_folder
         self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 32
         self.crop_size = kwargs["crop_size"] if "crop_size" in kwargs else 27
-        self.transforms = tt.Compose([tt.RandomHorizontalFlip(),
+        self.transforms_weak = tt.Compose([tt.RandomHorizontalFlip(p=0.2),
+                                    tt.RandomVerticalFlip(p=0.2),
+                                    tr.RandomPointMask(p=0.2),
+                                    tr.RandomRectangleMask(p=0.2)])
+        self.transforms_strong = tt.Compose([tt.RandomHorizontalFlip(),
                                     tt.RandomVerticalFlip(),
                                     tr.RandomPointMask(),
                                     tr.RandomRectangleMask()])
+                                    
         h5_files = [file for file in os.listdir(self.h5_location) if ".h5" in file]
         
         def make_dict(file_list, param_1, param_2):
@@ -140,7 +145,7 @@ class HyperDataset(Dataset):
         h5 = self.h5_dict[coords]
         f = h5py.File(os.path.join(self.h5_location, h5))
         all_data = hp.pre_processing(f, get_all=True)
-        base_h5 = utils.pca(all_data["bands"], True, n_components=30, whiten=False)
+        base_h5 = utils.pca(all_data["bands"], True, n_components=self.num_bands, whiten=False)
         to_return["base"] = base_h5
         viz_h5= hp.pre_processing(f, wavelength_ranges=self.viz_bands)
         to_return["viz"] = viz_h5["bands"]
@@ -161,9 +166,9 @@ class HyperDataset(Dataset):
         f.close()
 
         to_return = {key: self.make_h5_stack(value, crops) for key, value in to_return.items()}
-        to_return["rand"] = self.transforms(to_return["base"])
+        to_return["rand"] = self.transforms_strong(to_return["base"])
         #DOUBLE AUGMENT
-        to_return["base"] = self.transforms(to_return["base"])
+        to_return["base"] = self.transforms_weak(to_return["base"])
 
         return to_return
     

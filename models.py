@@ -17,6 +17,33 @@ def get_classifications(x):
     masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
+class BYOLTransformer(pl.LightningModule):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.sequencer = networks.Sequencer()
+        self.fcn = torch.nn.Linear()
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=256, nhead=16, dim_feedforward=512)
+        self.online = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
+        self.target = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
+        
+    
+    def training_step(self, x, idx):
+        viz, inp, inp_aug = x["viz"].squeeze(), x["base"].squeeze(), x["rand"].squeeze()
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=5e-4)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=1, verbose=True)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+        
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.projector_1(x)
+        return x
+    
+
+
+
+
 class DenseSimSiam(pl.LightningModule):
     def __init__(self, **kwargs):
         super().__init__()
