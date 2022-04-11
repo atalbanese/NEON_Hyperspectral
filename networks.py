@@ -226,4 +226,71 @@ class TPredictor(nn.Module):
         return x
 
 
+class SegLinear(nn.Module):
+    def __init__(self, num_channels=270):
+        super(SegLinear, self).__init__()
+        self.layer1 = nn.Sequential(nn.Linear(num_channels, 512),
+                                    nn.BatchNorm1d(82),
+                                    nn.ReLU()
+                                    )
+        self.layer2 = nn.Sequential(nn.Linear(512, num_channels),
+                                    nn.BatchNorm1d(82),
+                                    nn.ReLU()
+                                    )                                    
+        
 
+
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        # shape = x.shape
+        # # z = x[:,shape[1]-1, :].unsqueeze(1)
+        # x = x[:,0:shape[1]-1, :]
+        # #x= x*z
+
+
+        return x
+
+class SegDecoder(nn.Module):
+    def __init__(self, num_channels=270, num_classes=60, drop_class=True, patches=81):
+        super(SegDecoder, self).__init__()
+        self.layer1 = nn.Sequential(nn.Linear(num_channels, num_classes),
+                                    nn.BatchNorm1d(patches),
+                                    nn.ReLU()
+                                    )
+        self.layer2 = nn.Sequential(nn.Linear(num_classes, num_classes, bias=False),
+                                    nn.BatchNorm1d(patches, affine=False),
+                                    nn.ReLU()
+                                    )
+        self.drop_class = drop_class
+        
+    def forward(self, x):
+        shape = x.shape
+        # z = x[:,shape[1]-1, :].unsqueeze(1)
+        if self.drop_class:
+            x = x[:,0:shape[1]-1, :]
+        x = self.layer1(x)
+        x = self.layer2(x)
+
+        return x
+
+class DePatch(nn.Module):
+    def __init__(self):
+        super(DePatch, self).__init__()
+        self.layer1 = Rearrange('b (h w) c -> b c h w', h=9, w=9)
+        self.layer2 = nn.Upsample(scale_factor=3, mode='bilinear')
+        self.layer3 = nn.Softmax(1)
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        return x
+
+
+if __name__ == "__main__":
+    s = SegLinear()
+    p = torch.ones(256,82,270)
+    q = s(p)
+    print(q.shape)

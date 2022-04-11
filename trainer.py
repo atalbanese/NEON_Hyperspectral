@@ -25,7 +25,7 @@ if __name__ == "__main__":
     wavelengths = {f"{i}": i for i in range(50, 1200, 100)}
 
     dataset = HyperDataset(h5_fold, waves=wavelengths, batch_size=256, num_bands=30, crop_size=27)
-    train_loader = DataLoader(dataset, batch_size=1, num_workers = 20)
+    train_loader = DataLoader(dataset, batch_size=1, num_workers = 1)
     #model = models.HyperSimSiamWaveAugment(num_channels=30)
     model = models.BYOLTransformer()
     trainer = pl.Trainer(accelerator="cpu", max_epochs=15, callbacks=[checkpoint_callback])

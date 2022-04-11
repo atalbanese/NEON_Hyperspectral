@@ -12,6 +12,9 @@ import torchvision as tv
 def get_features(inp, feature_band=2):
     return np.reshape(inp, (-1,inp.shape[feature_band]))
 
+def get_norm_stats(inp, **kwargs):
+    return None
+
 
 def pca(data, prep, **kwargs):
     data = get_features(data)

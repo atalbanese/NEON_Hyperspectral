@@ -25,12 +25,9 @@ class HyperDataset(Dataset):
         self.h5_location = hyper_folder
         self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 32
         self.crop_size = kwargs["crop_size"] if "crop_size" in kwargs else 27
-        self.transforms_weak = tt.Compose([tt.RandomHorizontalFlip(p=0.2),
-                                    tt.RandomVerticalFlip(p=0.2),
-                                    tr.RandomPointMask(p=0.2),
-                                    tr.RandomRectangleMask(p=0.2)])
-        self.transforms_strong = tt.Compose([tt.RandomHorizontalFlip(),
-                                    tt.RandomVerticalFlip(),
+        self.transforms_1 = tt.Compose([tt.RandomHorizontalFlip(),
+                                    tt.RandomVerticalFlip()])
+        self.transforms_2 = tt.Compose([
                                     tr.RandomPointMask(),
                                     tr.RandomRectangleMask()])
                                     
@@ -44,7 +41,7 @@ class HyperDataset(Dataset):
         self.files = list(self.h5_dict.keys())
 
         #TODO: Test mode to enable/disable this
-        self.clear_nans()
+        #self.clear_nans()
     
 
 
@@ -166,9 +163,10 @@ class HyperDataset(Dataset):
         f.close()
 
         to_return = {key: self.make_h5_stack(value, crops) for key, value in to_return.items()}
-        to_return["rand"] = self.transforms_strong(to_return["base"])
+        to_return["base"] = self.transforms_1(to_return["base"])
+        to_return["rand"] = self.transforms_2(to_return["base"])
         #DOUBLE AUGMENT
-        to_return["base"] = self.transforms_weak(to_return["base"])
+        #to_return["base"] = self.transforms_1(to_return["base"])
 
         return to_return
     
