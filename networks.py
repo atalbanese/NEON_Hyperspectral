@@ -269,7 +269,7 @@ class SegDecoder(nn.Module):
         shape = x.shape
         # z = x[:,shape[1]-1, :].unsqueeze(1)
         if self.drop_class:
-            x = x[:,0:shape[1]-1, :]
+            x = x[:,1:shape[1], :]
         x = self.layer1(x)
         x = self.layer2(x)
 

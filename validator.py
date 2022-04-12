@@ -177,17 +177,28 @@ def bulk_validation(ckpts_dir, img_dir, save_dir, valid_file, **kwargs):
 
 
 if __name__ == "__main__":
-    NUM_CLUSTERS = 40
+    NUM_CLUSTERS = 60
     NUM_CHANNELS = 30
     IMG_DIR = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022"
     OUT_NAME = "test_inference_ckpt_6.npy"
+    IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_728000_4713000_reflectance.h5')
     SAVE_DIR = "ckpts/saved/harv_40_classes/validation"
     VALID_FILE = "/data/shared/src/aalbanese/datasets/neon-allsites-appidv-latest.csv"
     CKPTS_DIR = "ckpts/saved/harv_40_classes"
     PRED_DIR = 'ckpts/saved/harv_40_classes/validation/harv_densesimsiam_40_classes_epoch=14'
+    MODEL = inference.load_ckpt(models.BYOLTransformer, 'ckpts/harv_transformer_60_classes_epoch=0-v2.ckpt')
 
-    valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS)
-    valid.plot_trees(predictions = PRED_DIR)
+    test = inference.do_inference(MODEL,IMG ,True, n_components =NUM_CHANNELS)
+    rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_viz_bands())
+    rgb = hp.make_rgb(rgb["bands"])
+    rgb = exposure.rescale_intensity(rgb, out_range=(0.0,1.0))
+    plt.imshow(rgb)
+    plt.show()
+    plt.imshow(test)
+    plt.show()
+    print(test)
+    # valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS)
+    # valid.plot_trees(predictions = PRED_DIR)
 
     #bulk_validation(CKPTS_DIR, IMG_DIR, SAVE_DIR, VALID_FILE, site_name='HARV',num_channels=NUM_CHANNELS, num_classes=NUM_CLUSTERS, num_clusters=NUM_CLUSTERS)
 

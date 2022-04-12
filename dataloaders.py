@@ -10,7 +10,43 @@ import utils
 import h5py
 import transforms as tr
 import torchvision.transforms as tt
+from einops import rearrange
 #from torch_geometric.data import Data
+
+class PreProcDataset(Dataset):
+    def __init__(self, pca_folder, **kwargs):
+        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 128
+        self.crop_size = kwargs["crop_size"] if "crop_size" in kwargs else 25
+        self.mean = np.load(os.path.join(pca_folder, 'mean.npy')).astype(np.float64)
+        self.std = np.load(os.path.join(pca_folder, 'std.npy')).astype(np.float64)
+        self.norm = tt.Normalize(self.mean, self.std)
+        self.transforms_1 = tt.Compose([tt.RandomHorizontalFlip(),
+                                    tt.RandomVerticalFlip()])
+        self.transforms_2 = tt.Compose([
+                                    tr.RandomPointMask(),
+                                    tr.RandomRectangleMask()])
+        
+        self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+        self.rng = np.random.default_rng()
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, index):
+        img = np.load(self.files[index])
+        img = torch.from_numpy(img)
+        img = self.norm(img)
+        img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+        random_select = self.rng.choice(range(0, img.shape[0]), size=self.batch_size, replace=False)
+        img = img[random_select]
+
+        to_return = {}
+        to_return["base"] = self.transforms_1(img)
+        to_return["rand"] = self.transforms_2(to_return["base"])
+
+        return to_return
+
+        
 
 class HyperDataset(Dataset):
     def __init__(self, hyper_folder, **kwargs):
@@ -41,7 +77,7 @@ class HyperDataset(Dataset):
         self.files = list(self.h5_dict.keys())
 
         #TODO: Test mode to enable/disable this
-        #self.clear_nans()
+        self.clear_nans()
     
 
 
@@ -173,22 +209,27 @@ class HyperDataset(Dataset):
 
 
 if __name__ == "__main__":
+
+    pca_fold = '/data/shared/src/aalbanese/datasets/hs/pca/harv_2022'
+    test = PreProcDataset(pca_fold)
+
+    print(test.__getitem__(69).shape)
     #test = pylas.read('/data/shared/src/aalbanese/datasets/lidar/NEON_lidar-point-cloud-line/NEON.D16.WREF.DP1.30003.001.2021-07.basic.20220330T163527Z.PROVISIONAL/NEON_D16_WREF_DP1_L001-1_2021071815_unclassified_point_cloud.las')    
     #print(test)
 
     #las_fold = "/data/shared/src/aalbanese/datasets/lidar/NEON_lidar-point-cloud-line/NEON.D16.WREF.DP1.30003.001.2021-07.basic.20220330T192134Z.PROVISIONAL"
-    h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
+    # h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
 
-    wavelengths = {"red": 654,
-                    "green": 561, 
-                    "blue": 482,
-                    "nir": 865}
+    # wavelengths = {"red": 654,
+    #                 "green": 561, 
+    #                 "blue": 482,
+    #                 "nir": 865}
 
 
-    #test = MixedDataset(h5_fold, las_fold, waves=wavelengths)
-    test = HyperDataset(h5_fold, waves=wavelengths, augment="wavelength")
-    test_item = test.__getitem__(69)
-    print(test_item)
+    # #test = MixedDataset(h5_fold, las_fold, waves=wavelengths)
+    # test = HyperDataset(h5_fold, waves=wavelengths, augment="wavelength")
+    # test_item = test.__getitem__(69)
+    # print(test_item)
 
 
 #WIP - COME BACK TO WHEN WORKING ON LIDAR

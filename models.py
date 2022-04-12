@@ -33,9 +33,9 @@ class BYOLTransformer(pl.LightningModule):
         self.pred_2 = networks.SegDecoder(num_channels=82, num_classes=82, drop_class=False, patches=82)
         #self.online_proj = networks.BYOLLinear(270)
         self.loss = nn.MSELoss()
-        self.loss_2 = nn.KLDivLoss(reduction='batchmean')
-        self.softmax = torch.nn.Softmax(dim=1)
-        self.logmax = torch.nn.LogSoftmax(dim=1)
+        #self.loss_2 = nn.KLDivLoss(reduction='batchmean')
+        self.softmax = torch.nn.Softmax(dim=2)
+        self.logmax = torch.nn.LogSoftmax(dim=2)
         self.scale_up = nn.Upsample(scale_factor=3, mode='bilinear')
         self.depatch = networks.DePatch()
         #self.online_pred = networks.BYOLLinear(270)
@@ -76,9 +76,10 @@ class BYOLTransformer(pl.LightningModule):
         #self.log_images(viz,z1,p1, inp, inp_aug)
 
         pix_loss = (-(self.softmax(p_1).mean() * self.logmax(z2_stop).mean())-(self.softmax(p_2).mean() * self.logmax(z1_stop).mean())) * 0.5
-        region_loss = self.loss(u1, v2) *.25
-        loss = (pix_loss + region_loss) #* 0.5
-        k_l_loss = self.loss_2(u1.log(), v2)
+        region_loss = self.loss(u1, v2) * 0.5
+        rand_loss = self.loss(p_1, torch.randn_like(p_1)) *.05
+        loss = rand_loss + pix_loss + region_loss #* 0.5
+        #k_l_loss = self.loss_2(u1.log(), v2)
         # z_2 = z_2.detach()
         # z_1 = z_1.detach()
 
@@ -105,10 +106,12 @@ class BYOLTransformer(pl.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
         
     def forward(self, x):
+        x =self.patch_embed(x)
         x = self.online_enc(x)
-        x = self.proj(x)
-        x = self.pred(x)
-        x = self.scale_up(x)
+        x = self.proj_1(x)
+        x = self.pred_1(x)
+        x = self.depatch(x)
+        #x = self.scale_up(x)
 
         return x
     
