@@ -9,6 +9,8 @@ from tqdm import tqdm
 import torch
 import torchvision as tv
 from multiprocessing import Pool
+from pebble import ProcessPool
+from concurrent.futures import TimeoutError
 
 def get_features(inp, feature_band=2):
     return np.reshape(inp, (-1,inp.shape[feature_band]))
@@ -65,6 +67,11 @@ def get_viz_bands():
             "green": 561, 
             "blue": 482}
 
+def get_landsat_viz():
+    return  {"blue": {"lower": 452, "upper": 512},
+                     "green": {"lower": 533, "upper": 590},
+                     "red": {"lower": 636, "upper": 673}}
+
 def plot_output_files(dir):
     for file in os.listdir(dir):
         if ".npy" in file:
@@ -72,8 +79,10 @@ def plot_output_files(dir):
             plt.imshow(y)
             plt.show()
 
-def bulk_pca(file, in_dir, out_dir):
+def do_pca(args):
     band = {'b1': 500}
+    #print(args)
+    file, in_dir, out_dir = args
  
     if ".h5" in file:
         new_file = file.split(".")[0] + ".npy"
@@ -82,7 +91,14 @@ def bulk_pca(file, in_dir, out_dir):
             if np.isnan(img["bands"]['b1']).sum() == 0:
                 img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"]
                 img = pca(img, True, n_components=30)
-                np.save(os.path.join(out_dir,new_file), img)
+                return (os.path.join(out_dir,new_file), img)
+                #return new_file
+            else:
+                return "nans in file, skipping"
+        else:
+            return "file already exists"
+
+
 
 def img_stats(dir):
     files = os.listdir(dir)
@@ -105,25 +121,67 @@ def img_stats(dir):
     np.save(os.path.join(dir, "mean.npy"), total_mean)
     np.save(os.path.join(dir, "std.npy"), total_std)
 
+def save_bands(args):
+    file, bands, in_dir, out_dir = args
+
+    if ".h5" in file:
+        new_file = file.split(".")[0] + "crust_bands.npy"
+        if not os.path.exists(os.path.join(out_dir,new_file)):
+            img = hp.pre_processing(os.path.join(in_dir,file), wavelength_ranges=bands)["bands"]
+            return (os.path.join(out_dir,new_file), img)
+
+
+        else:
+            return "file already exists"
+    else: 
+        return "not an h5 file"
+
+
 
 
 
 if __name__ == '__main__':
-    #bulk_pca(
-    # with Pool(6) as pool:
-    #     in_dir = ["/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022"]
-    #     out_dir =  ["/data/shared/src/aalbanese/datasets/hs/pca/harv_2022"]
-    #     files = os.listdir(in_dir[0])
-    #     in_dir *= len(files)
-    #     out_dir *= len(files)
-    #     args = list(zip(files, in_dir, out_dir))
-    #     pool.starmap(bulk_pca, args)
+    with ProcessPool(3) as pool:
+        IN_DIR = ["/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022"]
+        OUT_DIR =  ["/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022"]
+        WAVES = [{'cyano_1': 440,
+                         'cyano_2': 489,
+                         'cyano_3': 504,
+                         'cyano_4': 627,
+                         'cyano_5': 680,
+                         'all_crusts': 1450,
+                         'moss_lichen_1': 1720,
+                         'generic_crust_1': 1920,
+                         'moss_lichen_2': 2100,
+                         'moss_lichen_3': 2180,
+                         'generic_crust_2': 2300}]
+        FILES = os.listdir(IN_DIR[0])
+        IN_DIR *= len(FILES)
+        OUT_DIR *= len(FILES)
+        WAVES *= len(FILES)
+        args = list(zip(FILES,WAVES, IN_DIR, OUT_DIR))
+        future = pool.map(save_bands, args, timeout=60)
+        iterator = future.result()
+        while True:
+            try:
+                n = next(iterator)
+                if isinstance(n, tuple):
+                    print(n[0])
+                    np.save(*n)
+                    #print(n[0])
+                else:
+                    print(n)
+            except TimeoutError as e:
+                print(e.args)
+                continue
+            except StopIteration:
+                break
 
     #img_stats("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022")
-    mean = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/mean.npy").astype(np.float64)
-    std = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/std.npy").astype(np.float64)
-    test = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/NEON_D01_HARV_DP3_735000_4713000_reflectance.npy")
-    test = torch.from_numpy(test)
-    norm = tv.transforms.Normalize(mean, std)
-    y = norm(test)
-    print(y)
+    # mean = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/mean.npy").astype(np.float64)
+    # std = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/std.npy").astype(np.float64)
+    # test = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/NEON_D01_HARV_DP3_735000_4713000_reflectance.npy")
+    # test = torch.from_numpy(test)
+    # norm = tv.transforms.Normalize(mean, std)
+    # y = norm(test)
+    # print(y)

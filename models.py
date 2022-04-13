@@ -4,46 +4,49 @@ import torch
 from torch import nn
 import pytorch_lightning as pl
 import torchvision as tv
+from einops import rearrange
 
 def save_grid(tb, inp, name, epoch):  
-    img_grid = tv.utils.make_grid(inp, normalize=True, scale_each=True)
-    tb.add_image(name, img_grid, epoch)
+    img_grid = rearrange(inp, 'b h w -> h (b w)')
+    tb.add_image(name, img_grid, epoch, dataformats='HW')
 
 def get_classifications(x):
     #norms = torch.nn.functional.softmax(x, dim=1)
-    masks = x.argmax(1).float()
+    masks = x.argmax(1)
 
-    masks = torch.unsqueeze(masks, 1) * 255.0/59
-    masks = torch.cat((masks, masks, masks), dim=1)
+    # masks = torch.unsqueeze(masks, 1) * 255.0/59
+    # masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
 class BYOLTransformer(pl.LightningModule):
     def __init__(self, **kwargs):
         super().__init__()
-        self.patch_embed = networks.PatchEmbedding(in_channels=30, patch_size=3, emb_size=270, img_size=27)
-        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=270, nhead=15, dim_feedforward=512, batch_first=True)
-        self.online_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=12)
+        self.patch_embed = networks.PatchEmbedding(in_channels=30, patch_size=5, emb_size=750, img_size=25)
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=750, nhead=15, dim_feedforward=1024, batch_first=True)
+        self.online_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
         #self.target_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
         # self.proj = networks.TProjector()
         # self.pred = networks.TPredictor()
-        self.proj_1 = networks.SegLinear()
-        self.proj_2 = networks.SegLinear(num_channels=82)
+        self.proj_1 = networks.SegLinear(num_channels=750, b1=25, b2=25)
+        #self.proj_2 = networks.SegLinear(num_channels=676, b1=1024, b2=676)
 
-        self.pred_1 = networks.SegDecoder()
-        self.pred_2 = networks.SegDecoder(num_channels=82, num_classes=82, drop_class=False, patches=82)
+        self.pred_1 = networks.SegDecoder(num_channels = 750, patches=25)
+        #self.pred_2 = networks.SegDecoder(num_channels=676, num_classes=676, drop_class=False, patches=676)
         #self.online_proj = networks.BYOLLinear(270)
-        self.loss = nn.MSELoss()
+        #self.loss = nn.MSELoss()
         #self.loss_2 = nn.KLDivLoss(reduction='batchmean')
-        self.softmax = torch.nn.Softmax(dim=2)
-        self.logmax = torch.nn.LogSoftmax(dim=2)
-        self.scale_up = nn.Upsample(scale_factor=3, mode='bilinear')
+        # self.softmax = torch.nn.Softmax(dim=1)
+        # self.logmax = torch.nn.LogSoftmax(dim=1)
+        self.scale_up = nn.Upsample(scale_factor=5, mode='bilinear')
         self.depatch = networks.DePatch()
+        self.loss = networks.SiamLoss()
         #self.online_pred = networks.BYOLLinear(270)
         #self.target_proj = networks.BYOLLinear(270)
 
     
     def training_step(self, x, idx):
-        viz, inp, inp_aug = x["viz"].squeeze(), x["base"].squeeze(), x["rand"].squeeze()
+        #viz, inp, inp_aug = x["viz"].squeeze(), x["base"].squeeze(), x["rand"].squeeze()
+        inp, inp_aug = x["base"].squeeze(), x["rand"].squeeze()
 
         x_1 = self.patch_embed(inp)
         #x_d = self.decoder(x_1)
@@ -59,26 +62,26 @@ class BYOLTransformer(pl.LightningModule):
 
         viz_p = self.depatch(p_1)
 
-        self.log_images(viz, viz_p)
+        self.log_images(viz_p)
         
         z1_stop = z_1.detach()
         z2_stop = z_2.detach()
 
-        e1 = torch.matmul(x_1, z_1.moveaxis(2, 1)) #.flatten(start_dim=2)
-        e2 = torch.matmul(x_2, z_2.moveaxis(2, 1)) #.flatten(start_dim=2)
+        # e1 = torch.matmul(x_1, z_1.moveaxis(2, 1)).flatten(start_dim=1)
+        # e2 = torch.matmul(x_2, z_2.moveaxis(2, 1)).flatten(start_dim=1)
 
 
-        v1 = self.proj_2(e1)
-        u1 = self.pred_2(v1)
+        # v1 = self.proj_2(e1)
+        # u1 = self.pred_2(v1)
 
-        v2 = self.proj_2(e2)
+        # v2 = self.proj_2(e2)
 
         #self.log_images(viz,z1,p1, inp, inp_aug)
-
-        pix_loss = (-(self.softmax(p_1).mean() * self.logmax(z2_stop).mean())-(self.softmax(p_2).mean() * self.logmax(z1_stop).mean())) * 0.5
-        region_loss = self.loss(u1, v2) * 0.5
-        rand_loss = self.loss(p_1, torch.randn_like(p_1)) *.05
-        loss = rand_loss + pix_loss + region_loss #* 0.5
+        pix_loss = (self.loss(p_1, z2_stop).mean() + self.loss(p_2, z1_stop).mean()) *0.5
+        #pix_loss = (-(self.softmax(p_1).mean() * self.logmax(z2_stop).mean())-(self.softmax(p_2).mean() * self.logmax(z1_stop).mean())) * 0.5
+        #region_loss = self.loss(u1, v2)/15
+        #rand_loss = self.loss(p_1, torch.randn_like(p_1)) *.005
+        loss = (pix_loss)/256  #* 0.5
         #k_l_loss = self.loss_2(u1.log(), v2)
         # z_2 = z_2.detach()
         # z_1 = z_1.detach()
@@ -87,11 +90,9 @@ class BYOLTransformer(pl.LightningModule):
         self.log('train_loss', loss)
         return loss
 
-    def log_images(self, viz, pred):
+    def log_images(self, pred):
         tb = self.logger.experiment
-        sample_imgs = viz[:6]
-        save_grid(tb, sample_imgs, 'rgb', self.current_epoch)
-           
+         
 
         sample_pred = pred[:6]
         #sample_pred = self.scale_up(sample_pred)

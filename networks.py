@@ -184,7 +184,7 @@ class PatchEmbedding(nn.Module):
         # prepend the cls token to the input
         x = torch.cat([cls_tokens, x], dim=1)
         # add position embedding
-        x += self.positions
+        #x += self.positions
         return x
 
 class TProjector(nn.Module):
@@ -227,23 +227,30 @@ class TPredictor(nn.Module):
 
 
 class SegLinear(nn.Module):
-    def __init__(self, num_channels=270):
+    def __init__(self, num_channels=270, b1=26, b2=26, drop_class=True):
         super(SegLinear, self).__init__()
-        self.layer1 = nn.Sequential(nn.Linear(num_channels, 512),
-                                    nn.BatchNorm1d(82),
+        self.layer1 = nn.Sequential(nn.Linear(num_channels, num_channels),
+                                    nn.BatchNorm1d(b1),
                                     nn.ReLU()
                                     )
-        self.layer2 = nn.Sequential(nn.Linear(512, num_channels),
-                                    nn.BatchNorm1d(82),
+        self.layer2 = nn.Sequential(nn.Linear(num_channels, num_channels),
+                                    nn.BatchNorm1d(b2),
                                     nn.ReLU()
-                                    )                                    
-        
+                                    ) 
+        self.layer3 = nn.Sequential(nn.Linear(num_channels, num_channels),
+                                    nn.BatchNorm1d(b2)
+                                    )                                      
+        self.drop_class = drop_class
 
 
 
     def forward(self, x):
+        if self.drop_class:
+            shape = x.shape
+            x = x[:,1:shape[1], :]
         x = self.layer1(x)
         x = self.layer2(x)
+        x = self.layer3(x)
         # shape = x.shape
         # # z = x[:,shape[1]-1, :].unsqueeze(1)
         # x = x[:,0:shape[1]-1, :]
@@ -255,21 +262,18 @@ class SegLinear(nn.Module):
 class SegDecoder(nn.Module):
     def __init__(self, num_channels=270, num_classes=60, drop_class=True, patches=81):
         super(SegDecoder, self).__init__()
-        self.layer1 = nn.Sequential(nn.Linear(num_channels, num_classes),
+        self.layer1 = nn.Sequential(nn.Linear(num_channels, num_channels//4),
                                     nn.BatchNorm1d(patches),
                                     nn.ReLU()
                                     )
-        self.layer2 = nn.Sequential(nn.Linear(num_classes, num_classes, bias=False),
-                                    nn.BatchNorm1d(patches, affine=False),
-                                    nn.ReLU()
+        self.layer2 = nn.Sequential(nn.Linear(num_channels//4, num_channels),
                                     )
-        self.drop_class = drop_class
+        
         
     def forward(self, x):
-        shape = x.shape
+        
         # z = x[:,shape[1]-1, :].unsqueeze(1)
-        if self.drop_class:
-            x = x[:,1:shape[1], :]
+        
         x = self.layer1(x)
         x = self.layer2(x)
 
@@ -278,15 +282,26 @@ class SegDecoder(nn.Module):
 class DePatch(nn.Module):
     def __init__(self):
         super(DePatch, self).__init__()
-        self.layer1 = Rearrange('b (h w) c -> b c h w', h=9, w=9)
-        self.layer2 = nn.Upsample(scale_factor=3, mode='bilinear')
+        self.layer0 = nn.Linear(750, 60, bias=False)
+        self.layer1 = Rearrange('b (h w) c -> b c h w', h=5, w=5)
+        self.layer2 = nn.Upsample(scale_factor=5, mode='bilinear')
         self.layer3 = nn.Softmax(1)
 
     def forward(self, x):
+        x= self.layer0(x)
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
         return x
+
+class SiamLoss(nn.Module):
+    def __init__(self):
+        super(SiamLoss, self).__init__()
+    
+    def forward(self, x, y):
+        a = x/torch.linalg.norm(x)
+        b = y/torch.linalg.norm(y)
+        return -(a*b)
 
 
 if __name__ == "__main__":
