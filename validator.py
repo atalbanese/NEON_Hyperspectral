@@ -9,19 +9,23 @@ import os
 import models
 import utils
 from skimage import exposure
+from scipy.stats import linregress
 
 class Validator():
     def __init__(self, **kwargs):
         self.file = kwargs["file"]
         self.img_dir = kwargs["img_dir"]
-        
+        #self.pca_dir = kwargs['pca_dir']
         self.num_clusters = kwargs["num_clusters"]
         self.site_name = kwargs["site_name"]
-        self.valid_data = self.open_file()
+        self.plot_file = kwargs['plot_file']
+        self.valid_data = self.get_plot_data()
         self.valid_files = self.get_valid_files()
         self.cluster_dict = self.make_empty_dict()
+        self.cluster_groups = set()
         #self._confusion_matrix = None
-
+    
+    #BEING DEPRECATED
     def open_file(self):
         data = pd.read_csv(self.file, usecols=['siteID', 'easting', 'northing', 'taxonID', 'ninetyCrownDiameter'])
         data = data.loc[data['siteID'] == self.site_name]
@@ -53,6 +57,51 @@ class Validator():
 
         return data
 
+    def get_plot_data(self):
+        data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'ninetyCrownDiameter', 'canopyPosition', 'taxonID', 'ninetyCrownDiameter'])
+        data = data.loc[data['siteID'] == self.site_name]
+        data = data.loc[(data['canopyPosition'] == "Partially shaded") | (data['canopyPosition'] == "Full sun")]
+        data = data.loc[(data['plantStatus'] != 'Dead, broken bole') | (data['plantStatus'] != 'Downed')]
+        data = data.loc[~(data['ninetyCrownDiameter'] != data['ninetyCrownDiameter'])]
+        data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
+
+        props = data.groupby(['plotID', 'taxonID']).sum()
+        #props = props.groupby(level=0).apply(lambda x: 100*x/x.sum())
+        props = pd.DataFrame(props.to_records())
+
+        plots = pd.read_csv(self.plot_file, usecols=['plotID', 'siteID', 'subtype', 'easting', 'northing', 'plotSize'])
+        plots = plots.loc[plots['siteID'] == self.site_name]
+        plots = plots.loc[plots['subtype'] == 'basePlot']
+
+        data = props.merge(plots, how='left', on='plotID')
+
+        data["file_west_bound"] = data["easting"] - data["easting"] % 1000
+        data["file_south_bound"] = data["northing"] - data["northing"] % 1000
+
+        data = data.astype({"file_west_bound": int,
+                            "file_south_bound": int})
+
+        data['x_min'] = (data['easting']//1 - data['file_west_bound']) - (data['plotSize']**(1/2)/2)
+        data['x_max'] = data['x_min'] + data['plotSize']**(1/2)
+
+        data['y_min'] = 1000- (data['northing']//1 - data['file_south_bound']) - (data['plotSize']**(1/2)/2)
+        data['y_max'] = data['y_min'] + data['plotSize']**(1/2)
+
+        data = data.astype({"file_west_bound": str,
+                            "file_south_bound": str,
+                            'x_min':int,
+                            'y_min':int,
+                            'x_max':int,
+                            'y_max': int})
+        
+        index_names = data[(data['x_min'] <0) | (data['y_min']<0) | (data['x_max'] >999) | (data['y_max']>999)].index
+        data = data.drop(index_names)
+
+        data['file_coords'] = data['file_west_bound'] + '_' + data['file_south_bound']
+
+        return data
+
+
     def get_valid_files(self):
         if self.img_dir is not None:
             coords = list(self.valid_data['file_coords'].unique())
@@ -63,23 +112,24 @@ class Validator():
         else:
             return None
 
-    def make_empty_dict(self):
-        keys = self.valid_data["taxonID"].unique()
-        template = {key:[0] * self.num_clusters for key in keys}
-        return template
+    
 
     def plot_tree(self, coord, file, **kwargs):
      
         fig, ax = plt.subplots()
         rgb = hp.pre_processing(file, wavelength_ranges=utils.get_viz_bands())
         rgb = hp.make_rgb(rgb["bands"])
+        rgb = exposure.adjust_gamma(rgb, 0.6)
         rgb = exposure.rescale_intensity(rgb)
+        
         ax.imshow(rgb)
         if 'predictions' in kwargs:
             loc = os.path.join(kwargs['predictions'], coord + '.npy')
-            y = np.load(loc)
-            im = ax.imshow(y, alpha=.2)
-            slider = self._make_slider(fig, im)
+            if os.path.isfile(loc):
+                y = np.load(loc)
+                #y[y!=52] = 0
+                im = ax.imshow(y, alpha=.2)
+                slider = self._make_slider(fig, im)
         data = self.valid_data.loc[self.valid_data['file_coords'] == coord]
         for ix, row in data.iterrows():
             # x = [row['x_min'], row['x_max'], row['x_max'], row['x_min'], row['x_min']]
@@ -119,6 +169,22 @@ class Validator():
 
         
 
+    #DEPRECATED FOR PLOT VALIDATION
+    # def validate(self, file_coords, f):
+    #     valid = self.valid_data.loc[self.valid_data["file_coords"] == file_coords]
+    #     if len(valid.index>0):
+    #         if isinstance(f, str):
+    #             clustered = np.load(f)
+    #         elif isinstance(f, np.ndarray):
+    #             clustered = f
+    #         else:
+    #             return False
+    #         for _, row in valid.iterrows():
+    #             select = clustered[row['x_min']:row['x_max'], row['y_min']:row['y_max']]
+    #             taxon = row['taxonID']
+    #             groups, counts = np.unique(select, return_counts=True)
+    #             for j, group in np.ndenumerate(groups):
+    #                 self.cluster_dict[taxon][int(group)] += int(counts[j])
 
     def validate(self, file_coords, f):
         valid = self.valid_data.loc[self.valid_data["file_coords"] == file_coords]
@@ -129,28 +195,52 @@ class Validator():
                 clustered = f
             else:
                 return False
-            for _, row in valid.iterrows():
+            plots = valid["plotID"].unique()
+            for plot in plots:
+                valid_plot = valid.loc[valid['plotID'] == plot]
+                row = valid_plot.iloc[0]
                 select = clustered[row['x_min']:row['x_max'], row['y_min']:row['y_max']]
-                taxon = row['taxonID']
                 groups, counts = np.unique(select, return_counts=True)
+                self.cluster_groups = self.cluster_groups.union(set(groups.astype(int)))
                 for j, group in np.ndenumerate(groups):
-                    self.cluster_dict[taxon][int(group)] += int(counts[j])
+                    self.cluster_dict[plot]['found'][int(group)] = counts[j]
+        return self.cluster_dict
+
+    def make_empty_dict(self):
+        #taxa = self.valid_data["taxonID"].unique()
+        plots = self.valid_data['plotID'].unique()
+
+        template = {plot:{'expected': {}, 'found': {}} for plot in plots}
+        for plot in plots:
+            valid = self.valid_data.loc[self.valid_data['plotID'] == plot]
+            taxa = valid["taxonID"].unique()
+            for taxon in taxa:
+
+                template[plot]['expected'][taxon] = int(valid.loc[valid['taxonID'] == taxon]['approx_sq_m'])
+        return template
+    
 
     @property
     def confusion_matrix(self):
-        df = pd.DataFrame.from_dict(self.cluster_dict, orient='index', dtype=int)
-        df["sum"] = df.sum(axis=1)
-        sum_row = pd.DataFrame(df.sum(axis=0)).transpose()
-        sum_row = sum_row.rename(index={0:'sum'})
-        df = pd.concat([df, sum_row])
-        return df
+        reformed = {(key, i, k):l for key, value in self.cluster_dict.items() for i, j in value.items() for k, l in j.items()}
+        mi = pd.MultiIndex.from_tuples(reformed.keys())
+        mat = pd.DataFrame(list(reformed.values()), index=mi)
+        
+
+        return mat
+        # df = pd.DataFrame.from_dict(self.cluster_dict, orient='index', dtype=int)
+        # df["sum"] = df.sum(axis=1)
+        # sum_row = pd.DataFrame(df.sum(axis=0)).transpose()
+        # sum_row = sum_row.rename(index={0:'sum'})
+        # df = pd.concat([df, sum_row])
+        # return df
 
     def kappa(self):
         return None
     
 
 def check_predictions(validator: Validator, model, coords, h5_file, save_dir, **kwargs):
-    y = inference.do_inference(model, h5_file, **kwargs)
+    y = inference.do_inference(model, h5_file, True, True, **kwargs)
     np.save(os.path.join(save_dir,coords+".npy"), y)
     validator.validate(coords, y)
     return None
@@ -163,14 +253,61 @@ def check_all(validator: Validator, model, save_dir, **kwargs):
 def bulk_validation(ckpts_dir, img_dir, save_dir, valid_file, **kwargs):
     for ckpt in os.listdir(ckpts_dir):
          if ".ckpt" in ckpt:
-             model = inference.load_ckpt(models.DenseSimSiam, os.path.join(ckpts_dir, ckpt), **kwargs)
+             model = inference.load_ckpt(models.BYOLTransformer, os.path.join(ckpts_dir, ckpt), **kwargs)
              valid = Validator(file=valid_file, img_dir=img_dir, **kwargs)
              ckpt_name = ckpt.replace(".ckpt", "")
              new_dir = os.path.join(save_dir, ckpt_name)
-             os.mkdir(new_dir)
+             if not os.path.isdir(new_dir):
+                os.mkdir(new_dir)
              check_all(valid, model, new_dir, n_components=kwargs['num_channels'])
              valid.confusion_matrix.to_csv(os.path.join(save_dir, ckpt_name + "conf_matrix.csv"))
     return True
+
+def side_by_side_bar(df, plot_name):
+    fig, ax = plt.subplots(1, 2)
+    cats = ('expected', 'found')
+    for i, y in enumerate(ax):
+        try:
+            df.loc[plot_name, cats[i]].plot.bar(ax=y)
+        except KeyError:
+            continue
+    plt.show()
+    print('here')
+
+def plot_species(validator: Validator, species):
+    df = validator.valid_data
+    groups = list(validator.cluster_groups)
+    plots = df['plotID'].unique()
+    
+    combos = [(species, group) for group in groups]
+    points = {combo:{'x':[], 'y':[]} for combo in combos}
+
+    conf = validator.confusion_matrix
+
+    for plot in plots:
+        pdf = conf.loc[plot]
+        for combo in combos:
+            try: 
+                expect = pdf.loc['expected']
+                found = pdf.loc['found']
+            except KeyError:
+                continue
+            if combo[0] in expect.index and combo[1] in found.index:
+                points[combo]['x'].append(int(expect.loc[combo[0]]))
+                points[combo]['y'].append(int(found.loc[combo[1]]))
+    
+    fig, ax = plt.subplots(4, 3)
+    ax = ax.flatten()
+    for i, (combo, value) in enumerate(points.items()):
+        if len(value['x'])>2:
+            slope, intercept, r , p, se = linregress(value['x'], value['y'])
+            ax[i].scatter(value['x'], value['y'])
+            ax[i].annotate(r, (0,1))
+    
+    plt.show()
+
+    print('here')
+
 
 
 
@@ -179,30 +316,42 @@ def bulk_validation(ckpts_dir, img_dir, save_dir, valid_file, **kwargs):
 if __name__ == "__main__":
     NUM_CLUSTERS = 60
     NUM_CHANNELS = 30
-    PCA_DIR= '/data/shared/src/aalbanese/datasets/hs/pca/harv_2022'
-    PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_730000_4700000_reflectance.npy')
-    IMG_DIR = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022"
+    PCA_DIR= '/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022'
+    PCA = os.path.join(PCA_DIR, 'NEON_D13_MOAB_DP3_640000_4237000_reflectancecrust_bands.npy')
+    IMG_DIR = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
-    IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_730000_4700000_reflectance.h5')
-    SAVE_DIR = "ckpts/saved/harv_40_classes/validation"
+    IMG= os.path.join(IMG_DIR, 'NEON_D13_MOAB_DP3_640000_4237000_reflectance.h5')
+    SAVE_DIR = "validation/harv_simsiam_transformer_0_1"
     VALID_FILE = "/data/shared/src/aalbanese/datasets/neon-allsites-appidv-latest.csv"
-    CKPTS_DIR = "ckpts/saved/harv_40_classes"
-    PRED_DIR = 'ckpts/saved/harv_40_classes/validation/harv_densesimsiam_40_classes_epoch=14'
-    MODEL = inference.load_ckpt(models.BYOLTransformer, 'ckpts/harv_transformer_60_classes_epoch=0.ckpt')
+    PLOT_FILE = '/data/shared/src/aalbanese/datasets/All_NEON_TOS_Plot_Centroids_V8.csv'
+    CKPTS_DIR = "ckpts/harv_simsiam_transformer_0_1"
+    PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
+    #MODEL = inference.load_ckpt(models.BYOLTransformer, 'ckpts/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25.ckpt', num_channels=NUM_CHANNELS)
 
-    test = inference.do_inference(MODEL,PCA ,True, True, n_components =NUM_CHANNELS)
+    # test = inference.do_inference(MODEL,PCA ,True, True, n_components =NUM_CHANNELS, rearrange=True)
     # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
     # rgb = hp.make_rgb(rgb["bands"])
     # rgb = exposure.adjust_gamma(rgb, gamma=0.5)
     # plt.imshow(rgb)
     # plt.show()
-    plt.imshow(test)
-    plt.show()
-    print(test)
-    # valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS)
+    # plt.imshow(test)
+    # plt.show()
+    # print(test)
+    valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
+    for file in os.listdir('validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=24/'):
+        coords = file.split(".npy")[0]
+        file = os.path.join('validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=24/', file)
+        valid.validate(coords, file)
+    #valid.confusion_matrix
+    for spec in valid.valid_data['taxonID'].unique():
+        plot_species(valid, spec)
+        print('here')
+    # valid.validate('731000_4713000','validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=24/731000_4713000.npy')
+    # print('here')
+    # valid.confusion_matrix
     # valid.plot_trees(predictions = PRED_DIR)
 
-    #bulk_validation(CKPTS_DIR, IMG_DIR, SAVE_DIR, VALID_FILE, site_name='HARV',num_channels=NUM_CHANNELS, num_classes=NUM_CLUSTERS, num_clusters=NUM_CLUSTERS)
+    #bulk_validation(CKPTS_DIR, PCA_DIR, SAVE_DIR, VALID_FILE, site_name='HARV',num_channels=NUM_CHANNELS, num_classes=NUM_CLUSTERS, num_clusters=NUM_CLUSTERS)
 
     # h5_file = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL/NEON_D16_WREF_DP3_580000_5075000_reflectance.h5"
     # coords = "580000_5075000"

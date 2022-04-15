@@ -15,6 +15,7 @@ from einops import rearrange
 
 class PreProcDataset(Dataset):
     def __init__(self, pca_folder, **kwargs):
+        self.rearrange = kwargs['rearrange'] if 'rearrange' in kwargs else False
         self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 128
         self.crop_size = kwargs["crop_size"] if "crop_size" in kwargs else 25
         self.mean = np.load(os.path.join(pca_folder, 'stats/mean.npy')).astype(np.float64)
@@ -35,8 +36,11 @@ class PreProcDataset(Dataset):
     def __getitem__(self, index):
         img = np.load(self.files[index]).astype(np.float32)
         img = torch.from_numpy(img)
+        if self.rearrange:
+            img = rearrange(img, 'h w c -> c h w')
         img = self.norm(img)
         img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+        img[img != img] = -10
         random_select = self.rng.choice(range(0, img.shape[0]), size=self.batch_size, replace=False)
         img = img[random_select]
 

@@ -280,9 +280,9 @@ class SegDecoder(nn.Module):
         return x
 
 class DePatch(nn.Module):
-    def __init__(self):
+    def __init__(self, num_channels=750):
         super(DePatch, self).__init__()
-        self.layer0 = nn.Linear(750, 60, bias=False)
+        self.layer0 = nn.Linear(num_channels, 60, bias=False)
         self.layer1 = Rearrange('b (h w) c -> b c h w', h=5, w=5)
         self.layer2 = nn.Upsample(scale_factor=5, mode='bilinear')
         self.layer3 = nn.Softmax(1)

@@ -18,6 +18,8 @@ def do_inference(model, file, reshape, pca, **kwargs):
     else:
         reduce_dim = np.load(file)
     if reshape:
+        if kwargs['rearrange']:
+            reduce_dim = rearrange(reduce_dim, 'h w c -> c h w')
         reduce_dim = transformer_inshape(reduce_dim)
         reduce_dim = torch.from_numpy(reduce_dim).float()
     else:    

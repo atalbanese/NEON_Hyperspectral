@@ -11,6 +11,7 @@ import torchvision as tv
 from multiprocessing import Pool
 from pebble import ProcessPool
 from concurrent.futures import TimeoutError
+from einops import rearrange
 
 def get_features(inp, feature_band=2):
     return np.reshape(inp, (-1,inp.shape[feature_band]))
@@ -100,16 +101,16 @@ def do_pca(args):
 
 
 
-def img_stats(dir):
+def img_stats(dir, out_dir, num_channels=30):
     files = os.listdir(dir)
-    psum = np.zeros((30,), dtype=np.float128) 
-    sq = np.zeros((30,), dtype=np.float128) 
+    psum = np.zeros((num_channels,), dtype=np.float128) 
+    sq = np.zeros((num_channels,), dtype=np.float128) 
     num_files = 0
     for file in tqdm(files):
         if ".npy" in file:
             num_files += 1
             img = np.load(os.path.join(dir, file))
-            img = np.reshape(img, (30, -1))
+            img = rearrange(img, 'h w c -> c (h w)')
             sum = img.sum(axis=1)
             psum += sum
             sq += (img**2).sum(axis=1)
@@ -118,8 +119,8 @@ def img_stats(dir):
     total_var = (sq/count) - (total_mean**2)
     total_std = np.sqrt(total_var)
 
-    np.save(os.path.join(dir, "mean.npy"), total_mean)
-    np.save(os.path.join(dir, "std.npy"), total_std)
+    np.save(os.path.join(out_dir, "mean.npy"), total_mean)
+    np.save(os.path.join(out_dir, "std.npy"), total_std)
 
 def save_bands(args):
     file, bands, in_dir, out_dir = args
@@ -128,6 +129,7 @@ def save_bands(args):
         new_file = file.split(".")[0] + "crust_bands.npy"
         if not os.path.exists(os.path.join(out_dir,new_file)):
             img = hp.pre_processing(os.path.join(in_dir,file), wavelength_ranges=bands)["bands"]
+            img = hp.stack_all(img)
             return (os.path.join(out_dir,new_file), img)
 
 
@@ -141,43 +143,50 @@ def save_bands(args):
 
 
 if __name__ == '__main__':
-    with ProcessPool(3) as pool:
-        IN_DIR = ["/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022"]
-        OUT_DIR =  ["/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022"]
-        WAVES = [{'cyano_1': 440,
-                         'cyano_2': 489,
-                         'cyano_3': 504,
-                         'cyano_4': 627,
-                         'cyano_5': 680,
-                         'all_crusts': 1450,
-                         'moss_lichen_1': 1720,
-                         'generic_crust_1': 1920,
-                         'moss_lichen_2': 2100,
-                         'moss_lichen_3': 2180,
-                         'generic_crust_2': 2300}]
-        FILES = os.listdir(IN_DIR[0])
-        IN_DIR *= len(FILES)
-        OUT_DIR *= len(FILES)
-        WAVES *= len(FILES)
-        args = list(zip(FILES,WAVES, IN_DIR, OUT_DIR))
-        future = pool.map(save_bands, args, timeout=60)
-        iterator = future.result()
-        while True:
-            try:
-                n = next(iterator)
-                if isinstance(n, tuple):
-                    print(n[0])
-                    np.save(*n)
-                    #print(n[0])
-                else:
-                    print(n)
-            except TimeoutError as e:
-                print(e.args)
-                continue
-            except StopIteration:
-                break
+    import utils
+    IMG = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022/NEON_D13_MOAB_DP3_645000_4230000_reflectance.h5'
+    rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
+    rgb = hp.make_rgb(rgb["bands"])
+    #rgb = exposure.adjust_gamma(rgb, gamma=0.5)
+    plt.imshow(rgb)
+    plt.show()
+    # with ProcessPool(3) as pool:
+    #     IN_DIR = ["/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022"]
+    #     OUT_DIR =  ["/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022"]
+    #     WAVES = [{'cyano_1': 440,
+    #                      'cyano_2': 489,
+    #                      'cyano_3': 504,
+    #                      'cyano_4': 627,
+    #                      'cyano_5': 680,
+    #                      'all_crusts': 1450,
+    #                      'moss_lichen_1': 1720,
+    #                      'generic_crust_1': 1920,
+    #                      'moss_lichen_2': 2100,
+    #                      'moss_lichen_3': 2180,
+    #                      'generic_crust_2': 2300}]
+    #     FILES = os.listdir(IN_DIR[0])
+    #     IN_DIR *= len(FILES)
+    #     OUT_DIR *= len(FILES)
+    #     WAVES *= len(FILES)
+    #     args = list(zip(FILES,WAVES, IN_DIR, OUT_DIR))
+    #     future = pool.map(save_bands, args, timeout=60)
+    #     iterator = future.result()
+    #     while True:
+    #         try:
+    #             n = next(iterator)
+    #             if isinstance(n, tuple):
+    #                 print(n[0])
+    #                 np.save(*n)
+    #                 #print(n[0])
+    #             else:
+    #                 print(n)
+    #         except TimeoutError as e:
+    #             print(e.args)
+    #             continue
+    #         except StopIteration:
+    #             break
 
-    #img_stats("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022")
+    #img_stats('/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022', '/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022/stats', num_channels=11 )
     # mean = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/mean.npy").astype(np.float64)
     # std = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/std.npy").astype(np.float64)
     # test = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/NEON_D01_HARV_DP3_735000_4713000_reflectance.npy")

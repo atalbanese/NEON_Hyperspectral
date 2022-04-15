@@ -19,18 +19,18 @@ def get_classifications(x):
     return masks
 
 class BYOLTransformer(pl.LightningModule):
-    def __init__(self, **kwargs):
+    def __init__(self, num_channels, **kwargs):
         super().__init__()
-        self.patch_embed = networks.PatchEmbedding(in_channels=30, patch_size=5, emb_size=750, img_size=25)
-        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=750, nhead=15, dim_feedforward=1024, batch_first=True)
+        self.patch_embed = networks.PatchEmbedding(in_channels=num_channels, patch_size=5, emb_size=25*num_channels, img_size=25)
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=25*num_channels, nhead=11, dim_feedforward=1024, batch_first=True)
         self.online_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
         #self.target_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
         # self.proj = networks.TProjector()
         # self.pred = networks.TPredictor()
-        self.proj_1 = networks.SegLinear(num_channels=750, b1=25, b2=25)
+        self.proj_1 = networks.SegLinear(num_channels=25 * num_channels, b1=25, b2=25)
         #self.proj_2 = networks.SegLinear(num_channels=676, b1=1024, b2=676)
 
-        self.pred_1 = networks.SegDecoder(num_channels = 750, patches=25)
+        self.pred_1 = networks.SegDecoder(num_channels = 25 * num_channels, patches=25)
         #self.pred_2 = networks.SegDecoder(num_channels=676, num_classes=676, drop_class=False, patches=676)
         #self.online_proj = networks.BYOLLinear(270)
         #self.loss = nn.MSELoss()
@@ -38,7 +38,7 @@ class BYOLTransformer(pl.LightningModule):
         # self.softmax = torch.nn.Softmax(dim=1)
         # self.logmax = torch.nn.LogSoftmax(dim=1)
         self.scale_up = nn.Upsample(scale_factor=5, mode='bilinear')
-        self.depatch = networks.DePatch()
+        self.depatch = networks.DePatch(num_channels=25*num_channels)
         self.loss = networks.SiamLoss()
         #self.online_pred = networks.BYOLLinear(270)
         #self.target_proj = networks.BYOLLinear(270)

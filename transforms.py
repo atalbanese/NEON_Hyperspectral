@@ -19,8 +19,8 @@ class RandomRectangleMask(torch.nn.Module):
             height = random.randint(0, upper_bound - j)
 
             arr = F.erase(arr, i, j, height, width, zeros)
-            if arr[:,middle, middle].sum() == 0:
-                arr[:,middle,middle] = 1
+            if arr[:,:,middle, middle].sum() == 0:
+                arr[:,:,middle,middle] = 1
         return arr
 
 
@@ -34,6 +34,6 @@ class RandomPointMask(torch.nn.Module):
             middle = arr.shape[-1]//2
             mask = torch.randint_like(arr, low=0, high=2)
             arr = arr * mask
-            if mask[middle, middle].sum() == 0:
-                arr[:,middle,middle] = 1
+            if mask[:,:,middle, middle].sum() == 0:
+                arr[:,:,middle,middle] = 1
         return arr
