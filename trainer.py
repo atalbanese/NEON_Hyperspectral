@@ -27,11 +27,12 @@ if __name__ == "__main__":
     wavelengths = {f"{i}": i for i in range(50, 1200, 100)}
 
     #dataset = HyperDataset(h5_fold, waves=wavelengths, batch_size=256, num_bands=30, crop_size=27)
-    dataset = PreProcDataset(pca_fold, batch_size=256, rearrange=True)
+    dataset = PreProcDataset(pca_fold, batch_size=256, rearrange=False)
     train_loader = DataLoader(dataset, batch_size=1, num_workers = 1)
     #model = models.HyperSimSiamWaveAugment(num_channels=30)
-    model = models.BYOLTransformer(num_channels=11)
-    #MODEL = inference.load_ckpt(models.BYOLTransformer,'ckpts/harv_simsiam_60_classes/harv_transformer_60_classes_epoch=24.ckpt')
+    #model = models.BYOLTransformer(num_channels=30)
+    model = models.MixedModel(num_channels=30)
+    #model = inference.load_ckpt(models.BYOLTransformer, 'ckpts/harv_transformer_fixed_augment_60_classes_epoch=13.ckpt', num_channels=30)
     trainer = pl.Trainer(accelerator="cpu", max_epochs=25, callbacks=[checkpoint_callback])
     trainer.fit(model, train_loader)
 

@@ -905,11 +905,11 @@ class ResnetEncoder(nn.Module):
         for i in range(n_downsampling):  # add downsampling layers
             mult = 2 ** i
             if(no_antialias):
-                model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=2, padding=1, bias=use_bias),
+                model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=5, stride=2, padding=1, bias=use_bias),
                           norm_layer(ngf * mult * 2),
                           nn.ReLU(True)]
             else:
-                model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=1, padding=1, bias=use_bias),
+                model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=5, stride=1, padding=1, bias=use_bias),
                           norm_layer(ngf * mult * 2),
                           nn.ReLU(True),
                           Downsample(ngf * mult * 2)]

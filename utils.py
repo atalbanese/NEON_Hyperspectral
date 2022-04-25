@@ -12,6 +12,7 @@ from multiprocessing import Pool
 from pebble import ProcessPool
 from concurrent.futures import TimeoutError
 from einops import rearrange
+from skimage.color import rgb2hsv
 
 def get_features(inp, feature_band=2):
     return np.reshape(inp, (-1,inp.shape[feature_band]))
@@ -30,7 +31,86 @@ def pca(data, prep, **kwargs):
         return data.reshape((kwargs["n_components"], 1000, 1000))
     return data
 
+#Take a dictionary of bands and return a numpy array thats [:,:,3] in red, green, blue order
+def make_rgb(band_dict):
+    to_stack = [band_dict["red"],
+                band_dict["green"],
+                band_dict["blue"]]
+    return np.stack(to_stack, axis=2)
 
+#Run the han 2018 (https://doi.org/10.3390/app8101883) algorithm for shadow segmentation on rgb/nir bands normalized to 0 to 1 values
+def han_2018(to_segment):
+    #Get RGB values out of RGB/NIR dictionary
+    rgb = make_rgb(to_segment)
+    
+    #Convert to HSV
+    hsv = rgb2hsv(rgb)
+    #Get Mixed Property Based Shadow Index (MPSI): (H- I) * (R - NIR)
+    #Saturation is equivalent to intensity so using S from HSV
+    mpsi = (hsv[:,:,0] - hsv[:,:,1]) * (rgb[:,:,0] - to_segment["nir"])
+
+    #Scale MPSI 0 to 255
+    mpsi = rescale(mpsi, 255)
+
+    #Calculate neighborhood valley threshold from Fan 2011
+    thresh = neighborhood_valley_thresh(mpsi, 3)
+    print(f'found threshold: {thresh}')
+    shadow_mask = mpsi.copy()
+    shadow_mask[shadow_mask<thresh] = 0
+    shadow_mask[shadow_mask>=thresh] = 1
+
+    
+    return mpsi, shadow_mask
+
+
+def rescale(np_arr, max_val):
+    if np_arr.min()<0:
+        np_arr += np.abs(np_arr.min())
+    return np_arr * max_val
+
+def get_ndvi(to_index):
+    return (to_index['nir'] - to_index['red'])/(to_index['nir'] + to_index['red'])
+
+
+
+# Neighborhood valley threshold from Fan 2011, implemented based on Han 2018. Finds the threshold with the greatest neighboring variance
+# Unlike Otsu threshold, does not depend on a bimodal distribution
+def neighborhood_valley_thresh(image: np.ndarray, neighborhood_length: int):
+    num_pixels = image.size
+    # Calculate neighborhood search radius
+    m = int(neighborhood_length//2)
+    # Get greyscale histogram
+    image_hist, bins = np.histogram(image, bins=255, range=(0, 255))
+    # Get probability for each histogram bin - h(g) in han 2018
+    h_of_g = image_hist/num_pixels
+    potential_thresholds = range(m, image_hist.size-m)
+
+    def h_bar(index):
+        return np.sum(h_of_g[index-m:index+m+1])
+    
+    def mu_lower(index, p):
+        summed = np.sum(h_of_g[:index+1] * range(0,index+1))
+        return summed/p
+
+    def mu_upper(index, p):
+        summed = np.sum(h_of_g[index+1:] * range(index+1,255))
+        return summed/p
+
+    best_threshold = -1
+    max_var = -1
+    for t in potential_thresholds:
+        component_1 = (1-h_bar(t))
+        p_0 = np.sum(h_of_g[:t+1])
+        mu_0 = mu_lower(t, p_0) ** 2.0
+        p_1 = np.sum(h_of_g[t+1:])
+        mu_1 = mu_upper(t, p_1) ** 2.0
+        component_2 = (p_0*mu_0) + (p_1 * mu_1)
+        var = component_1 * component_2
+        if var > max_var:
+            max_var = var
+            best_threshold = t
+
+    return best_threshold
 
 #TODO: add dask support for speed up/bulk images
 def ward_cluster(inp, n_clusters, mask=None, n_neighbors=4):
@@ -67,6 +147,12 @@ def get_viz_bands():
     return {"red": 654,
             "green": 561, 
             "blue": 482}
+
+def get_shadow_bands():
+    return {"red": 654,
+            "green": 561, 
+            "blue": 482,
+            "nir": 865}
 
 def get_landsat_viz():
     return  {"blue": {"lower": 452, "upper": 512},
@@ -138,18 +224,79 @@ def save_bands(args):
     else: 
         return "not an h5 file"
 
+#Shadows = 0, Sunlit = 1
+def get_shadow_mask(args):
+    file, in_dir, out_dir = args
+    if ".h5" in file:
+        new_file = file.split(".")[0] + 'shadow_mask.npy'
+        if not os.path.exists(os.path.join(out_dir,new_file)):
+            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=get_shadow_bands())["bands"]
+            stack = hp.stack_all(img)
+            nan_mask = stack != stack
+            if nan_mask.sum() > 0:
+                return "Too many NaNs"
+            mpsi, thresh = han_2018(img)
+            print(thresh)
+            #img[nan_mask] = -1
+            # features = rearrange(img, 'h w c -> (h w) c')
+            # cluster = ward_cluster(features, 2, n_neighbors=8)
+            # cluster = rearrange(cluster, '(h w) -> h w', h=1000, w=1000)
+            # ones_mask = cluster == 1
+            # zeros_mask = cluster == 0
+            # img_ones = img[ones_mask]
+            # img_zeros = img[zeros_mask]
+            # greater =  img_ones.mean() > img_zeros.mean()
+            # #cluster[nan_mask] = np.nan
+            # if not greater:
+            #     cluster[zeros_mask] = 1
+            #     cluster[ones_mask] = 0
+            # return cluster, new_file
+        else:
+            return "file already exists"
+    else: 
+        return "not an h5 file"
+
+def bulk_process(pool, in_dir, out_dir, fn, **kwargs):
+    files = os.listdir(in_dir)
+    in_dir = [in_dir] * len(files)
+    out_dir = [out_dir] * len(files)
+
+    args_list = list(zip(files, in_dir, out_dir))
+
+    future = pool.map(fn, args_list, timeout=60)
+    iterator = future.result()
+    while True:
+        try:
+            n = next(iterator)
+            if isinstance(n, tuple):
+                print(n[0])
+                np.save(*n)
+                #print(n[0])
+            else:
+                print(n)
+        except TimeoutError as e:
+            print(e.args)
+            continue
+        except StopIteration:
+            break
+
 
 
 
 
 if __name__ == '__main__':
-    import utils
-    IMG = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022/NEON_D13_MOAB_DP3_645000_4230000_reflectance.h5'
-    rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
-    rgb = hp.make_rgb(rgb["bands"])
-    #rgb = exposure.adjust_gamma(rgb, gamma=0.5)
-    plt.imshow(rgb)
-    plt.show()
+
+    IMG = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022/NEON_D01_HARV_DP3_736000_4703000_reflectance.h5'
+    get_shadow_mask((IMG, '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022', '/data/shared/src/aalbanese/datasets/hs/shadow_masks/harv'))
+    # import utils
+    # IMG = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022/NEON_D13_MOAB_DP3_645000_4230000_reflectance.h5'
+    # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
+    # rgb = hp.make_rgb(rgb["bands"])
+    # #rgb = exposure.adjust_gamma(rgb, gamma=0.5)
+    # plt.imshow(rgb)
+    # plt.show()
+
+
     # with ProcessPool(3) as pool:
     #     IN_DIR = ["/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022"]
     #     OUT_DIR =  ["/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022"]

@@ -5,6 +5,7 @@ from torch import nn
 import pytorch_lightning as pl
 import torchvision as tv
 from einops import rearrange
+from einops.layers.torch import Rearrange
 
 def save_grid(tb, inp, name, epoch):  
     img_grid = rearrange(inp, 'b h w -> h (b w)')
@@ -18,11 +19,132 @@ def get_classifications(x):
     # masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
+
+class MixedModel(pl.LightningModule):
+    def __init__(self, num_channels, **kwargs):
+        super().__init__()
+
+        #Transformer
+        self.patch_embed = networks.PatchEmbedding(in_channels=num_channels, patch_size=5, emb_size=25*num_channels, img_size=25)
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=25*num_channels, nhead=15, dim_feedforward=1024, batch_first=True)
+        #self.t_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
+
+        self.t_enc = nn.Sequential(networks.PatchEmbedding(in_channels=num_channels, patch_size=5, emb_size=25*num_channels, img_size=25),
+                                    torch.nn.TransformerEncoder(encoder_layer, num_layers=4),
+                                    networks.SegLinear(num_channels=25 * num_channels, b1=25, b2=25))
+       
+        #CNN
+        self.c_enc = nn.Sequential(net_gen.ResnetEncoder(num_channels, num_channels),
+                                    Rearrange('b c h w -> b (h w) c'),
+                                    networks.SegLinearUp(b1=25, b2=25, drop_class=False))
+
+        #Voter?
+
+
+        #Projector, Predictor
+        self.pred_1 = networks.SegDecoder(num_channels = 25 * num_channels, patches=25)
+
+        #Scaling and unpatching
+        self.scale_up = nn.Upsample(scale_factor=5, mode='bilinear')
+        self.depatch = networks.DePatch(num_channels=25*num_channels)
+
+        #Loss
+        self.loss = networks.SiamLoss()
+
+
+
+    
+    def training_step(self, x, idx, optimizer_idx):
+        inp, inp_aug = x["base"].squeeze(), x["rand"].squeeze()
+
+        if optimizer_idx == 0:
+            z_1 = self.t_enc(inp)
+            z_2 = self.c_enc(inp_aug)
+
+            p_1 = self.pred_1(z_1)
+            p_2 = self.pred_1(z_2)
+
+            viz_p = self.depatch(p_1)
+
+            self.log_images(viz_p)
+
+            z_1 = z_1.detach()
+            z_2 = z_2.detach()
+
+            loss = (self.loss(p_1, z_2).mean() + self.loss(p_2, z_1).mean()) *0.5
+
+            self.log('former_loss', loss)
+
+            return loss/256
+        
+        if optimizer_idx == 1:
+            z_1 = self.c_enc(inp)
+            z_2 = self.t_enc(inp_aug)
+
+            p_1 = self.pred_1(z_1)
+            p_2 = self.pred_1(z_2)
+
+            z_1 = z_1.detach()
+            z_2 = z_2.detach()
+
+            loss = (self.loss(p_1, z_2).mean() + self.loss(p_2, z_1).mean()) *0.5
+
+            self.log('conv_loss', loss)
+
+            return loss/256
+
+
+        # x_1 = self.t_enc(inp)
+        # z_1 = self.proj_1(x_1)
+        # p_1 = self.pred_1(z_1)
+
+        # x_2 = self.t_enc(x_2)
+        # z_2 = self.proj_1(x_2)
+        # p_2 = self.pred_1(z_2)
+
+        # viz_p = self.depatch(p_1)
+
+        # self.log_images(viz_p)
+        
+        # z1_stop = z_1.detach()
+        # z2_stop = z_2.detach()
+
+        # pix_loss = (self.loss(p_1, z2_stop).mean() + self.loss(p_2, z1_stop).mean()) *0.5
+        # loss = (pix_loss)/256 
+
+        # self.log('train_loss', loss)
+        # return loss
+
+    def log_images(self, pred):
+        tb = self.logger.experiment
+        sample_pred = pred[:6]
+        sample_pred = get_classifications(sample_pred)
+        save_grid(tb, sample_pred, 'predicted', self.current_epoch)
+
+    def configure_optimizers(self):
+        optimizer_t = torch.optim.Adam(self.t_enc.parameters(), lr=5e-4)
+        scheduler_t = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_t, 'min', patience=1, verbose=True)
+
+        optimizer_c = torch.optim.Adam(self.c_enc.parameters(), lr=5e-4)
+        scheduler_c = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_c, 'min', patience=1, verbose=True)
+        #return {"optimizers": [optimizer_t, optimizer_c], "lr_scheduler": [scheduler_t, scheduler_c], "monitor": "train_loss"}
+        return [optimizer_t, optimizer_c], []
+        
+    def forward(self, x):
+        #x = self.patch_embed(x)
+        x = self.t_enc(x)
+        #x = self.proj_1(x)
+        x = self.pred_1(x)
+        x = self.depatch(x)
+
+        return x
+
+
 class BYOLTransformer(pl.LightningModule):
     def __init__(self, num_channels, **kwargs):
         super().__init__()
         self.patch_embed = networks.PatchEmbedding(in_channels=num_channels, patch_size=5, emb_size=25*num_channels, img_size=25)
-        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=25*num_channels, nhead=11, dim_feedforward=1024, batch_first=True)
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=25*num_channels, nhead=15, dim_feedforward=1024, batch_first=True)
         self.online_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
         #self.target_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=2)
         # self.proj = networks.TProjector()

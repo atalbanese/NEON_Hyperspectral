@@ -131,13 +131,13 @@ class Validator():
                 im = ax.imshow(y, alpha=.2)
                 slider = self._make_slider(fig, im)
         data = self.valid_data.loc[self.valid_data['file_coords'] == coord]
-        for ix, row in data.iterrows():
-            # x = [row['x_min'], row['x_max'], row['x_max'], row['x_min'], row['x_min']]
-            # y = [row['y_max'], row['y_max'], row['y_min'], row['y_min'], row['y_max']]
-            x= (row['x_min'] + row['x_max'])//2
-            y= (row['y_min'] + row['y_max'])//2
-            ax.plot(x, y, marker="o")
-            ax.annotate(row['taxonID'], (x, y), textcoords='offset points', xytext= (0, 5), ha='center')
+        # for ix, row in data.iterrows():
+        #     # x = [row['x_min'], row['x_max'], row['x_max'], row['x_min'], row['x_min']]
+        #     # y = [row['y_max'], row['y_max'], row['y_min'], row['y_min'], row['y_max']]
+        #     x= (row['x_min'] + row['x_max'])//2
+        #     y= (row['y_min'] + row['y_max'])//2
+        #     ax.plot(x, y, marker="o")
+        #     ax.annotate(row['taxonID'], (x, y), textcoords='offset points', xytext= (0, 5), ha='center')
         plt.show()
     
     @staticmethod
@@ -250,10 +250,10 @@ def check_all(validator: Validator, model, save_dir, **kwargs):
         check_predictions(validator, model, coord, file, save_dir, **kwargs)
     return None
 
-def bulk_validation(ckpts_dir, img_dir, save_dir, valid_file, **kwargs):
+def bulk_validation(ckpts_dir, img_dir, save_dir, valid_file, model_type, **kwargs):
     for ckpt in os.listdir(ckpts_dir):
          if ".ckpt" in ckpt:
-             model = inference.load_ckpt(models.BYOLTransformer, os.path.join(ckpts_dir, ckpt), **kwargs)
+             model = inference.load_ckpt(model_type, os.path.join(ckpts_dir, ckpt), **kwargs)
              valid = Validator(file=valid_file, img_dir=img_dir, **kwargs)
              ckpt_name = ckpt.replace(".ckpt", "")
              new_dir = os.path.join(save_dir, ckpt_name)
@@ -296,17 +296,21 @@ def plot_species(validator: Validator, species):
                 points[combo]['x'].append(int(expect.loc[combo[0]]))
                 points[combo]['y'].append(int(found.loc[combo[1]]))
     
-    fig, ax = plt.subplots(4, 3)
+    fig, ax = plt.subplots(4, 5)
     ax = ax.flatten()
     for i, (combo, value) in enumerate(points.items()):
         if len(value['x'])>2:
             slope, intercept, r , p, se = linregress(value['x'], value['y'])
             ax[i].scatter(value['x'], value['y'])
-            ax[i].annotate(r, (0,1))
-    
+            ax[i].set_title(f'{combo} r2: {r**2:.2f}')
+    plt.tight_layout()
     plt.show()
 
-    print('here')
+def show_file(f):
+    f = np.load(f)
+    plt.imshow(f)
+    plt.show()
+
 
 
 
@@ -316,15 +320,15 @@ def plot_species(validator: Validator, species):
 if __name__ == "__main__":
     NUM_CLUSTERS = 60
     NUM_CHANNELS = 30
-    PCA_DIR= '/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022'
+    PCA_DIR= '/data/shared/src/aalbanese/datasets/hs/pca/harv_2022'
     PCA = os.path.join(PCA_DIR, 'NEON_D13_MOAB_DP3_640000_4237000_reflectancecrust_bands.npy')
     IMG_DIR = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
     IMG= os.path.join(IMG_DIR, 'NEON_D13_MOAB_DP3_640000_4237000_reflectance.h5')
-    SAVE_DIR = "validation/harv_simsiam_transformer_0_1"
+    SAVE_DIR = "validation/harv_transformer_fixed_augment"
     VALID_FILE = "/data/shared/src/aalbanese/datasets/neon-allsites-appidv-latest.csv"
     PLOT_FILE = '/data/shared/src/aalbanese/datasets/All_NEON_TOS_Plot_Centroids_V8.csv'
-    CKPTS_DIR = "ckpts/harv_simsiam_transformer_0_1"
+    CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
     #MODEL = inference.load_ckpt(models.BYOLTransformer, 'ckpts/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25.ckpt', num_channels=NUM_CHANNELS)
 
@@ -338,20 +342,24 @@ if __name__ == "__main__":
     # plt.show()
     # print(test)
     valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
-    for file in os.listdir('validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=24/'):
-        coords = file.split(".npy")[0]
-        file = os.path.join('validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=24/', file)
-        valid.validate(coords, file)
-    #valid.confusion_matrix
-    for spec in valid.valid_data['taxonID'].unique():
-        plot_species(valid, spec)
-        print('here')
+
+    testing = 'validation/harv_transformer_fixed_augment/harv_transformer_fixed_augment_60_classes_epoch=5'
+
+    # for file in os.listdir(testing):
+    #     show_file(os.path.join(testing,file))
+    #     coords = file.split(".npy")[0]
+    #     file = os.path.join(testing, file)
+    #     valid.validate(coords, file)
+    # #valid.confusion_matrix
+    # for spec in valid.valid_data['taxonID'].unique():
+    #     plot_species(valid, spec)
+    #     print('here')
     # valid.validate('731000_4713000','validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=24/731000_4713000.npy')
     # print('here')
     # valid.confusion_matrix
-    # valid.plot_trees(predictions = PRED_DIR)
+    valid.plot_trees(predictions = PRED_DIR)
 
-    #bulk_validation(CKPTS_DIR, PCA_DIR, SAVE_DIR, VALID_FILE, site_name='HARV',num_channels=NUM_CHANNELS, num_classes=NUM_CLUSTERS, num_clusters=NUM_CLUSTERS)
+    #bulk_validation(CKPTS_DIR, PCA_DIR, SAVE_DIR, VALID_FILE, site_name='HARV',num_channels=NUM_CHANNELS, num_classes=NUM_CLUSTERS, num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE, rearrange=False)
 
     # h5_file = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL/NEON_D16_WREF_DP3_580000_5075000_reflectance.h5"
     # coords = "580000_5075000"

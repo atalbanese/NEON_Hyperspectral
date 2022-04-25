@@ -259,6 +259,39 @@ class SegLinear(nn.Module):
 
         return x
 
+class SegLinearUp(nn.Module):
+    def __init__(self, num_in=256, num_out=750, b1=26, b2=26, drop_class=True):
+        super(SegLinearUp, self).__init__()
+        self.layer1 = nn.Sequential(nn.Linear(num_in, 1024),
+                                    nn.BatchNorm1d(b1),
+                                    nn.ReLU()
+                                    )
+        self.layer2 = nn.Sequential(nn.Linear(1024, 1024),
+                                    nn.BatchNorm1d(b2),
+                                    nn.ReLU()
+                                    ) 
+        self.layer3 = nn.Sequential(nn.Linear(1024, num_out),
+                                    nn.BatchNorm1d(b2)
+                                    )                                      
+        self.drop_class = drop_class
+
+
+
+    def forward(self, x):
+        if self.drop_class:
+            shape = x.shape
+            x = x[:,1:shape[1], :]
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        # shape = x.shape
+        # # z = x[:,shape[1]-1, :].unsqueeze(1)
+        # x = x[:,0:shape[1]-1, :]
+        # #x= x*z
+
+
+        return x
+
 class SegDecoder(nn.Module):
     def __init__(self, num_channels=270, num_classes=60, drop_class=True, patches=81):
         super(SegDecoder, self).__init__()
