@@ -337,8 +337,46 @@ class SiamLoss(nn.Module):
         return -(a*b)
 
 
+
+class T_Enc(nn.Module):
+    def __init__(self, num_channels):
+        super(T_Enc, self).__init__()
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=25*num_channels, nhead=15, dim_feedforward=1024, batch_first=True)
+        self.layer_1 = nn.Sequential(PatchEmbedding(in_channels=num_channels, patch_size=5, emb_size=25*num_channels, img_size=25),
+                                    torch.nn.TransformerEncoder(encoder_layer, num_layers=4),
+                                    SegLinear(num_channels=25 * num_channels, b1=25, b2=25))
+        self.layer_2 = SegDecoder(num_channels = 25 * num_channels, patches=25)
+
+    def forward(self, x):
+        z_1 = self.layer_1(x)
+        p_1 = self.layer_2(z_1)
+
+        return p_1, z_1.detach()
+
+
+class C_Enc(nn.Module):
+    def __init__(self, num_channels):
+        super(C_Enc, self).__init__()
+        self.layer_1 = nn.Sequential(net_gen.ResnetEncoder(num_channels, num_channels),
+                                    Rearrange('b c h w -> b (h w) c'),
+                                    SegLinearUp(b1=25, b2=25, drop_class=False))
+        self.layer_2 = SegDecoder(num_channels = 25 * num_channels, patches=25)
+
+    def forward(self, x):
+        z_1 = self.layer_1(x)
+        p_1 = self.layer_2(z_1)
+
+        return p_1, z_1.detach()
+
+
+
+
+
 if __name__ == "__main__":
     s = SegLinear()
     p = torch.ones(256,82,270)
     q = s(p)
     print(q.shape)
+
+
+

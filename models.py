@@ -26,23 +26,25 @@ class MixedModel(pl.LightningModule):
 
         #Transformer
         self.patch_embed = networks.PatchEmbedding(in_channels=num_channels, patch_size=5, emb_size=25*num_channels, img_size=25)
-        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=25*num_channels, nhead=15, dim_feedforward=1024, batch_first=True)
+        #encoder_layer = torch.nn.TransformerEncoderLayer(d_model=25*num_channels, nhead=15, dim_feedforward=1024, batch_first=True)
         #self.t_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
 
-        self.t_enc = nn.Sequential(networks.PatchEmbedding(in_channels=num_channels, patch_size=5, emb_size=25*num_channels, img_size=25),
-                                    torch.nn.TransformerEncoder(encoder_layer, num_layers=4),
-                                    networks.SegLinear(num_channels=25 * num_channels, b1=25, b2=25))
+        # self.t_enc = nn.Sequential(networks.PatchEmbedding(in_channels=num_channels, patch_size=5, emb_size=25*num_channels, img_size=25),
+        #                             torch.nn.TransformerEncoder(encoder_layer, num_layers=4),
+        #                             networks.SegLinear(num_channels=25 * num_channels, b1=25, b2=25))
+        self.t_enc = networks.T_Enc(num_channels)
        
         #CNN
-        self.c_enc = nn.Sequential(net_gen.ResnetEncoder(num_channels, num_channels),
-                                    Rearrange('b c h w -> b (h w) c'),
-                                    networks.SegLinearUp(b1=25, b2=25, drop_class=False))
+        # self.c_enc = nn.Sequential(net_gen.ResnetEncoder(num_channels, num_channels),
+        #                             Rearrange('b c h w -> b (h w) c'),
+        #                             networks.SegLinearUp(b1=25, b2=25, drop_class=False))
+        self.c_enc = networks.C_Enc(num_channels)
 
         #Voter?
 
 
         #Projector, Predictor
-        self.pred_1 = networks.SegDecoder(num_channels = 25 * num_channels, patches=25)
+        #self.pred_1 = networks.SegDecoder(num_channels = 25 * num_channels, patches=25)
 
         #Scaling and unpatching
         self.scale_up = nn.Upsample(scale_factor=5, mode='bilinear')
@@ -58,18 +60,21 @@ class MixedModel(pl.LightningModule):
         inp, inp_aug = x["base"].squeeze(), x["rand"].squeeze()
 
         if optimizer_idx == 0:
-            z_1 = self.t_enc(inp)
-            z_2 = self.c_enc(inp_aug)
 
-            p_1 = self.pred_1(z_1)
-            p_2 = self.pred_1(z_2)
+            p_1, z_1 = self.t_enc(inp)
+            p_2, z_2 = self.c_enc(inp_aug)
+            # z_1 = self.t_enc(inp)
+            # z_2 = self.c_enc(inp_aug)
+
+            # p_1 = self.pred_1(z_1)
+            # p_2 = self.pred_1(z_2)
 
             viz_p = self.depatch(p_1)
 
             self.log_images(viz_p)
 
-            z_1 = z_1.detach()
-            z_2 = z_2.detach()
+            # z_1 = z_1.detach()
+            # z_2 = z_2.detach()
 
             loss = (self.loss(p_1, z_2).mean() + self.loss(p_2, z_1).mean()) *0.5
 
@@ -78,14 +83,9 @@ class MixedModel(pl.LightningModule):
             return loss/256
         
         if optimizer_idx == 1:
-            z_1 = self.c_enc(inp)
-            z_2 = self.t_enc(inp_aug)
-
-            p_1 = self.pred_1(z_1)
-            p_2 = self.pred_1(z_2)
-
-            z_1 = z_1.detach()
-            z_2 = z_2.detach()
+            
+            p_1, z_1 = self.c_enc(inp)
+            p_2, z_2 = self.t_enc(inp_aug)
 
             loss = (self.loss(p_1, z_2).mean() + self.loss(p_2, z_1).mean()) *0.5
 

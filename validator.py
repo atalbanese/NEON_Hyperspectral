@@ -321,29 +321,29 @@ if __name__ == "__main__":
     NUM_CLUSTERS = 60
     NUM_CHANNELS = 30
     PCA_DIR= '/data/shared/src/aalbanese/datasets/hs/pca/harv_2022'
-    PCA = os.path.join(PCA_DIR, 'NEON_D13_MOAB_DP3_640000_4237000_reflectancecrust_bands.npy')
+    PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.npy')
     IMG_DIR = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
-    IMG= os.path.join(IMG_DIR, 'NEON_D13_MOAB_DP3_640000_4237000_reflectance.h5')
+    IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
     SAVE_DIR = "validation/harv_transformer_fixed_augment"
     VALID_FILE = "/data/shared/src/aalbanese/datasets/neon-allsites-appidv-latest.csv"
     PLOT_FILE = '/data/shared/src/aalbanese/datasets/All_NEON_TOS_Plot_Centroids_V8.csv'
     CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
-    #MODEL = inference.load_ckpt(models.BYOLTransformer, 'ckpts/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25.ckpt', num_channels=NUM_CHANNELS)
+    MODEL = inference.load_ckpt(models.MixedModel, 'ckpts/harv_transformer_fixed_augment_60_classes_epoch=5.ckpt', num_channels=NUM_CHANNELS)
 
-    # test = inference.do_inference(MODEL,PCA ,True, True, n_components =NUM_CHANNELS, rearrange=True)
+    test = inference.do_inference(MODEL,PCA ,True, True, n_components =NUM_CHANNELS, rearrange=True)
     # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
     # rgb = hp.make_rgb(rgb["bands"])
     # rgb = exposure.adjust_gamma(rgb, gamma=0.5)
     # plt.imshow(rgb)
     # plt.show()
-    # plt.imshow(test)
-    # plt.show()
-    # print(test)
-    valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
+    plt.imshow(test)
+    plt.show()
+    print(test)
+    #valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
 
-    testing = 'validation/harv_transformer_fixed_augment/harv_transformer_fixed_augment_60_classes_epoch=5'
+    #testing = 'validation/harv_transformer_fixed_augment/harv_transformer_fixed_augment_60_classes_epoch=5'
 
     # for file in os.listdir(testing):
     #     show_file(os.path.join(testing,file))
@@ -357,7 +357,7 @@ if __name__ == "__main__":
     # valid.validate('731000_4713000','validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=24/731000_4713000.npy')
     # print('here')
     # valid.confusion_matrix
-    valid.plot_trees(predictions = PRED_DIR)
+    #valid.plot_trees(predictions = PRED_DIR)
 
     #bulk_validation(CKPTS_DIR, PCA_DIR, SAVE_DIR, VALID_FILE, site_name='HARV',num_channels=NUM_CHANNELS, num_classes=NUM_CLUSTERS, num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE, rearrange=False)
 
