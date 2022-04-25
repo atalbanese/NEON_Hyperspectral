@@ -4,6 +4,7 @@ from torchvision import models
 import net_gen
 from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange, Reduce
+import numpy as np
 
 # Adapated from https://github.com/facebookresearch/simsiam/blob/main/simsiam/builder.py
 
@@ -357,17 +358,42 @@ class T_Enc(nn.Module):
 class C_Enc(nn.Module):
     def __init__(self, num_channels):
         super(C_Enc, self).__init__()
-        self.layer_1 = nn.Sequential(net_gen.ResnetEncoder(num_channels, num_channels),
-                                    Rearrange('b c h w -> b (h w) c'),
+        self.layer_enc = net_gen.ResnetEncoder(num_channels, num_channels, n_blocks=9)
+        self.layer_dec = net_gen.ResnetDecoder(256, 60)
+        self.project = nn.Sequential(Rearrange('b c h w -> b (h w) c'),
                                     SegLinearUp(b1=25, b2=25, drop_class=False))
-        self.layer_2 = SegDecoder(num_channels = 25 * num_channels, patches=25)
+        self.predict = SegDecoder(num_channels = 25 * num_channels, patches=25)
 
-    def forward(self, x):
-        z_1 = self.layer_1(x)
-        p_1 = self.layer_2(z_1)
+    def forward(self, x, decode=False):
+        x_1 = self.layer_enc(x)
+        if not decode:
+            z_1 = self.project(x_1)
+            p_1 = self.predict(z_1)
 
-        return p_1, z_1.detach()
+            return p_1, z_1.detach()
+        else:
+            out = self.layer_dec(x_1)
+            return out
 
+
+class Discriminator(nn.Module):
+    def __init__(self, img_shape):
+        super().__init__()
+
+        self.model = nn.Sequential(
+            nn.Linear(int(np.prod(img_shape)), 512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(512, 256),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(256, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, img):
+        img_flat = img.view(img.size(0), -1)
+        validity = self.model(img_flat)
+
+        return validity
 
 
 

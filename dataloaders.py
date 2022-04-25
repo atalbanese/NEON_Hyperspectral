@@ -39,6 +39,7 @@ class PreProcDataset(Dataset):
         if self.rearrange:
             img = rearrange(img, 'h w c -> c h w')
         img = self.norm(img)
+        full = img
         img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
         img[img != img] = -10
         random_select = self.rng.choice(range(0, img.shape[0]), size=self.batch_size, replace=False)
@@ -47,6 +48,7 @@ class PreProcDataset(Dataset):
         to_return = {}
         to_return["base"] = self.transforms_1(img)
         to_return["rand"] = self.transforms_2(to_return["base"])
+        to_return["full"] = full
 
         return to_return
 
