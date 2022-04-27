@@ -11,7 +11,63 @@ import h5py
 import transforms as tr
 import torchvision.transforms as tt
 from einops import rearrange
+import numpy.ma as ma
 #from torch_geometric.data import Data
+
+class MaskedDataset(Dataset):
+    def __init__(self, pca_folder, **kwargs):
+        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 128
+        self.mean = np.load(os.path.join(pca_folder, 'stats/mean.npy')).astype(np.float32)
+        self.std = np.load(os.path.join(pca_folder, 'stats/std.npy')).astype(np.float32)
+        self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+        self.rng = np.random.default_rng()
+
+        self.flip = tr.Flip()
+        self.blit = tr.Blit()
+        self.block = tr.Block()
+
+        self.check_files()
+
+    def check_files(self):
+        to_remove = []
+        for file in self.files:
+            img = np.load(file)
+            good_pix = np.count_nonzero(~np.isnan(img))
+            if good_pix < self.batch_size * 4:
+                to_remove.append(file)
+        self.files = list(set(self.files) - set(to_remove))
+
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, index):
+        to_return = {}
+        img = np.load(self.files[index]).astype(np.float32)
+
+        img = rearrange(img, 'h w c -> (h w) c')
+        #to_return['orig_shape'] = img.shape
+        img = ma.masked_invalid(img)
+        #to_return['mask'] = img.mask
+        img = ma.compress_rows(img)
+
+        random_select = self.rng.choice(range(0, img.shape[0]), size=self.batch_size, replace=False)
+        img = img[random_select]
+        img = (img - self.mean)/self.std
+        to_return['base'] = self.flip(img).copy()
+        to_return['augment'] = self.block(self.blit(img))
+
+        return to_return
+
+    
+
+         
+
+        
+
+
+
+
 
 class PreProcDataset(Dataset):
     def __init__(self, pca_folder, **kwargs):

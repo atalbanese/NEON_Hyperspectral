@@ -332,9 +332,9 @@ class SiamLoss(nn.Module):
         super(SiamLoss, self).__init__()
     
     def forward(self, x, y):
-        a = x/torch.linalg.norm(x)
-        b = y/torch.linalg.norm(y)
-        return -(a*b)
+        a = x/torch.linalg.norm(x, dim=1).unsqueeze(dim=1)
+        b = y/torch.linalg.norm(y, dim=1).unsqueeze(dim=1)
+        return -(a*b).sum(dim=1).mean()
 
 
 

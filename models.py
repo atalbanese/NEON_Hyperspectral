@@ -21,6 +21,57 @@ def get_classifications(x):
     return masks
 
 
+class MaskedSiam(pl.LightningModule):
+    def __init__(self, num_channels, batch_size, proj_d = 1024):
+        super().__init__()
+        self.batch_size = batch_size
+
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=num_channels, nhead=num_channels//6, dim_feedforward=1024, batch_first=True)
+        self.t_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=9)
+        self.proj = nn.Sequential(nn.Linear(num_channels, proj_d),
+                                    nn.BatchNorm1d(proj_d),
+                                    nn.ReLU(),
+                                    nn.Linear(proj_d, proj_d),
+                                    nn.BatchNorm1d(proj_d),
+                                    nn.ReLU(),
+                                    nn.Linear(proj_d, proj_d),
+                                    nn.BatchNorm1d(proj_d)
+                                    )
+
+        self.pred = nn.Sequential(nn.Linear(proj_d, proj_d//2),
+                                    nn.BatchNorm1d(proj_d//2),
+                                    nn.ReLU(),
+                                    nn.Linear(proj_d//2, proj_d)
+                                    )
+
+        self.loss = networks.SiamLoss()
+
+    def training_step(self, x):
+        inp, inp_aug = x['base'].squeeze(), x['augment'].squeeze()
+        z_1 = self.t_enc(inp)
+        z_2 = self.t_enc(inp_aug)
+
+        z_1 = self.proj(z_1)
+        z_2 = self.proj(z_2)
+
+        p_1 = self.pred(z_1)
+        p_2 = self.pred(z_2)
+
+        z_1, z_2, = z_1.detach(), z_2.detach()
+
+        loss = (self.loss(p_1, z_2) + self.loss(p_2, z_1)) *0.5
+
+        self.log('train_loss', loss)
+
+        return loss/self.batch_size
+
+    def configure_optimizers(self):
+        optimizer_t = torch.optim.Adam(self.parameters(), lr=5e-5)
+        return optimizer_t
+
+    def forward(self, x):
+        return x
+
 class MixedModel(pl.LightningModule):
     def __init__(self, num_channels, **kwargs):
         super().__init__()

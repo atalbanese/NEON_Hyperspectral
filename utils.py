@@ -203,6 +203,7 @@ def img_stats(dir, out_dir, num_channels=30):
     psum = np.zeros((num_channels,), dtype=np.float128) 
     sq = np.zeros((num_channels,), dtype=np.float128) 
     num_files = 0
+    count= 0
     for file in tqdm(files):
         if ".npy" in file:
             num_files += 1
@@ -332,8 +333,10 @@ if __name__ == '__main__':
     IMG = 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5'
 
     OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/pca/harv_masked_2022'
-    with ProcessPool(4) as pool:
-        bulk_process(pool, [IN_DIR, OUT_DIR, MASK_DIR], masked_pca)
+    #with ProcessPool(4) as pool:
+        #bulk_process(pool, [IN_DIR, OUT_DIR, MASK_DIR], masked_pca)
+
+    img_stats(OUT_DIR, '/data/shared/src/aalbanese/datasets/hs/pca/harv_masked_2022/stats')
     #get_bareness_mask((IMG, '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022', '/data/shared/src/aalbanese/datasets/hs/shadow_masks/harv'))
     # import utils
     # IMG = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022/NEON_D13_MOAB_DP3_645000_4230000_reflectance.h5'
