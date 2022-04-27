@@ -300,8 +300,7 @@ class SegDecoder(nn.Module):
                                     nn.BatchNorm1d(patches),
                                     nn.ReLU()
                                     )
-        self.layer2 = nn.Sequential(nn.Linear(num_channels//4, num_channels),
-                                    )
+        self.layer2 = nn.Linear(num_channels//4, num_classes, bias=False)
         
         
     def forward(self, x):
@@ -316,13 +315,13 @@ class SegDecoder(nn.Module):
 class DePatch(nn.Module):
     def __init__(self, num_channels=750):
         super(DePatch, self).__init__()
-        self.layer0 = nn.Linear(num_channels, 60, bias=False)
+        #self.layer0 = nn.Linear(num_channels, 60, bias=False)
         self.layer1 = Rearrange('b (h w) c -> b c h w', h=5, w=5)
         self.layer2 = nn.Upsample(scale_factor=5, mode='bilinear')
         self.layer3 = nn.Softmax(1)
 
     def forward(self, x):
-        x= self.layer0(x)
+        #x= self.layer0(x)
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
@@ -352,48 +351,49 @@ class T_Enc(nn.Module):
         z_1 = self.layer_1(x)
         p_1 = self.layer_2(z_1)
 
-        return p_1, z_1.detach()
+        return p_1
 
 
 class C_Enc(nn.Module):
     def __init__(self, num_channels):
         super(C_Enc, self).__init__()
         self.layer_enc = net_gen.ResnetEncoder(num_channels, num_channels, n_blocks=9)
-        self.layer_dec = net_gen.ResnetDecoder(256, 60)
         self.project = nn.Sequential(Rearrange('b c h w -> b (h w) c'),
                                     SegLinearUp(b1=25, b2=25, drop_class=False))
         self.predict = SegDecoder(num_channels = 25 * num_channels, patches=25)
 
-    def forward(self, x, decode=False):
+    def forward(self, x):
         x_1 = self.layer_enc(x)
-        if not decode:
-            z_1 = self.project(x_1)
-            p_1 = self.predict(z_1)
 
-            return p_1, z_1.detach()
-        else:
-            out = self.layer_dec(x_1)
-            return out
+        return x_1
 
 
-class Discriminator(nn.Module):
-    def __init__(self, img_shape):
-        super().__init__()
+class C_Proj(nn.Module):
+    def __init__(self, num_channels):
+        super(C_Proj, self).__init__()
+        self.project = nn.Sequential(Rearrange('b c h w -> b (h w) c'),
+                                    SegLinearUp(b1=25, b2=25, drop_class=False))
+        self.predict = SegDecoder(num_channels = 25 * num_channels, patches=25)
 
-        self.model = nn.Sequential(
-            nn.Linear(int(np.prod(img_shape)), 512),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 256),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(256, 1),
-            nn.Sigmoid(),
-        )
+    def forward(self, x):
+        z_1 = self.project(x)
+        p_1 = self.predict(z_1)
 
-    def forward(self, img):
-        img_flat = img.view(img.size(0), -1)
-        validity = self.model(img_flat)
+        return p_1
 
-        return validity
+       
+
+
+class C_Dec(nn.Module):
+    def __init__(self, num_channels):
+        super(C_Dec, self).__init__()
+        self.layer_dec = net_gen.ResnetDecoder(256, 60)
+
+    def forward(self, x):
+        out = self.layer_dec(x)
+        return out
+
+
 
 
 

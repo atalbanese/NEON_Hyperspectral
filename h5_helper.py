@@ -108,7 +108,7 @@ def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select
 
     else:
         refl_values = refl_values[:]/10000
-        refl_values[refl_values<0] = -1
+        refl_values[refl_values<0] = np.nan
         to_return["bands"] = refl_values
     if was_str:
         f.close()

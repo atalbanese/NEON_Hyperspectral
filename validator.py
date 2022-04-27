@@ -331,17 +331,17 @@ if __name__ == "__main__":
     PLOT_FILE = '/data/shared/src/aalbanese/datasets/All_NEON_TOS_Plot_Centroids_V8.csv'
     CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
-    MODEL = inference.load_ckpt(models.MixedModel, 'ckpts/harv_mixed_model_small_loss_epoch=1.ckpt', num_channels=NUM_CHANNELS)
+    MODEL = inference.load_ckpt(models.MixedModel, 'ckpts/harv_mixed_model_asym_two_optim_epoch=0.ckpt', num_channels=NUM_CHANNELS)
 
     test = inference.do_inference(MODEL,PCA ,True, True, n_components =NUM_CHANNELS)
     # test = np.load(PCA)
     # test = rearrange(test, 'c h w -> h w c')
     # test = test[:,:,2:5]
-    # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
-    # rgb = hp.make_rgb(rgb["bands"])
-    # rgb = exposure.adjust_gamma(rgb, gamma=0.5)
-    # plt.imshow(rgb)
-    # plt.show()
+    rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
+    rgb = hp.make_rgb(rgb["bands"])
+    rgb = exposure.adjust_gamma(rgb, gamma=0.5)
+    plt.imshow(rgb)
+    plt.show()
     plt.imshow(test)
     plt.show()
     print(test)

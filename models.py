@@ -31,6 +31,8 @@ class MixedModel(pl.LightningModule):
        
         #CNN
         self.c_enc = networks.C_Enc(num_channels)
+        self.c_proj = networks.C_Proj(num_channels)
+        #self.c_dec = networks.C_Dec(num_channels)
 
         #Voter?
 
@@ -39,46 +41,68 @@ class MixedModel(pl.LightningModule):
         self.scale_up = nn.Upsample(scale_factor=5, mode='bilinear')
         self.depatch = networks.DePatch(num_channels=25*num_channels)
 
-        #Loss
+        #Loss 
         self.sim_loss = networks.SiamLoss()
-        self.bce_loss = nn.BCEWithLogitsLoss()
+        self.ce_loss = nn.CrossEntropyLoss()
    
     def training_step(self, x, idx, optimizer_idx):
         
 
         if optimizer_idx == 0:
-            inp, inp_aug = x["base"].squeeze(), x["rand"].squeeze()
+            inp, inp_aug = x["base"].squeeze(), x["rand"].squeeze() 
 
-            p_1, z_1 = self.t_enc(inp)
-            p_2, z_2 = self.c_enc(inp_aug)
+            p_1 = self.t_enc(inp)
+            p_2 = self.c_enc(inp_aug)
+            p_2 = self.c_proj(p_2).detach()
             viz_p = self.depatch(p_1)
 
             self.log_images(viz_p)
 
-            loss = self.sim_loss(p_1, z_2).mean() #+ self.loss(p_2, z_1).mean()) *0.5
+            loss = self.sim_loss(p_1, p_2).mean() #+ self.loss(p_2, z_1).mean()) *0.5
 
             self.log('former_loss', loss)
 
             return loss/256
-        
+
         if optimizer_idx == 1:
-            inp = x['full']
-            p_1 = self.c_enc(inp, decode=True)
-            p_1 = f.softmax(p_1, dim=1)
-            p_1 = f.upsample(p_1, size=(1000,1000)).squeeze()
-            inp = inp.squeeze()
-            batched = rearrange(inp, "c (b1 h) (b2 w) -> (b1 b2) c h w", h=25, w=25, b1=40, b2=40)
-            p_2 = self.forward(batched)
+            inp, inp_aug = x["base"].squeeze(), x["rand"].squeeze() 
 
-            p_2 = rearrange(p_2, "(b1 b2) c h w -> c (b1 h) (b2 w)", h=25, w=25, b1=40, b2=40)
-            # p_2, z_2 = self.t_enc(inp_aug)
+            p_1 = self.c_enc(inp)
+            p_1 = self.c_proj(p_1)
+            p_2 = self.t_enc(inp_aug).detach()
+            # viz_p = self.depatch(p_1)
 
-            # loss = self.sim_loss(p_1, z_2).mean() #+ self.loss(p_2, z_1).mean()) *0.5
+            # self.log_images(viz_p)
 
-            loss = self.bce_loss(p_1, p_2)
+            loss = self.sim_loss(p_1, p_2).mean() #+ self.loss(p_2, z_1).mean()) *0.5
+
             self.log('conv_loss', loss)
 
-            return loss
+            return loss/256
+
+        
+        # if optimizer_idx == 2:
+        #     #MAKE THIS LEARNABLE??
+        #     if torch.rand(1) < 0.10:
+        #         inp = x['full']
+        #         p_1 = self.c_enc(inp)
+        #         p_1 = self.c_dec(p_1)
+        #         p_1 = f.softmax(p_1, dim=1)
+        #         p_1 = f.interpolate(p_1, size=(1000,1000)).squeeze()
+        #         inp = inp.squeeze()
+        #         batched = rearrange(inp, "c (b1 h) (b2 w) -> (b1 b2) c h w", h=25, w=25, b1=40, b2=40)
+        #         p_2 = self.t_enc(batched)
+        #         p_2 = self.depatch(p_2)
+
+        #         p_2 = rearrange(p_2, "(b1 b2) c h w -> c (b1 h) (b2 w)", h=25, w=25, b1=40, b2=40)
+        #         # p_2, z_2 = self.t_enc(inp_aug)
+
+        #         # loss = self.sim_loss(p_1, z_2).mean() #+ self.loss(p_2, z_1).mean()) *0.5
+
+        #         loss = self.ce_loss(p_1, p_2)
+        #         self.log('conv_loss', loss)
+
+        #         return loss
 
     def log_images(self, pred):
         tb = self.logger.experiment
@@ -87,17 +111,19 @@ class MixedModel(pl.LightningModule):
         save_grid(tb, sample_pred, 'predicted', self.current_epoch)
 
     def configure_optimizers(self):
-        optimizer_t = torch.optim.Adam(self.t_enc.parameters(), lr=5e-4)
+        optimizer_t = torch.optim.Adam(self.t_enc.parameters(), lr=5e-5)
         scheduler_t = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_t, 'min', patience=1, verbose=True)
 
-        optimizer_c = torch.optim.Adam(self.c_enc.parameters(), lr=5e-4)
+        optimizer_c = torch.optim.Adam([{'params': self.c_enc.parameters(), 'params': self.c_proj.parameters()}], lr=5e-5)
         scheduler_c = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_c, 'min', patience=1, verbose=True)
+
+        #optimizer_c_dec = torch.optim.Adam([{'params': self.c_enc.parameters(), 'params': self.c_dec.parameters()}], lr=5e-5)
         #return {"optimizers": [optimizer_t, optimizer_c], "lr_scheduler": [scheduler_t, scheduler_c], "monitor": "train_loss"}
         return [optimizer_t, optimizer_c], []
         
     def forward(self, x):
         #x = self.patch_embed(x)
-        x, _ = self.t_enc(x)
+        x  = self.t_enc(x)
         #x = self.proj_1(x)
         #x = self.pred_1(x)
         x = self.depatch(x)

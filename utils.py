@@ -13,6 +13,8 @@ from pebble import ProcessPool
 from concurrent.futures import TimeoutError
 from einops import rearrange
 from skimage.color import rgb2hsv
+from skimage import exposure
+import numpy.ma as ma
 
 def get_features(inp, feature_band=2):
     return np.reshape(inp, (-1,inp.shape[feature_band]))
@@ -86,23 +88,23 @@ def neighborhood_valley_thresh(image: np.ndarray, neighborhood_length: int):
     potential_thresholds = range(m, image_hist.size-m)
 
     def h_bar(index):
-        return np.sum(h_of_g[index-m:index+m+1])
+        return np.nansum(h_of_g[index-m:index+m+1])
     
     def mu_lower(index, p):
-        summed = np.sum(h_of_g[:index+1] * range(0,index+1))
+        summed = np.nansum(h_of_g[:index+1] * range(0,index+1))
         return summed/p
 
     def mu_upper(index, p):
-        summed = np.sum(h_of_g[index+1:] * range(index+1,255))
+        summed = np.nansum(h_of_g[index+1:] * range(index+1,255))
         return summed/p
 
     best_threshold = -1
     max_var = -1
     for t in potential_thresholds:
         component_1 = (1-h_bar(t))
-        p_0 = np.sum(h_of_g[:t+1])
+        p_0 = np.nansum(h_of_g[:t+1])
         mu_0 = mu_lower(t, p_0) ** 2.0
-        p_1 = np.sum(h_of_g[t+1:])
+        p_1 = np.nansum(h_of_g[t+1:])
         mu_1 = mu_upper(t, p_1) ** 2.0
         component_2 = (p_0*mu_0) + (p_1 * mu_1)
         var = component_1 * component_2
@@ -159,6 +161,15 @@ def get_landsat_viz():
                      "green": {"lower": 533, "upper": 590},
                      "red": {"lower": 636, "upper": 673}}
 
+def get_bareness_bands():
+    return {
+        'red': 654,
+        "green": 561, 
+        "blue": 482,
+        'nir': 865,
+        'swir': 1610
+    }
+
 def plot_output_files(dir):
     for file in os.listdir(dir):
         if ".npy" in file:
@@ -197,10 +208,11 @@ def img_stats(dir, out_dir, num_channels=30):
             num_files += 1
             img = np.load(os.path.join(dir, file))
             img = rearrange(img, 'h w c -> c (h w)')
-            sum = img.sum(axis=1)
+            sum = np.nansum(img, axis=1)
             psum += sum
-            sq += (img**2).sum(axis=1)
-    count = num_files *1000 * 1000
+            sq += np.nansum((img**2), axis=1)
+            count+= np.count_nonzero(~np.isnan(img))
+    #count = num_files *1000 * 1000
     total_mean = psum/count
     total_var = (sq/count) - (total_mean**2)
     total_std = np.sqrt(total_var)
@@ -224,44 +236,67 @@ def save_bands(args):
     else: 
         return "not an h5 file"
 
-#Shadows = 0, Sunlit = 1
-def get_shadow_mask(args):
+def get_masks(args):
     file, in_dir, out_dir = args
     if ".h5" in file:
-        new_file = file.split(".")[0] + 'shadow_mask.npy'
-        if not os.path.exists(os.path.join(out_dir,new_file)):
-            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=get_shadow_bands())["bands"]
-            stack = hp.stack_all(img)
-            nan_mask = stack != stack
-            if nan_mask.sum() > 0:
-                return "Too many NaNs"
-            mpsi, thresh = han_2018(img)
-            print(thresh)
-            #img[nan_mask] = -1
-            # features = rearrange(img, 'h w c -> (h w) c')
-            # cluster = ward_cluster(features, 2, n_neighbors=8)
-            # cluster = rearrange(cluster, '(h w) -> h w', h=1000, w=1000)
-            # ones_mask = cluster == 1
-            # zeros_mask = cluster == 0
-            # img_ones = img[ones_mask]
-            # img_zeros = img[zeros_mask]
-            # greater =  img_ones.mean() > img_zeros.mean()
-            # #cluster[nan_mask] = np.nan
-            # if not greater:
-            #     cluster[zeros_mask] = 1
-            #     cluster[ones_mask] = 0
-            # return cluster, new_file
-        else:
-            return "file already exists"
-    else: 
-        return "not an h5 file"
+        bare_file = file.split(".")[0] + '_bare_mask.npy'
+        shadow_file = file.split(".")[0] + '_shadow_mask.npy'
+        if not os.path.exists(os.path.join(out_dir,bare_file)):
+            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=get_bareness_bands())["bands"]
+            #viz = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=get_viz_bands())["bands"]
+            #stack = hp.stack_all(img)
+            #nan_mask = stack != stack
+            # viz = hp.stack_all(viz)
+            # viz = exposure.adjust_gamma(viz, gamma=0.5)
+            b_i = img['red'] + img['swir'] - img['nir']
+            bare = b_i > 0
+            masked_img = {}
+            for key, value in img.items():
+                value[bare] = np.nan
+                masked_img[key] = value
+            _, shadow_mask = han_2018(masked_img)
 
-def bulk_process(pool, in_dir, out_dir, fn, **kwargs):
-    files = os.listdir(in_dir)
-    in_dir = [in_dir] * len(files)
-    out_dir = [out_dir] * len(files)
+            shadows = shadow_mask > 0
+            
+            np.save(os.path.join(out_dir, bare_file), bare)
+            np.save(os.path.join(out_dir, shadow_file), shadows)
+            return True
 
-    args_list = list(zip(files, in_dir, out_dir))
+
+def masked_pca(args):
+    file, in_dir, out_dir, mask_dir = args
+    if ".h5" in file:
+        pca_file = file.split(".")[0] + '_pca.npy'
+        #bare_file = file.split(".")[0] + '_bare_mask.npy'
+        shadow_file = file.split(".")[0] + '_shadow_mask.npy'
+        if not os.path.exists(os.path.join(out_dir, pca_file)):
+            img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"]
+            #bare_mask = np.load(os.path.join(mask_dir, bare_file))
+            shadow_mask = ~np.load(os.path.join(mask_dir, shadow_file))
+            img[shadow_mask] = np.nan
+            img = rearrange(img, 'h w c -> (h w) c')
+            masked = ma.masked_invalid(img)
+            mask = masked.mask[:, 0:30]
+            to_pca = ma.compress_rows(masked)
+            pc = PCA(n_components=30, svd_solver='randomized')
+            pc.fit(to_pca)
+            data = pc.transform(to_pca)
+            out = np.empty(mask.shape, dtype=np.float64)
+            np.place(out, mask, np.nan)
+            np.place(out, ~mask, data)
+            out = rearrange(out, '(h w) c -> h w c', h=1000, w=1000)
+            np.save(os.path.join(out_dir, pca_file), out)
+
+
+            return pca_file
+
+
+
+def bulk_process(pool, dirs, fn, **kwargs):
+    files = os.listdir(dirs[0])
+    dirs = [[folder] * len(files) for folder in dirs]
+
+    args_list = list(zip(files, *dirs))
 
     future = pool.map(fn, args_list, timeout=60)
     iterator = future.result()
@@ -286,8 +321,20 @@ def bulk_process(pool, in_dir, out_dir, fn, **kwargs):
 
 if __name__ == '__main__':
 
-    IMG = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022/NEON_D01_HARV_DP3_736000_4703000_reflectance.h5'
-    get_shadow_mask((IMG, '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022', '/data/shared/src/aalbanese/datasets/hs/shadow_masks/harv'))
+    # with ProcessPool(4) as pool:
+    #     IN_DIR = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022'
+    #     OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/masks/HARV'
+    #     bulk_process(pool, IN_DIR, OUT_DIR, get_masks)
+
+    IN_DIR = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022'
+    MASK_DIR = '/data/shared/src/aalbanese/datasets/hs/masks/HARV'
+
+    IMG = 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5'
+
+    OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/pca/harv_masked_2022'
+    with ProcessPool(4) as pool:
+        bulk_process(pool, [IN_DIR, OUT_DIR, MASK_DIR], masked_pca)
+    #get_bareness_mask((IMG, '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022', '/data/shared/src/aalbanese/datasets/hs/shadow_masks/harv'))
     # import utils
     # IMG = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022/NEON_D13_MOAB_DP3_645000_4230000_reflectance.h5'
     # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
