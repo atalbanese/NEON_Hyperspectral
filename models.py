@@ -8,6 +8,9 @@ import torchvision as tv
 from einops import rearrange
 from einops.layers.torch import Rearrange
 
+import numpy.ma as ma
+import numpy as np
+
 def save_grid(tb, inp, name, epoch):  
     img_grid = rearrange(inp, 'b h w -> h (b w)')
     tb.add_image(name, img_grid, epoch, dataformats='HW')
@@ -69,8 +72,27 @@ class MaskedSiam(pl.LightningModule):
         optimizer_t = torch.optim.Adam(self.parameters(), lr=5e-5)
         return optimizer_t
 
-    def forward(self, x):
-        return x
+    def forward(self, img):
+        #Assumes we have numpy array (h w c)
+        img = rearrange(img, 'h w c -> (h w) c')
+        orig_shape = img.shape
+        img = ma.masked_invalid(img)
+        mask = img.mask
+        img = ma.compress_rows(img)
+
+        img = self.t_enc(img)
+        img = self.proj(img)
+        img = self.pred(img)
+
+        img = torch.argmax(img, dim=1)
+
+        out = np.empty(mask.shape, dtype=np.float32)
+        np.place(out, mask, np.nan)
+        np.place(out, ~mask, img)
+        img = rearrange(img, '(h w) c -> h w c', h=orig_shape[0], w=orig_shape[1])
+
+        
+        return img
 
 class MixedModel(pl.LightningModule):
     def __init__(self, num_channels, **kwargs):
