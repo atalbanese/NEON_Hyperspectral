@@ -321,8 +321,8 @@ def show_file(f):
 if __name__ == "__main__":
     NUM_CLUSTERS = 60
     NUM_CHANNELS = 30
-    PCA_DIR= '/data/shared/src/aalbanese/datasets/hs/pca/harv_2022'
-    PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.npy')
+    PCA_DIR= '/data/shared/src/aalbanese/datasets/hs/pca/harv_masked_2022'
+    PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance_pca.npy')
     IMG_DIR = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
     IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
@@ -331,17 +331,20 @@ if __name__ == "__main__":
     PLOT_FILE = '/data/shared/src/aalbanese/datasets/All_NEON_TOS_Plot_Centroids_V8.csv'
     CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
-    MODEL = inference.load_ckpt(models.MixedModel, 'ckpts/harv_mixed_model_asym_two_optim_epoch=0.ckpt', num_channels=NUM_CHANNELS)
+    MODEL = inference.load_ckpt(models.MaskedSiam, 'ckpts/harv_sim_siam_masked_epoch=7.ckpt', num_channels=NUM_CHANNELS)
 
-    test = inference.do_inference(MODEL,PCA ,True, True, n_components =NUM_CHANNELS)
+    MEAN = np.load(os.path.join(PCA_DIR, 'stats/mean.npy')).astype(np.float32)
+    STD = np.load(os.path.join(PCA_DIR, 'stats/std.npy')).astype(np.float32)
+
+    test = MODEL(np.load(PCA).astype(np.float32), MEAN, STD)
     # test = np.load(PCA)
     # test = rearrange(test, 'c h w -> h w c')
     # test = test[:,:,2:5]
-    rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
-    rgb = hp.make_rgb(rgb["bands"])
-    rgb = exposure.adjust_gamma(rgb, gamma=0.5)
-    plt.imshow(rgb)
-    plt.show()
+    # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
+    # rgb = hp.make_rgb(rgb["bands"])
+    # rgb = exposure.adjust_gamma(rgb, gamma=0.5)
+    # plt.imshow(rgb)
+    # plt.show()
     plt.imshow(test)
     plt.show()
     print(test)

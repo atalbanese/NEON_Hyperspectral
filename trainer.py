@@ -34,7 +34,7 @@ if __name__ == "__main__":
     train_loader = DataLoader(dataset, batch_size=1, num_workers=1)
     model = models.MaskedSiam(30, 512)
 
-    trainer = pl.Trainer(accelerator="cpu", max_epochs=10, callbacks=[checkpoint_callback])
+    trainer = pl.Trainer(accelerator="cpu", max_epochs=100, callbacks=[checkpoint_callback])
     trainer.fit(model, train_loader)
 
     

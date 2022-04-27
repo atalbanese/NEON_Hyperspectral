@@ -25,7 +25,7 @@ def get_classifications(x):
 
 
 class MaskedSiam(pl.LightningModule):
-    def __init__(self, num_channels, batch_size, proj_d = 1024):
+    def __init__(self, num_channels, batch_size = 512, proj_d = 1024):
         super().__init__()
         self.batch_size = batch_size
 
@@ -69,29 +69,46 @@ class MaskedSiam(pl.LightningModule):
         return loss/self.batch_size
 
     def configure_optimizers(self):
-        optimizer_t = torch.optim.Adam(self.parameters(), lr=5e-5)
-        return optimizer_t
+        optimizer = torch.optim.Adam(self.parameters(), lr=5e-5)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
 
-    def forward(self, img):
+    def forward(self, x, mean, std):
         #Assumes we have numpy array (h w c)
-        img = rearrange(img, 'h w c -> (h w) c')
-        orig_shape = img.shape
-        img = ma.masked_invalid(img)
-        mask = img.mask
-        img = ma.compress_rows(img)
-
-        img = self.t_enc(img)
-        img = self.proj(img)
-        img = self.pred(img)
-
-        img = torch.argmax(img, dim=1)
-
-        out = np.empty(mask.shape, dtype=np.float32)
-        np.place(out, mask, np.nan)
-        np.place(out, ~mask, img)
-        img = rearrange(img, '(h w) c -> h w c', h=orig_shape[0], w=orig_shape[1])
 
         
+        batched = rearrange(x, '(b1 h) (b2 w) c -> (b1 b2) (h w) c', b1=10, b2=10, h=100, w=100)
+        batched = (batched - std)/mean
+        holder = np.empty(batched.shape[0:2], dtype=np.int64)
+        for ix, img in enumerate(batched):
+            #orig_shape = img.shape
+            #img = rearrange(img, 'h w c -> (h w) c')
+            
+            img = ma.masked_invalid(img)
+            mask = img.mask.mean(axis=1).astype(np.bool)
+            if mask.sum() < 100 * 100:
+                img = ma.compress_rows(img)
+                img = torch.from_numpy(img)
+
+                img = self.t_enc(img)
+                img = self.proj(img)
+                img = self.pred(img)
+
+                img = torch.argmax(img, dim=1)
+                img = img.detach().numpy()
+
+                out = np.empty(mask.shape, dtype=np.int64)
+                np.place(out, mask, -999)
+                np.place(out, ~mask, img)
+                img = out
+                #img = rearrange(out, '(h w) -> h w', h=orig_shape[0], w=orig_shape[1])
+            else: 
+                img = np.ones((100*100), dtype=np.int64) * -999
+            holder[ix] = img
+
+        img = rearrange(holder, '(b1 b2) (h w) -> (b1 h) (b2 w)', b1=10, b2=10, h=100, w=100)
+
+
         return img
 
 class MixedModel(pl.LightningModule):
