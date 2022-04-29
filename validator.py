@@ -11,6 +11,7 @@ import utils
 from skimage import exposure
 from scipy.stats import linregress
 from einops import rearrange
+import torchvision.transforms as tt
 
 class Validator():
     def __init__(self, **kwargs):
@@ -331,16 +332,21 @@ if __name__ == "__main__":
     PLOT_FILE = '/data/shared/src/aalbanese/datasets/All_NEON_TOS_Plot_Centroids_V8.csv'
     CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
-    MODEL = inference.load_ckpt(models.MaskedSiam, 'ckpts/harv_sim_siam_masked_epoch=7.ckpt', num_channels=NUM_CHANNELS)
+    MODEL = inference.load_ckpt(models.MaskedVitSiam, 'ckpts/harv_sim_siam_masked_patched_vit_no_pos_epoch=0.ckpt', num_channels=NUM_CHANNELS)
 
     MEAN = np.load(os.path.join(PCA_DIR, 'stats/mean.npy')).astype(np.float32)
     STD = np.load(os.path.join(PCA_DIR, 'stats/std.npy')).astype(np.float32)
 
-    test = MODEL(np.load(PCA).astype(np.float32), MEAN, STD)
+    norm = tt.Normalize(MEAN, STD)
+
+    test = inference.vit_inference(MODEL, PCA, norm)
+
+    #np.save('transformer_test.npy', test)
+
     # test = np.load(PCA)
     # test = rearrange(test, 'c h w -> h w c')
     # test = test[:,:,2:5]
-    # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
+    # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_viz_bands())
     # rgb = hp.make_rgb(rgb["bands"])
     # rgb = exposure.adjust_gamma(rgb, gamma=0.5)
     # plt.imshow(rgb)

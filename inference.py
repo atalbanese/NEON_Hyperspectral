@@ -11,12 +11,13 @@ def load_ckpt(model_class, ckpt, **kwargs):
     model= model_class(**kwargs).load_from_checkpoint(ckpt, **kwargs)
     return model.eval()
 
-def do_inference(model, file, reshape, pca, **kwargs):
+def do_inference(model, file, reshape, pca, norm, **kwargs):
     if not pca:
         opened = hp.pre_processing(file, get_all=True)["bands"]
         reduce_dim = utils.pca(opened, True, **kwargs)
     else:
         reduce_dim = np.load(file)
+        reduce_dim = norm(reduce_dim)
     if reshape:
         # if kwargs['rearrange']:
         #     reduce_dim = rearrange(reduce_dim, 'h w c -> c h w')
@@ -30,6 +31,31 @@ def do_inference(model, file, reshape, pca, **kwargs):
     if reshape:
         y = transformer_outshape(y)
     return y
+
+def vit_inference(model, file, norm):
+    model.eval()
+    img = np.load(file)
+    img = torch.from_numpy(img).float()
+    img = rearrange(img, 'h w c -> c h w')
+    mask = img != img
+    #Set nans to 0
+    img[mask] = 0
+    img = norm(img)
+    img[mask] = 0
+
+    img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=25, w=25, b1=40, b2=40)
+    mask = rearrange(mask, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=25, w=25,  b1=40, b2=40)
+
+    img = model(img).detach()
+
+    mask = mask[:,0,:,:]
+    img[mask] = -1
+    img = rearrange(img, "(b1 b2) h w -> (b1 h) (b2 w)", h=25, w=25, b1=40, b2=40)
+    img = img.numpy()
+    return img
+
+
+
 
 def transformer_inshape(inp):
     #inp = inp[:, 0:999, 0:999]

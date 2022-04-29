@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torchvision import models
+import torch.nn.functional as f
 import net_gen
 from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange, Reduce
@@ -95,7 +96,7 @@ class DenseProjector(nn.Module):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
-
+        x = f.interpolate(x, (25, 25))
         return x
 
 #Predictor h - just guessing as to whats this is supposed to be like
@@ -163,6 +164,118 @@ class BYOLLinear(nn.Module):
     
     def forward(self, x):
         return self.layer1(x)
+
+
+class LinearPatchEmbed(nn.Module):
+    def __init__(self, in_channels: int = 30, patch_size: int = 5, emb_size: int = 750, img_size=25):
+        super(LinearPatchEmbed, self).__init__()
+        self.patch_size = patch_size
+        self.projection = nn.Sequential(
+            # break-down the image in s1 x s2 patches and flat them
+            Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
+            nn.Linear(patch_size * patch_size * in_channels, emb_size)
+        )
+        self.cls_token = nn.Parameter(torch.randn(1,1, emb_size))
+        self.positions = nn.Parameter(torch.randn((img_size // patch_size) **2 + 1, emb_size))
+
+                
+    def forward(self, x):
+        b, _, _, _ = x.shape
+        x = self.projection(x)
+        cls_tokens = repeat(self.cls_token, '() n e -> b n e', b=b)
+        # prepend the cls token to the input
+        x = torch.cat([cls_tokens, x], dim=1)
+        # add position embedding
+        x += self.positions
+        return x
+
+
+class RCU(nn.Module):
+    def __init__(self, num_channels=256):
+        super(RCU, self).__init__()
+        self.layer1 = nn.Sequential(nn.ReLU(),
+                                    nn.Conv2d(num_channels, num_channels, kernel_size=3, stride=1, padding=1),
+                                    nn.ReLU(),
+                                    nn.Conv2d(num_channels, num_channels, kernel_size=3, stride=1, padding=1))
+    def forward(self, x):
+        z = self.layer1(x)
+        return x+z
+
+class Fusion(nn.Module):
+    def __init__(self, num_channels=256):
+        super(Fusion, self).__init__()
+        self.RCU1 = RCU(num_channels=num_channels)
+        self.RCU2 = RCU(num_channels=num_channels)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.project = nn.Conv2d(num_channels, num_channels, kernel_size=1)
+
+    def forward(self, x, z=None):
+        x = self.RCU1(x)
+        if z is not None:
+            x = x+z
+        x = self.RCU2(x)
+        x = self.up(x)
+        x = self.project(x)
+        return x
+
+
+#https://openaccess.thecvf.com/content/ICCV2021/papers/Ranftl_Vision_Transformers_for_Dense_Prediction_ICCV_2021_paper.pdf
+#The add read option
+class MapToken(nn.Module):
+    def __init__(self, emb_size, patches=25):
+        super(MapToken, self).__init__()
+        self.layer1 = nn.Sequential(nn.Linear(emb_size * 2, emb_size),
+                                    nn.BatchNorm1d(patches),
+                                    nn.ReLU(),
+                                    nn.Linear(emb_size, emb_size))
+
+    def forward(self,x):
+        cls_token = x[:,0,:].unsqueeze(dim=1)
+        features = x[:,1:,:]
+
+        cls_token = repeat(cls_token, 'b p e -> b (p repeat) e', repeat=features.shape[1])
+
+
+        out = torch.cat((cls_token, features), dim=2)
+        out = self.layer1(out)
+
+        return out
+
+class VitProject(nn.Module):
+    def __init__(self, num_classes, emb_size = 1024):
+        super(VitProject, self).__init__()
+        self.layer1 = nn.Sequential(nn.Conv2d(emb_size, num_classes, kernel_size=1),
+                                    nn.BatchNorm2d(num_classes),
+                                    nn.ReLU())
+        self.layer2 = nn.Sequential(nn.ConvTranspose2d(num_classes, num_classes, 3, stride=2, padding=1),
+                                    nn.BatchNorm2d(num_classes),
+                                    nn.ReLU())
+        self.layer3 = nn.Sequential(nn.ConvTranspose2d(num_classes, num_classes, 3, stride=2, padding=1),
+                                    nn.BatchNorm2d(num_classes),
+                                    nn.ReLU())
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = f.interpolate(x, (25, 25))
+        return x
+
+class VitPredict(nn.Module):
+    def __init__(self, num_classes):
+        super(VitPredict, self).__init__()
+        self.layer1 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1),
+                                    nn.BatchNorm2d(num_classes),
+                                    nn.ReLU())
+        self.layer2 = nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False)
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+
+        return x
+
+    
 
 #From https://towardsdatascience.com/implementing-visualttransformer-in-pytorch-184f9f16f632
 class PatchEmbedding(nn.Module):
@@ -337,6 +450,17 @@ class SiamLoss(nn.Module):
         return -(a*b).sum(dim=1).mean()
 
 
+class VitSiamLoss(nn.Module):
+    def __init__(self):
+        super(VitSiamLoss, self).__init__()
+    
+    def forward(self, x, y):
+        a = x/torch.linalg.norm(x)
+        b = y/torch.linalg.norm(y)
+        return -(a*b).sum().mean()
+
+
+
 
 class T_Enc(nn.Module):
     def __init__(self, num_channels):
@@ -399,8 +523,8 @@ class C_Dec(nn.Module):
 
 
 if __name__ == "__main__":
-    s = SegLinear()
-    p = torch.ones(256,82,270)
+    s = LinearPatchEmbed()
+    p = torch.ones(50, 30, 25, 25)
     q = s(p)
     print(q.shape)
 

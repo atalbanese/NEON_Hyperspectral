@@ -1,4 +1,4 @@
-from dataloaders import HyperDataset, PreProcDataset, MaskedDataset
+from dataloaders import HyperDataset, PreProcDataset, MaskedDataset, MaskedVitDataset, MaskedDenseVitDataset
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 import models
@@ -12,7 +12,7 @@ if __name__ == "__main__":
     h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022"
     checkpoint_callback = ModelCheckpoint(
         dirpath='ckpts', 
-        filename='harv_sim_siam_masked_{epoch}',
+        filename='harv_sim_siam_masked_patched_vit_no_pos_{epoch}',
         every_n_epochs=1,
         save_on_train_epoch_end=True,
         save_top_k = -1
@@ -30,11 +30,11 @@ if __name__ == "__main__":
     # trainer = pl.Trainer(accelerator="cpu", max_epochs=10, callbacks=[checkpoint_callback])
     # trainer.fit(model, train_loader)
 
-    dataset = MaskedDataset(pca_fold, batch_size=512)
+    dataset = MaskedDenseVitDataset(pca_fold, 8, eval=False)
     train_loader = DataLoader(dataset, batch_size=1, num_workers=1)
-    model = models.MaskedSiam(30, 512)
+    model = models.MaskedVitSiam(30)
 
-    trainer = pl.Trainer(accelerator="cpu", max_epochs=100, callbacks=[checkpoint_callback])
+    trainer = pl.Trainer(accelerator="cpu", max_epochs=10, callbacks=[checkpoint_callback])
     trainer.fit(model, train_loader)
 
     

@@ -14,6 +14,126 @@ from einops import rearrange
 import numpy.ma as ma
 #from torch_geometric.data import Data
 
+class MaskedDenseVitDataset(Dataset):
+    def __init__(self, pca_folder, crop_size, eval=False, **kwargs):
+        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 128
+        self.mean = np.load(os.path.join(pca_folder, 'stats/mean.npy')).astype(np.float64)
+        self.std = np.load(os.path.join(pca_folder, 'stats/std.npy')).astype(np.float64)
+        self.norm = tt.Normalize(self.mean, self.std)
+        self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+        self.rng = np.random.default_rng()
+        self.crop_size = crop_size
+
+        self.random_crop = tt.RandomCrop(256)
+
+        self.transforms_1 = tt.Compose([tt.RandomHorizontalFlip(),
+                                    tt.RandomVerticalFlip()])
+        self.transforms_2 = tt.Compose([
+                                    tr.RandomPointMaskEven(),
+                                    tr.RandomRectangleMaskEven()])
+
+        if not eval:
+            self.check_files()
+
+    def check_files(self):
+        to_remove = []
+        for file in self.files:
+            img = np.load(file)
+            img = rearrange(img, 'h w c -> (h w) c')
+            img = ma.masked_invalid(img)
+            img = ma.compress_rows(img)
+            if img.shape[0] < self.batch_size * 4:
+                to_remove.append(file)
+        self.files = list(set(self.files) - set(to_remove))
+
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, index):
+        img = np.load(self.files[index]).astype(np.float32)
+        img = torch.from_numpy(img)
+        img = rearrange(img, 'h w c -> c h w')
+
+        img = self.random_crop(img)
+        mask = img != img
+        #Set nans to 0
+        img[mask] = 0
+        img = self.norm(img)
+        #Reset them to 0 as they will be 'normalized' now
+        img[mask] = 0
+        # img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+        # mask = rearrange(mask, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+
+
+        to_return = {}
+        to_return["base"] = self.transforms_1(img)
+        to_return["augment"] = self.transforms_2(to_return["base"])
+        to_return["mask"] = mask
+        #to_return["full"] = full
+
+        return to_return
+
+class MaskedVitDataset(Dataset):
+    def __init__(self, pca_folder, crop_size, eval=False, **kwargs):
+        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 128
+        self.mean = np.load(os.path.join(pca_folder, 'stats/mean.npy')).astype(np.float64)
+        self.std = np.load(os.path.join(pca_folder, 'stats/std.npy')).astype(np.float64)
+        self.norm = tt.Normalize(self.mean, self.std)
+        self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+        self.rng = np.random.default_rng()
+        self.crop_size = crop_size
+
+        self.transforms_1 = tt.Compose([tt.RandomHorizontalFlip(),
+                                    tt.RandomVerticalFlip()])
+        self.transforms_2 = tt.Compose([
+                                    tr.RandomPointMask(),
+                                    tr.RandomRectangleMask()])
+
+        if not eval:
+            self.check_files()
+
+    def check_files(self):
+        to_remove = []
+        for file in self.files:
+            img = np.load(file)
+            img = rearrange(img, 'h w c -> (h w) c')
+            img = ma.masked_invalid(img)
+            img = ma.compress_rows(img)
+            if img.shape[0] < self.batch_size * 4:
+                to_remove.append(file)
+        self.files = list(set(self.files) - set(to_remove))
+
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, index):
+        img = np.load(self.files[index]).astype(np.float32)
+        img = torch.from_numpy(img)
+        img = rearrange(img, 'h w c -> c h w')
+        mask = img != img
+        #Set nans to 0
+        img[mask] = 0
+        img = self.norm(img)
+        #Reset them to 0 as they will be 'normalized' now
+        img[mask] = 0
+        img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+        mask = rearrange(mask, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+        random_select = self.rng.choice(range(0, img.shape[0]), size=self.batch_size, replace=False)
+        img = img[random_select]
+        mask = mask[random_select]
+
+        to_return = {}
+        to_return["base"] = self.transforms_1(img)
+        to_return["augment"] = self.transforms_2(to_return["base"])
+        to_return["mask"] = mask
+        #to_return["full"] = full
+
+        return to_return
+
+
+
 class MaskedDataset(Dataset):
     def __init__(self, pca_folder, **kwargs):
         self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 128
@@ -24,6 +144,7 @@ class MaskedDataset(Dataset):
 
         self.flip = tr.Flip()
         self.blit = tr.Blit()
+        self.blit_darken = tr.BlitDarken()
         self.block = tr.Block()
 
         self.check_files()
@@ -32,8 +153,10 @@ class MaskedDataset(Dataset):
         to_remove = []
         for file in self.files:
             img = np.load(file)
-            good_pix = np.count_nonzero(~np.isnan(img))
-            if good_pix < self.batch_size * 4:
+            img = rearrange(img, 'h w c -> (h w) c')
+            img = ma.masked_invalid(img)
+            img = ma.compress_rows(img)
+            if img.shape[0] < self.batch_size * 4:
                 to_remove.append(file)
         self.files = list(set(self.files) - set(to_remove))
 
@@ -55,7 +178,7 @@ class MaskedDataset(Dataset):
         img = img[random_select]
         img = (img - self.mean)/self.std
         to_return['base'] = self.flip(img).copy()
-        to_return['augment'] = self.block(self.blit(img))
+        to_return['augment'] = self.block(self.blit_darken(self.blit(img)))
 
         return to_return
 
@@ -272,8 +395,8 @@ class HyperDataset(Dataset):
 
 if __name__ == "__main__":
 
-    pca_fold = '/data/shared/src/aalbanese/datasets/hs/pca/harv_2022'
-    test = PreProcDataset(pca_fold)
+    pca_fold = '/data/shared/src/aalbanese/datasets/hs/pca/harv_masked_2022'
+    test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 
     print(test.__getitem__(69).shape)
     #test = pylas.read('/data/shared/src/aalbanese/datasets/lidar/NEON_lidar-point-cloud-line/NEON.D16.WREF.DP1.30003.001.2021-07.basic.20220330T163527Z.PROVISIONAL/NEON_D16_WREF_DP1_L001-1_2021071815_unclassified_point_cloud.las')    
