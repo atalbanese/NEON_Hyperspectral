@@ -207,7 +207,7 @@ class Fusion(nn.Module):
         self.RCU1 = RCU(num_channels=num_channels)
         self.RCU2 = RCU(num_channels=num_channels)
         self.up = nn.Upsample(scale_factor=2, mode='bilinear')
-        self.project = nn.Conv2d(num_channels, num_channels, kernel_size=1)
+        self.project = RCU(num_channels=num_channels)
 
     def forward(self, x, z=None):
         x = self.RCU1(x)
@@ -216,6 +216,20 @@ class Fusion(nn.Module):
         x = self.RCU2(x)
         x = self.up(x)
         x = self.project(x)
+        return x
+
+class ChainedPool(nn.Module):
+    def __init__(self, num_channels=256):
+        super(ChainedPool, self).__init__()
+        self.layer1 = nn.ReLU()
+        self.pool1 = nn.MaxPool2d(kernel_size=5)
+        self.conv1 = nn.Conv2d(num_channels, num_channels, kernel_size=3)
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.pool1(x)
+        x = self.conv1(x)
+
         return x
 
 
@@ -259,6 +273,20 @@ class VitProject(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = f.interpolate(x, (25, 25))
+        return x
+
+class DenseVitPredict(nn.Module):
+    def __init__(self, num_classes):
+        super(DenseVitPredict, self).__init__()
+        self.layer1 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1),
+                                    nn.InstanceNorm2d(num_classes),
+                                    nn.ReLU())
+        self.layer2 = nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False)
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.layer2(x)
+
         return x
 
 class VitPredict(nn.Module):

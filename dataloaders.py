@@ -12,15 +12,23 @@ import transforms as tr
 import torchvision.transforms as tt
 from einops import rearrange
 import numpy.ma as ma
+import pickle
 #from torch_geometric.data import Data
 
 class MaskedDenseVitDataset(Dataset):
     def __init__(self, pca_folder, crop_size, eval=False, **kwargs):
+        self.pca_folder = pca_folder
         self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 128
         self.mean = np.load(os.path.join(pca_folder, 'stats/mean.npy')).astype(np.float64)
         self.std = np.load(os.path.join(pca_folder, 'stats/std.npy')).astype(np.float64)
         self.norm = tt.Normalize(self.mean, self.std)
-        self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+        if os.path.exists(os.path.join(self.pca_folder, 'stats/good_files.pkl')):
+            with open(os.path.join(self.pca_folder, 'stats/good_files.pkl'), 'rb') as f:
+                self.files = pickle.load(f)
+        else:
+            self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+            if not eval:
+                self.check_files()
         self.rng = np.random.default_rng()
         self.crop_size = crop_size
 
@@ -32,8 +40,7 @@ class MaskedDenseVitDataset(Dataset):
                                     tr.RandomPointMaskEven(),
                                     tr.RandomRectangleMaskEven()])
 
-        if not eval:
-            self.check_files()
+        
 
     def check_files(self):
         to_remove = []
@@ -42,9 +49,12 @@ class MaskedDenseVitDataset(Dataset):
             img = rearrange(img, 'h w c -> (h w) c')
             img = ma.masked_invalid(img)
             img = ma.compress_rows(img)
-            if img.shape[0] < self.batch_size * 4:
+            if img.shape[0] < 256*64:
                 to_remove.append(file)
         self.files = list(set(self.files) - set(to_remove))
+        with open(os.path.join(self.pca_folder, 'stats/good_files.pkl'), 'wb') as f:
+            pickle.dump(self.files, f)
+
 
 
     def __len__(self):

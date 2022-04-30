@@ -12,7 +12,7 @@ if __name__ == "__main__":
     h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022"
     checkpoint_callback = ModelCheckpoint(
         dirpath='ckpts', 
-        filename='harv_sim_siam_masked_patched_vit_no_pos_{epoch}',
+        filename='harv_sim_siam_masked_patched_vit_dense_{epoch}',
         every_n_epochs=1,
         save_on_train_epoch_end=True,
         save_top_k = -1

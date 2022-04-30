@@ -1,7 +1,7 @@
 import networks
 import net_gen
 import torch
-from torch import nn
+from torch import layer_norm, nn
 import torch.nn.functional as f
 import pytorch_lightning as pl
 import torchvision as tv
@@ -72,7 +72,7 @@ class MaskedVitSiam(pl.LightningModule):
         self.fusion8 = networks.Fusion(num_channels=output_classes)
         self.fusion4 = networks.Fusion(num_channels=output_classes)
 
-        self.pred = networks.VitPredict(output_classes)
+        self.pred = networks.DenseVitPredict(output_classes)
 
         self.softmax = nn.Softmax(dim=1)
         self.loss = networks.VitSiamLoss()
@@ -113,7 +113,7 @@ class MaskedVitSiam(pl.LightningModule):
         inp, inp_aug, mask = x['base'], x['augment'], ~x['mask']
         mask = mask[:,0,:,:]
         mask = mask.unsqueeze(dim=1)
-        #TODO: Figure this out when we get to it
+
         mask = repeat(mask, 'b c h w -> b (repeat c) h w', repeat=self.output_classes)
 
         e_1 = self.embed(inp)
@@ -141,17 +141,17 @@ class MaskedVitSiam(pl.LightningModule):
 
         z_1, z_2, = z_1.detach(), z_2.detach()
 
-        p_1 = self.softmax(p_1)
-        p_2 = self.softmax(p_2)
+        # p_1 = self.softmax(p_1)
+        # p_2 = self.softmax(p_2)
 
-        z_1 = self.softmax(z_1)
-        z_2 = self.softmax(z_2)
+        # z_1 = self.softmax(z_1)
+        # z_2 = self.softmax(z_2)
 
         loss = (self.loss(p_1[mask], z_2[mask]) + self.loss(p_2[mask], z_1[mask])) *0.5
 
-        self.log('train_loss', loss)
+        self.log('train_loss', loss/256)
 
-        return loss
+        return loss/256
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=5e-5)
