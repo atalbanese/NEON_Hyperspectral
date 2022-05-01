@@ -222,14 +222,14 @@ def img_stats(dir, out_dir, num_channels=30):
     np.save(os.path.join(out_dir, "std.npy"), total_std)
 
 def save_bands(args):
-    file, bands, in_dir, out_dir = args
+    file, in_dir, out_dir, bands = args
 
     if ".h5" in file:
-        new_file = file.split(".")[0] + "crust_bands.npy"
+        new_file = file.split(".")[0] + "viz_bands.npy"
         if not os.path.exists(os.path.join(out_dir,new_file)):
             img = hp.pre_processing(os.path.join(in_dir,file), wavelength_ranges=bands)["bands"]
             img = hp.stack_all(img)
-            return (os.path.join(out_dir,new_file), img)
+            np.save(os.path.join(out_dir,new_file), img)
 
 
         else:
@@ -293,6 +293,8 @@ def masked_pca(args):
 
 
 
+
+
 def bulk_process(pool, dirs, fn, **kwargs):
     files = os.listdir(dirs[0])
     dirs = [[folder] * len(files) for folder in dirs]
@@ -329,14 +331,17 @@ if __name__ == '__main__':
 
     IN_DIR = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022'
     MASK_DIR = '/data/shared/src/aalbanese/datasets/hs/masks/HARV'
+    BANDS = get_shadow_bands()
 
     IMG = 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5'
 
-    OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/pca/harv_masked_2022'
-    #with ProcessPool(4) as pool:
-        #bulk_process(pool, [IN_DIR, OUT_DIR, MASK_DIR], masked_pca)
+    OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/viz_nir/harv_2022'
+    # with ProcessPool(4) as pool:
+    #     bulk_process(pool, [IN_DIR, OUT_DIR, BANDS], save_bands)
 
-    img_stats(OUT_DIR, '/data/shared/src/aalbanese/datasets/hs/pca/harv_masked_2022/stats')
+    img_stats(OUT_DIR, '/data/shared/src/aalbanese/datasets/hs/viz_nir/harv_2022/stats', num_channels=4)
+
+
     #get_bareness_mask((IMG, '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022', '/data/shared/src/aalbanese/datasets/hs/shadow_masks/harv'))
     # import utils
     # IMG = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022/NEON_D13_MOAB_DP3_645000_4230000_reflectance.h5'

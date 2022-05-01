@@ -9,16 +9,18 @@ import numpy as np
 import utils
 import h5py
 import transforms as tr
+import torch.nn.functional as f
 import torchvision.transforms as tt
 from einops import rearrange
 import numpy.ma as ma
 import pickle
+from einops.layers.torch import Rearrange, Reduce
 #from torch_geometric.data import Data
 
 class MaskedDenseVitDataset(Dataset):
     def __init__(self, pca_folder, crop_size, eval=False, **kwargs):
         self.pca_folder = pca_folder
-        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 128
+        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 64
         self.mean = np.load(os.path.join(pca_folder, 'stats/mean.npy')).astype(np.float64)
         self.std = np.load(os.path.join(pca_folder, 'stats/std.npy')).astype(np.float64)
         self.norm = tt.Normalize(self.mean, self.std)
@@ -32,14 +34,18 @@ class MaskedDenseVitDataset(Dataset):
         self.rng = np.random.default_rng()
         self.crop_size = crop_size
 
-        self.random_crop = tt.RandomCrop(256)
+        self.random_crop = tt.RandomCrop(crop_size)
 
         self.transforms_1 = tt.Compose([tt.RandomHorizontalFlip(),
                                     tt.RandomVerticalFlip()])
-        self.transforms_2 = tt.Compose([
-                                    tr.RandomPointMaskEven(),
-                                    tr.RandomRectangleMaskEven()])
+        # self.transforms_2 = tt.Compose([
+        #                             tr.RandomPointMaskEven(),
+        #                             tr.RandomRectangleMaskEven()])
 
+        self.blit = tr.Blit()
+        self.block = tr.Block()
+        self.make_linear = Rearrange('b c h w -> b (h w) c')
+        self.make_2d = Rearrange('b (h w) c -> b c h w', h=self.crop_size, w = self.crop_size)
         
 
     def check_files(self):
@@ -49,7 +55,7 @@ class MaskedDenseVitDataset(Dataset):
             img = rearrange(img, 'h w c -> (h w) c')
             img = ma.masked_invalid(img)
             img = ma.compress_rows(img)
-            if img.shape[0] < 256*64:
+            if img.shape[0] < 800*800:
                 to_remove.append(file)
         self.files = list(set(self.files) - set(to_remove))
         with open(os.path.join(self.pca_folder, 'stats/good_files.pkl'), 'wb') as f:
@@ -62,23 +68,31 @@ class MaskedDenseVitDataset(Dataset):
 
     def __getitem__(self, index):
         img = np.load(self.files[index]).astype(np.float32)
-        img = torch.from_numpy(img)
-        img = rearrange(img, 'h w c -> c h w')
+        img = torch.from_numpy(img).unsqueeze(0)
+        img = f.interpolate(img, size=(1024,1024))
+        img = img.squeeze()
+        #img = rearrange(img, 'h w c -> c h w')
 
-        img = self.random_crop(img)
+        #img = self.random_crop(img)
         mask = img != img
         #Set nans to 0
         img[mask] = 0
         img = self.norm(img)
         #Reset them to 0 as they will be 'normalized' now
         img[mask] = 0
-        # img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
-        # mask = rearrange(mask, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+        img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+        mask = rearrange(mask, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+        random_select = self.rng.choice(range(0, img.shape[0]), size=self.batch_size, replace=False)
+        img = img[random_select]
+        mask = mask[random_select]
 
 
         to_return = {}
         to_return["base"] = self.transforms_1(img)
-        to_return["augment"] = self.transforms_2(to_return["base"])
+        augment = self.make_linear(img)
+        augment = self.blit(self.block(augment))
+        augment = self.make_2d(augment)
+        to_return['augment'] = augment
         to_return["mask"] = mask
         #to_return["full"] = full
 
@@ -121,7 +135,7 @@ class MaskedVitDataset(Dataset):
     def __getitem__(self, index):
         img = np.load(self.files[index]).astype(np.float32)
         img = torch.from_numpy(img)
-        img = rearrange(img, 'h w c -> c h w')
+        #img = rearrange(img, 'h w c -> c h w')
         mask = img != img
         #Set nans to 0
         img[mask] = 0

@@ -7,12 +7,12 @@ import inference
 
 
 if __name__ == "__main__":
-    pca_fold = '/data/shared/src/aalbanese/datasets/hs/pca/harv_masked_2022'
+    pca_fold = '/data/shared/src/aalbanese/datasets/hs/pca/harv_2022'
     #h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
     h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022"
     checkpoint_callback = ModelCheckpoint(
         dirpath='ckpts', 
-        filename='harv_sim_siam_masked_patched_vit_dense_{epoch}',
+        filename='harv_sim_siam_dense_no_class_no_pos_{epoch}',
         every_n_epochs=1,
         save_on_train_epoch_end=True,
         save_top_k = -1
@@ -30,9 +30,9 @@ if __name__ == "__main__":
     # trainer = pl.Trainer(accelerator="cpu", max_epochs=10, callbacks=[checkpoint_callback])
     # trainer.fit(model, train_loader)
 
-    dataset = MaskedDenseVitDataset(pca_fold, 8, eval=False)
+    dataset = MaskedDenseVitDataset(pca_fold, 64, eval=False, batch_size=32)
     train_loader = DataLoader(dataset, batch_size=1, num_workers=1)
-    model = models.MaskedVitSiam(30)
+    model = models.MaskedVitSiam(30, img_size=64, patch_size=4) #.load_from_checkpoint('ckpts/harv_sim_siam_masked_patched_vit_dense_vizepoch=2-v1.ckpt', num_channels=30, img_size=64, patch_size=4)
 
     trainer = pl.Trainer(accelerator="cpu", max_epochs=10, callbacks=[checkpoint_callback])
     trainer.fit(model, train_loader)

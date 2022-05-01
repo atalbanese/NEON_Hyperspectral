@@ -166,6 +166,28 @@ class BYOLLinear(nn.Module):
         return self.layer1(x)
 
 
+
+class ResnetPatchEmbed(nn.Module):
+    def __init__(self, in_channels: int = 30, patch_size: int = 5, emb_size: int = 750, img_size=25):
+        super(ResnetPatchEmbed, self).__init__()
+        self.layer1 = net_gen.ResnetGenerator(in_channels, emb_size//(patch_size**2), n_blocks=3)
+        self.rearrange = Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size)
+
+        #self.cls_token = nn.Parameter(torch.randn(1,1, emb_size))
+        #self.positions = nn.Parameter(torch.randn((img_size // patch_size) **2 + 1, emb_size))
+
+    def forward(self, x):
+        #b, _, _, _ = x.shape
+        x = self.layer1(x)
+        x= self.rearrange(x)
+        #cls_tokens = repeat(self.cls_token, '() n e -> b n e', b=b)
+        # prepend the cls token to the input
+        #x = torch.cat([cls_tokens, x], dim=1)
+        # add position embedding
+        #x += self.positions
+        return x
+
+
 class LinearPatchEmbed(nn.Module):
     def __init__(self, in_channels: int = 30, patch_size: int = 5, emb_size: int = 750, img_size=25):
         super(LinearPatchEmbed, self).__init__()
@@ -194,6 +216,7 @@ class RCU(nn.Module):
     def __init__(self, num_channels=256):
         super(RCU, self).__init__()
         self.layer1 = nn.Sequential(nn.ReLU(),
+                                    nn.BatchNorm2d(num_channels),
                                     nn.Conv2d(num_channels, num_channels, kernel_size=3, stride=1, padding=1),
                                     nn.ReLU(),
                                     nn.Conv2d(num_channels, num_channels, kernel_size=3, stride=1, padding=1))
@@ -207,6 +230,7 @@ class Fusion(nn.Module):
         self.RCU1 = RCU(num_channels=num_channels)
         self.RCU2 = RCU(num_channels=num_channels)
         self.up = nn.Upsample(scale_factor=2, mode='bilinear')
+        #self.pool = ChainedPool(num_channels=num_channels)
         self.project = RCU(num_channels=num_channels)
 
     def forward(self, x, z=None):
@@ -215,6 +239,7 @@ class Fusion(nn.Module):
             x = x+z
         x = self.RCU2(x)
         x = self.up(x)
+        #x = self.pool(x)
         x = self.project(x)
         return x
 
@@ -222,13 +247,22 @@ class ChainedPool(nn.Module):
     def __init__(self, num_channels=256):
         super(ChainedPool, self).__init__()
         self.layer1 = nn.ReLU()
-        self.pool1 = nn.MaxPool2d(kernel_size=5)
-        self.conv1 = nn.Conv2d(num_channels, num_channels, kernel_size=3)
+        self.pool1 = nn.Sequential(nn.MaxPool2d(kernel_size=5, stride=1, padding=2),
+                                    nn.Conv2d(num_channels, num_channels, kernel_size=3, padding=1))
+        self.pool2 = nn.Sequential(nn.MaxPool2d(kernel_size=5, stride=1, padding=2),
+                                    nn.Conv2d(num_channels, num_channels, kernel_size=3, padding=1))
+        self.pool3 = nn.Sequential(nn.MaxPool2d(kernel_size=5, stride=1, padding=2),
+                                    nn.Conv2d(num_channels, num_channels, kernel_size=3, padding=1))
+
 
     def forward(self, x):
         x = self.layer1(x)
-        x = self.pool1(x)
-        x = self.conv1(x)
+        z = self.pool1(x)
+        x = x + z
+        z = self.pool2(z)
+        x = x + z
+        z = self.pool3(z)
+        x = x + z
 
         return x
 
@@ -278,14 +312,19 @@ class VitProject(nn.Module):
 class DenseVitPredict(nn.Module):
     def __init__(self, num_classes):
         super(DenseVitPredict, self).__init__()
-        self.layer1 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1),
-                                    nn.InstanceNorm2d(num_classes),
+        self.layer1 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False),
+                                    nn.BatchNorm2d(num_classes),
                                     nn.ReLU())
-        self.layer2 = nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False)
+        self.layer2 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False),
+                                    nn.BatchNorm2d(num_classes),
+                                    nn.ReLU())
+        self.layer3 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False),
+                                    nn.BatchNorm2d(num_classes, affine=False))
 
     def forward(self, x):
         x = self.layer1(x)
         x = self.layer2(x)
+        x = self.layer3(x)
 
         return x
 
@@ -551,8 +590,8 @@ class C_Dec(nn.Module):
 
 
 if __name__ == "__main__":
-    s = LinearPatchEmbed()
-    p = torch.ones(50, 30, 25, 25)
+    s = ChainedPool()
+    p = torch.ones(1, 256, 64, 64)
     q = s(p)
     print(q.shape)
 

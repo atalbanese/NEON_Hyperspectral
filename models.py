@@ -1,3 +1,4 @@
+from requests import patch
 import networks
 import net_gen
 import torch
@@ -40,45 +41,73 @@ class MaskedVitSiam(pl.LightningModule):
 
         self.up = nn.UpsamplingBilinear2d(scale_factor=2)
 
-        self.embed = networks.LinearPatchEmbed(in_channels=num_channels, patch_size=patch_size, emb_size=emb_size, img_size=img_size)
+        #self.embed = networks.LinearPatchEmbed(in_channels=num_channels, patch_size=patch_size, emb_size=emb_size, img_size=img_size)
+        self.embed = networks.ResnetPatchEmbed(in_channels=num_channels, patch_size=patch_size, emb_size=emb_size, img_size=img_size)
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=8, dim_feedforward=1024, batch_first=True)
-        self.t_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=12)
-        self.map = networks.MapToken(emb_size=emb_size, patches=img_size**2//(patch_size**2))
+        self.t_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
+        #self.map = networks.MapToken(emb_size=emb_size, patches=img_size**2//(patch_size**2))
         #self.proj = networks.VitProject(output_classes, emb_size=emb_size)
         #Might want to use Group or Layer Norm
+        # self.resample32 = nn.Sequential(nn.Conv2d(emb_size, output_classes, kernel_size=1),
+        #                                 nn.BatchNorm2d(output_classes),
+        #                                 nn.ReLU(),
+        #                                 nn.Conv2d(output_classes, output_classes, kernel_size=3, stride=4))
+
+        # self.resample16 = nn.Sequential(nn.Conv2d(emb_size, output_classes, kernel_size=1),
+        #                                 nn.BatchNorm2d(output_classes),
+        #                                 nn.ReLU(),
+        #                                 nn.Conv2d(output_classes, output_classes, kernel_size=3, stride=2, padding=1))
+        # self.resample8 = nn.Sequential(nn.Conv2d(emb_size, output_classes, kernel_size=1),
+        #                                 nn.BatchNorm2d(output_classes),
+        #                                 nn.ReLU(),
+        #                                 nn.Conv2d(output_classes, output_classes, kernel_size=3, stride=1, padding=1))
+        # self.resample4 = nn.Sequential(nn.Conv2d(emb_size, output_classes, kernel_size=1),
+        #                                nn.BatchNorm2d(output_classes),
+        #                                 nn.ReLU(),
+        #                                 nn.ConvTranspose2d(output_classes, output_classes, kernel_size=3, stride=2, padding=1),
+        #                                 #nn.Upsample((img_size//4,img_size//4))
+        #                                 )
+
         self.resample32 = nn.Sequential(nn.Conv2d(emb_size, output_classes, kernel_size=1),
-                                        nn.InstanceNorm2d(output_classes),
+                                        nn.BatchNorm2d(output_classes),
                                         nn.ReLU(),
-                                        nn.Conv2d(output_classes, output_classes, kernel_size=3, stride=4))
+                                        nn.Conv2d(output_classes, output_classes, kernel_size=3, stride=8),
+                                        )
 
         self.resample16 = nn.Sequential(nn.Conv2d(emb_size, output_classes, kernel_size=1),
-                                        nn.InstanceNorm2d(output_classes),
+                                        nn.BatchNorm2d(output_classes),
+                                        nn.ReLU(),
+                                        nn.Conv2d(output_classes, output_classes, kernel_size=3, stride=4, padding=1))
+        self.resample8 = nn.Sequential(nn.Conv2d(emb_size, output_classes, kernel_size=1),
+                                        nn.BatchNorm2d(output_classes),
                                         nn.ReLU(),
                                         nn.Conv2d(output_classes, output_classes, kernel_size=3, stride=2, padding=1))
-        self.resample8 = nn.Sequential(nn.Conv2d(emb_size, output_classes, kernel_size=1),
-                                        nn.InstanceNorm2d(output_classes),
-                                        nn.ReLU(),
-                                        nn.Conv2d(output_classes, output_classes, kernel_size=3, stride=1, padding=1))
         self.resample4 = nn.Sequential(nn.Conv2d(emb_size, output_classes, kernel_size=1),
-                                        nn.InstanceNorm2d(output_classes),
+                                       nn.BatchNorm2d(output_classes),
                                         nn.ReLU(),
-                                        nn.ConvTranspose2d(output_classes, output_classes, kernel_size=3, stride=2, padding=1),
-                                        nn.Upsample((64,64)))
+                                        nn.Conv2d(output_classes, output_classes, kernel_size=3, stride=1, padding=1),
+                                        #nn.Upsample((img_size//4,img_size//4))
+                                        )
+
         self.resamplers = [self.resample4, self.resample8, self.resample16, self.resample32]
 
-        self.fusion32 = networks.Fusion(num_channels=output_classes)
-        self.fusion16 = networks.Fusion(num_channels=output_classes)
-        self.fusion8 = networks.Fusion(num_channels=output_classes)
-        self.fusion4 = networks.Fusion(num_channels=output_classes)
+        # self.fusion32 = networks.Fusion(num_channels=output_classes)
+        # self.fusion16 = networks.Fusion(num_channels=output_classes)
+        # self.fusion8 = networks.Fusion(num_channels=output_classes)
+        # self.fusion4 = networks.Fusion(num_channels=output_classes)
+
+        self.fusion = networks.Fusion(num_channels=output_classes)
 
         self.pred = networks.DenseVitPredict(output_classes)
 
         self.softmax = nn.Softmax(dim=1)
+        self.logmax = nn.LogSoftmax(dim=1)
         self.loss = networks.VitSiamLoss()
+        #self.loss = nn.CrossEntropyLoss()
         self.features = {}
         
-        self.get_layers = [2, 5, 8, 11]
+        self.get_layers = [0,1,2,3]
         self.register_hooks()
 
     def register_hooks(self):
@@ -94,23 +123,32 @@ class MaskedVitSiam(pl.LightningModule):
     def reassamble_layers(self):
         for ix, layer in enumerate(self.get_layers):
             feature = self.features[layer]
-            feature = self.map(feature)
+            #feature = self.map(feature)
             feature = self.depatch(feature)
             feature = self.resamplers[ix](feature)
             self.features[layer] = feature
 
+    # def fuse_layers(self):
+    #     a = self.fusion32(self.features[11])
+    #     b = self.fusion16(self.features[8], z=a)
+    #     c = self.fusion8(self.features[5], z=b)
+    #     d = self.fusion4(self.features[2], z=c)
+    #     return d
+
     def fuse_layers(self):
-        a = self.fusion32(self.features[11])
-        b = self.fusion16(self.features[8], z=a)
-        c = self.fusion8(self.features[5], z=b)
-        d = self.fusion4(self.features[2], z=c)
+        a = self.fusion(self.features[self.get_layers[3]])
+        b = self.fusion(self.features[self.get_layers[2]], z=a)
+        c = self.fusion(self.features[self.get_layers[1]], z=b)
+        d = self.fusion(self.features[self.get_layers[0]], z=c)
         return d
+
+    
 
             
 
     def training_step(self, x):
         #Mask is True where NANs existed before so we want to invert it
-        inp, inp_aug, mask = x['base'], x['augment'], ~x['mask']
+        inp, inp_aug, mask = x['base'].squeeze(0), x['augment'].squeeze(0), ~x['mask'].squeeze(0)
         mask = mask[:,0,:,:]
         mask = mask.unsqueeze(dim=1)
 
@@ -125,15 +163,49 @@ class MaskedVitSiam(pl.LightningModule):
         z_1 = self.fuse_layers()
         z_1 = self.up(z_1)
 
+        # e_1 = self.map(e_1)
+        e_1 = self.depatch(e_1)
+        e_1 = self.up(e_1)
+        e_1 = self.up(e_1)
+        e_1 = e_1.detach()
+        e_1 = e_1[0]
+
+        to_viz = torch.argmax(e_1, dim=0)
+        save_grid(self.logger.experiment, to_viz, 'embed', self.current_epoch)
+
+        # e_1 = self.resample4(e_1)
+        # e_1 = self.fusion(e_1)
+        # e_1 = self.fusion(e_1)
+
+        
+        # z_1 = z_1 + e_1
+
 
         self.t_enc(e_2)
         self.reassamble_layers()
         z_2 = self.fuse_layers()
         z_2 = self.up(z_2)
 
+        # e_2 = self.map(e_2)
+        # e_2 = self.depatch(e_2)
+        # e_2 = self.resample4(e_2)
+        # e_2 = self.fusion(e_2)
+        # e_2 = self.fusion(e_2)
+
+        # z_2 = z_2 + e_2
+
 
         p_1 = self.pred(z_1)
         p_2 = self.pred(z_2)
+
+        inp = inp.detach()
+        inp = inp[0]
+        inp = inp[0:3]
+        self.logger.experiment.add_image('input', inp, self.current_epoch, dataformats='CHW')
+
+        to_viz = z_1.detach()[0]
+        to_viz = torch.argmax(to_viz, dim=0)
+        save_grid(self.logger.experiment, to_viz, 'projected', self.current_epoch)
 
         to_viz = p_1.detach()[0]
         to_viz = torch.argmax(to_viz, dim=0)
@@ -144,14 +216,15 @@ class MaskedVitSiam(pl.LightningModule):
         # p_1 = self.softmax(p_1)
         # p_2 = self.softmax(p_2)
 
-        # z_1 = self.softmax(z_1)
-        # z_2 = self.softmax(z_2)
+        # z_1 = self.logmax(z_1)
+        # z_2 = self.logmax(z_2)
 
-        loss = (self.loss(p_1[mask], z_2[mask]) + self.loss(p_2[mask], z_1[mask])) *0.5
+        #loss = (self.loss(p_1[mask], z_2[mask]) + self.loss(p_2[mask], z_1[mask])) *0.5
+        loss = (self.loss(p_1, z_2) + self.loss(p_2, z_1)) *0.5
 
-        self.log('train_loss', loss/256)
+        self.log('train_loss', loss)
 
-        return loss/256
+        return loss/32
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=5e-5)
