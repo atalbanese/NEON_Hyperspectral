@@ -2,17 +2,17 @@ from dataloaders import HyperDataset, PreProcDataset, MaskedDataset, MaskedVitDa
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 import models
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, StochasticWeightAveraging
 import inference
 
 
 if __name__ == "__main__":
-    pca_fold = '/data/shared/src/aalbanese/datasets/hs/pca/harv_2022'
+    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022'
     #h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
     h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022"
     checkpoint_callback = ModelCheckpoint(
         dirpath='ckpts', 
-        filename='harv_sim_siam_dense_no_class_no_pos_{epoch}',
+        filename='harv_sim_siam_patched_{epoch}',
         every_n_epochs=1,
         save_on_train_epoch_end=True,
         save_top_k = -1
@@ -30,11 +30,11 @@ if __name__ == "__main__":
     # trainer = pl.Trainer(accelerator="cpu", max_epochs=10, callbacks=[checkpoint_callback])
     # trainer.fit(model, train_loader)
 
-    dataset = MaskedDenseVitDataset(pca_fold, 64, eval=False, batch_size=32)
-    train_loader = DataLoader(dataset, batch_size=1, num_workers=1)
-    model = models.MaskedVitSiam(30, img_size=64, patch_size=4) #.load_from_checkpoint('ckpts/harv_sim_siam_masked_patched_vit_dense_vizepoch=2-v1.ckpt', num_channels=30, img_size=64, patch_size=4)
+    dataset = MaskedDenseVitDataset(pca_fold, 64, eval=False, batch_size=8)
+    train_loader = DataLoader(dataset, batch_size=1, num_workers=4)
+    model = models.PatchedSimSiam(30, img_size=64, patch_size=4) #.load_from_checkpoint('ckpts/harv_sim_siam_masked_patched_vit_dense_vizepoch=2-v1.ckpt', num_channels=30, img_size=64, patch_size=4)
 
-    trainer = pl.Trainer(accelerator="cpu", max_epochs=10, callbacks=[checkpoint_callback])
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=10, callbacks=[checkpoint_callback, StochasticWeightAveraging(swa_lrs=1e-2)], accumulate_grad_batches=8)
     trainer.fit(model, train_loader)
 
     

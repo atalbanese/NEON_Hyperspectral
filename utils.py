@@ -1,7 +1,8 @@
+from multiprocessing.sharedctypes import Value
 import h5_helper as hp
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, IncrementalPCA
 from sklearn.neighbors import kneighbors_graph
 from sklearn import cluster
 import os
@@ -15,6 +16,7 @@ from einops import rearrange
 from skimage.color import rgb2hsv
 from skimage import exposure
 import numpy.ma as ma
+import random 
 
 def get_features(inp, feature_band=2):
     return np.reshape(inp, (-1,inp.shape[feature_band]))
@@ -200,19 +202,23 @@ def do_pca(args):
 
 def img_stats(dir, out_dir, num_channels=30):
     files = os.listdir(dir)
-    psum = np.zeros((num_channels,), dtype=np.float128) 
-    sq = np.zeros((num_channels,), dtype=np.float128) 
+    psum = np.zeros((num_channels,), dtype=np.float64) 
+    sq = np.zeros((num_channels,), dtype=np.float64) 
     num_files = 0
     count= 0
     for file in tqdm(files):
         if ".npy" in file:
             num_files += 1
-            img = np.load(os.path.join(dir, file))
-            img = rearrange(img, 'h w c -> c (h w)')
-            sum = np.nansum(img, axis=1)
-            psum += sum
-            sq += np.nansum((img**2), axis=1)
-            count+= np.count_nonzero(~np.isnan(img))
+            try:
+                img = np.load(os.path.join(dir, file))
+                img = rearrange(img, 'h w c -> c (h w)')
+                sum = np.nansum(img, axis=1)
+                psum += sum
+                sq += np.nansum((img**2), axis=1)
+                count+= np.count_nonzero(~np.isnan(img))
+            except ValueError as e:
+                print(e)
+                continue
     #count = num_files *1000 * 1000
     total_mean = psum/count
     total_var = (sq/count) - (total_mean**2)
@@ -291,6 +297,41 @@ def masked_pca(args):
 
             return pca_file
 
+def build_inc_pca(args):
+    file, in_dir, pca_solver = args
+    if ".h5" in file:
+        img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"]
+
+        img = rearrange(img, 'h w c -> (h w) c')
+        masked = ma.masked_invalid(img)
+        mask = masked.mask[:, 0:30]
+        to_pca = ma.compress_rows(masked)
+        pca_solver.partial_fit(to_pca)
+
+
+    return pca_solver
+
+def do_inc_pca(args):
+    file, in_dir, out_dir, pca_solver = args
+    if ".h5" in file:
+        pca_file = file.split(".")[0] + '_pca.npy'
+        if not os.path.exists(os.path.join(out_dir, pca_file)):
+            img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"]
+            #bare_mask = np.load(os.path.join(mask_dir, bare_file))
+            img = rearrange(img, 'h w c -> (h w) c')
+            masked = ma.masked_invalid(img)
+            mask = masked.mask[:, 0:30]
+            to_pca = ma.compress_rows(masked)
+            data = pca_solver.transform(to_pca)
+            out = np.empty(mask.shape, dtype=np.float64)
+            np.place(out, mask, np.nan)
+            np.place(out, ~mask, data)
+            out = rearrange(out, '(h w) c -> h w c', h=1000, w=1000)
+            np.save(os.path.join(out_dir, pca_file), out)
+
+            return pca_file
+
+
 
 
 
@@ -329,17 +370,30 @@ if __name__ == '__main__':
     #     OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/masks/HARV'
     #     bulk_process(pool, IN_DIR, OUT_DIR, get_masks)
 
-    IN_DIR = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022'
+    IN_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
     MASK_DIR = '/data/shared/src/aalbanese/datasets/hs/masks/HARV'
     BANDS = get_shadow_bands()
 
     IMG = 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5'
 
-    OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/viz_nir/harv_2022'
+    OUT_DIR = 'W:/Classes/Research/datasets/hs/pca/harv_2022'
+
+    PCA_SOLVER = IncrementalPCA(n_components=30)
+
+    # for f in tqdm(random.sample(os.listdir(IN_DIR), 40)):
+    #     PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
+
+    # # print(PCA_SOLVER.mean_)
+    # # print(PCA_SOLVER.var_)
+
+    # with ProcessPool(4) as pool:
+    #     bulk_process(pool, [IN_DIR, OUT_DIR, PCA_SOLVER], do_inc_pca)
+
+
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, OUT_DIR, BANDS], save_bands)
 
-    img_stats(OUT_DIR, '/data/shared/src/aalbanese/datasets/hs/viz_nir/harv_2022/stats', num_channels=4)
+    img_stats(OUT_DIR, 'W:/Classes/Research/datasets/hs/pca/harv_2022/stats', num_channels=30)
 
 
     #get_bareness_mask((IMG, '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022', '/data/shared/src/aalbanese/datasets/hs/shadow_masks/harv'))

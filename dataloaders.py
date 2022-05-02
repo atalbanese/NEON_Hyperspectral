@@ -21,9 +21,9 @@ class MaskedDenseVitDataset(Dataset):
     def __init__(self, pca_folder, crop_size, eval=False, **kwargs):
         self.pca_folder = pca_folder
         self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 64
-        self.mean = np.load(os.path.join(pca_folder, 'stats/mean.npy')).astype(np.float64)
-        self.std = np.load(os.path.join(pca_folder, 'stats/std.npy')).astype(np.float64)
-        self.norm = tt.Normalize(self.mean, self.std)
+        # self.mean = np.load(os.path.join(pca_folder, 'stats/mean.npy')).astype(np.float64)
+        # self.std = np.load(os.path.join(pca_folder, 'stats/std.npy')).astype(np.float64)
+        # self.norm = tt.Normalize(self.mean, self.std)
         if os.path.exists(os.path.join(self.pca_folder, 'stats/good_files.pkl')):
             with open(os.path.join(self.pca_folder, 'stats/good_files.pkl'), 'rb') as f:
                 self.files = pickle.load(f)
@@ -51,8 +51,11 @@ class MaskedDenseVitDataset(Dataset):
     def check_files(self):
         to_remove = []
         for file in self.files:
-            img = np.load(file)
-            img = rearrange(img, 'h w c -> (h w) c')
+            try:
+                img = np.load(file)
+                img = rearrange(img, 'h w c -> (h w) c')
+            except ValueError as e:
+                to_remove.append(file)
             img = ma.masked_invalid(img)
             img = ma.compress_rows(img)
             if img.shape[0] < 800*800:
@@ -68,16 +71,17 @@ class MaskedDenseVitDataset(Dataset):
 
     def __getitem__(self, index):
         img = np.load(self.files[index]).astype(np.float32)
+        img = rearrange(img, 'h w c -> c h w')
         img = torch.from_numpy(img).unsqueeze(0)
         img = f.interpolate(img, size=(1024,1024))
         img = img.squeeze()
-        #img = rearrange(img, 'h w c -> c h w')
+        
 
         #img = self.random_crop(img)
         mask = img != img
         #Set nans to 0
         img[mask] = 0
-        img = self.norm(img)
+        #img = self.norm(img)
         #Reset them to 0 as they will be 'normalized' now
         img[mask] = 0
         img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)

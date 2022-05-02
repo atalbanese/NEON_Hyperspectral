@@ -8,7 +8,7 @@ import pytorch_lightning as pl
 import torchvision as tv
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
-import cv2 as cv
+#import cv2 as cv
 import numpy.ma as ma
 import numpy as np
 
@@ -27,7 +27,107 @@ def get_classifications(x):
 
 
 
+class PatchedSimSiam(pl.LightningModule):
+    def __init__(self, num_channels, batch_size = 512, emb_size=1024, img_size=256, patch_size=8, output_classes=256):
+        super().__init__()
+        self.batch_size = batch_size
+        self.img_size = img_size
+        self.output_classes = output_classes
+        self.patch_size = patch_size
+        self.num_patches = self.img_size//self.patch_size
+
+        self.up = nn.UpsamplingBilinear2d(scale_factor=2)
+
+        self.embed = networks.LinearPatchEmbed(in_channels=num_channels, patch_size=patch_size, emb_size=emb_size, img_size=img_size)
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=8, dim_feedforward=1024, batch_first=True)
+        self.t_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
+        self.map = networks.MapToken(emb_size=emb_size, patches=img_size**2//(patch_size**2))
+       
+        self.proj = networks.DenseProjectorMLP(num_channels=emb_size)
+        #self.fusion = networks.Fusion(num_channels=output_classes)
+
+        self.pred = networks.DenseVitPredict(output_classes)
+
+        self.softmax = nn.Softmax(dim=1)
+        self.logmax = nn.LogSoftmax(dim=1)
+        self.loss = networks.VitSiamLoss()
+ 
+
+            
+    def training_step(self, x):
+        #Mask is True where NANs existed before so we want to invert it
+        inp, inp_aug, mask = x['base'].squeeze(0), x['augment'].squeeze(0), ~x['mask'].squeeze(0)
+        mask = mask[:,0,:,:]
+        mask = mask.unsqueeze(dim=1)
+
+        mask = repeat(mask, 'b c h w -> b (repeat c) h w', repeat=self.output_classes)
+
+        e_1 = self.embed(inp)
+
+        e_2 = self.embed(inp_aug)
+
+        z_1 = self.t_enc(e_1)
+        z_1 = self.map(z_1)
+        z_1 = self.proj(z_1)
+        z_1 = self.depatch(z_1)
+        z_1 = self.up(z_1)
+        z_1 = self.up(z_1)
+
+        z_2 = self.t_enc(e_2)
+        z_2 = self.map(z_2)
+        z_2 = self.proj(z_2)
+        z_2 = self.depatch(z_2)
+        z_2 = self.up(z_2)
+        z_2 = self.up(z_2)
+
+
+        p_1 = self.pred(z_1)
+        p_2 = self.pred(z_2)
+
+        # inp = inp.detach()
+        # inp = inp[0]
+        # inp = inp[0:3]
+        # self.logger.experiment.add_image('input', inp, self.current_epoch, dataformats='CHW')
+
+        # to_viz = z_1.detach()[0]
+        # to_viz = self.up(to_viz.unsqueeze(0)).squeeze(0)
+        # to_viz = torch.argmax(to_viz, dim=0)
+        # save_grid(self.logger.experiment, to_viz, 'projected', self.current_epoch)
+
+        # to_viz = p_1.detach()[0]
+        # to_viz = self.up(to_viz.unsqueeze(0)).squeeze(0)
+        # to_viz = torch.argmax(to_viz, dim=0)
+        # save_grid(self.logger.experiment, to_viz, 'predicted', self.current_epoch)
+
+        z_1, z_2, = z_1.detach(), z_2.detach()
+
+        loss = (self.loss(p_1[mask], z_2[mask]) + self.loss(p_2[mask], z_1[mask])) *0.5
+
+        self.log('train_loss', loss)
+
+        return loss/8
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=5e-5)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+
+    def depatch(self, x):
+        x = rearrange(x, 'b (h w) c -> b c h w', h=self.num_patches, w=self.num_patches)
+        #x = f.interpolate(x, scale_factor=2)
+        return x
+
+    def forward(self, x):
+        x = self.embed(x)
+        x = self.t_enc(x)
+        x = self.map(x)
+        x = self.depatch(x)
+        x = self.proj(x)
+        x = self.pred(x)
+        x = torch.argmax(x, dim=1)
+        return x
         
+
 
 
 class MaskedVitSiam(pl.LightningModule):
@@ -41,12 +141,12 @@ class MaskedVitSiam(pl.LightningModule):
 
         self.up = nn.UpsamplingBilinear2d(scale_factor=2)
 
-        #self.embed = networks.LinearPatchEmbed(in_channels=num_channels, patch_size=patch_size, emb_size=emb_size, img_size=img_size)
-        self.embed = networks.ResnetPatchEmbed(in_channels=num_channels, patch_size=patch_size, emb_size=emb_size, img_size=img_size)
+        self.embed = networks.LinearPatchEmbed(in_channels=num_channels, patch_size=patch_size, emb_size=emb_size, img_size=img_size)
+        #self.embed = networks.ResnetPatchEmbed(in_channels=num_channels, patch_size=patch_size, emb_size=emb_size, img_size=img_size)
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=8, dim_feedforward=1024, batch_first=True)
         self.t_enc = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
-        #self.map = networks.MapToken(emb_size=emb_size, patches=img_size**2//(patch_size**2))
+        self.map = networks.MapToken(emb_size=emb_size, patches=img_size**2//(patch_size**2))
         #self.proj = networks.VitProject(output_classes, emb_size=emb_size)
         #Might want to use Group or Layer Norm
         # self.resample32 = nn.Sequential(nn.Conv2d(emb_size, output_classes, kernel_size=1),
@@ -123,7 +223,7 @@ class MaskedVitSiam(pl.LightningModule):
     def reassamble_layers(self):
         for ix, layer in enumerate(self.get_layers):
             feature = self.features[layer]
-            #feature = self.map(feature)
+            feature = self.map(feature)
             feature = self.depatch(feature)
             feature = self.resamplers[ix](feature)
             self.features[layer] = feature
@@ -164,14 +264,14 @@ class MaskedVitSiam(pl.LightningModule):
         z_1 = self.up(z_1)
 
         # e_1 = self.map(e_1)
-        e_1 = self.depatch(e_1)
-        e_1 = self.up(e_1)
-        e_1 = self.up(e_1)
-        e_1 = e_1.detach()
-        e_1 = e_1[0]
+        # e_1 = self.depatch(e_1)
+        # e_1 = self.up(e_1)
+        # e_1 = self.up(e_1)
+        # e_1 = e_1.detach()
+        # e_1 = e_1[0]
 
-        to_viz = torch.argmax(e_1, dim=0)
-        save_grid(self.logger.experiment, to_viz, 'embed', self.current_epoch)
+        # to_viz = torch.argmax(e_1, dim=0)
+        # save_grid(self.logger.experiment, to_viz, 'embed', self.current_epoch)
 
         # e_1 = self.resample4(e_1)
         # e_1 = self.fusion(e_1)
@@ -224,7 +324,7 @@ class MaskedVitSiam(pl.LightningModule):
 
         self.log('train_loss', loss)
 
-        return loss/32
+        return loss/8
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=5e-5)

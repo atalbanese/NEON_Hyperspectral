@@ -120,14 +120,14 @@ class DensePredictor(nn.Module):
 class DenseProjectorMLP(nn.Module):
     def __init__(self, num_channels=512):
         super(DenseProjectorMLP, self).__init__()
-        self.layer1 = nn.Sequential(nn.Linear(729, 512, bias=False),
-                                    nn.BatchNorm1d(20),
+        self.layer1 = nn.Sequential(nn.Linear(num_channels, num_channels//2),
+                                    nn.BatchNorm1d(256),
                                     nn.ReLU())
-        self.layer2 = nn.Sequential(nn.Linear(512, 512, bias=False),
-                                    nn.BatchNorm1d(20),
+        self.layer2 = nn.Sequential(nn.Linear(num_channels//2, num_channels//4),
+                                    nn.BatchNorm1d(256),
                                     nn.ReLU())
-        self.layer3 = nn.Sequential(nn.Linear(512, 512, bias=False),
-                                    nn.BatchNorm1d(20),
+        self.layer3 = nn.Sequential(nn.Linear(num_channels//4, num_channels//4),
+                                    nn.BatchNorm1d(256),
                                     nn.ReLU())
 
     def forward(self, x):
@@ -173,18 +173,18 @@ class ResnetPatchEmbed(nn.Module):
         self.layer1 = net_gen.ResnetGenerator(in_channels, emb_size//(patch_size**2), n_blocks=3)
         self.rearrange = Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size)
 
-        #self.cls_token = nn.Parameter(torch.randn(1,1, emb_size))
-        #self.positions = nn.Parameter(torch.randn((img_size // patch_size) **2 + 1, emb_size))
+        self.cls_token = nn.Parameter(torch.randn(1,1, emb_size))
+        self.positions = nn.Parameter(torch.randn((img_size // patch_size) **2 + 1, emb_size))
 
     def forward(self, x):
         #b, _, _, _ = x.shape
         x = self.layer1(x)
         x= self.rearrange(x)
-        #cls_tokens = repeat(self.cls_token, '() n e -> b n e', b=b)
+        cls_tokens = repeat(self.cls_token, '() n e -> b n e', b=b)
         # prepend the cls token to the input
-        #x = torch.cat([cls_tokens, x], dim=1)
+        x = torch.cat([cls_tokens, x], dim=1)
         # add position embedding
-        #x += self.positions
+        x += self.positions
         return x
 
 
@@ -198,7 +198,7 @@ class LinearPatchEmbed(nn.Module):
             nn.Linear(patch_size * patch_size * in_channels, emb_size)
         )
         self.cls_token = nn.Parameter(torch.randn(1,1, emb_size))
-        self.positions = nn.Parameter(torch.randn((img_size // patch_size) **2 + 1, emb_size))
+        #self.positions = nn.Parameter(torch.randn((img_size // patch_size) **2 + 1, emb_size))
 
                 
     def forward(self, x):
@@ -208,7 +208,7 @@ class LinearPatchEmbed(nn.Module):
         # prepend the cls token to the input
         x = torch.cat([cls_tokens, x], dim=1)
         # add position embedding
-        x += self.positions
+        #x += self.positions
         return x
 
 
@@ -312,10 +312,10 @@ class VitProject(nn.Module):
 class DenseVitPredict(nn.Module):
     def __init__(self, num_classes):
         super(DenseVitPredict, self).__init__()
-        self.layer1 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False),
+        self.layer1 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1),
                                     nn.BatchNorm2d(num_classes),
                                     nn.ReLU())
-        self.layer2 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False),
+        self.layer2 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1),
                                     nn.BatchNorm2d(num_classes),
                                     nn.ReLU())
         self.layer3 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False),
