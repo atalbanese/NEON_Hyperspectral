@@ -322,9 +322,9 @@ def show_file(f):
 if __name__ == "__main__":
     NUM_CLUSTERS = 60
     NUM_CHANNELS = 30
-    PCA_DIR= '/data/shared/src/aalbanese/datasets/hs/pca/harv_masked_2022'
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022'
     PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance_pca.npy')
-    IMG_DIR = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022'
+    IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
     IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
     SAVE_DIR = "validation/harv_transformer_fixed_augment"
@@ -332,7 +332,7 @@ if __name__ == "__main__":
     PLOT_FILE = '/data/shared/src/aalbanese/datasets/All_NEON_TOS_Plot_Centroids_V8.csv'
     CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
-    MODEL = inference.load_ckpt(models.MaskedVitSiam, 'ckpts/harv_sim_siam_masked_patched_vit_no_pos_epoch=0.ckpt', num_channels=NUM_CHANNELS)
+    MODEL = inference.load_ckpt(models.TransEmbedConvSimSiam, 'ckpts\harv_trans_embed_conv_sim_epoch=2.ckpt', num_channels=30, img_size=32, output_classes=20)
 
     MEAN = np.load(os.path.join(PCA_DIR, 'stats/mean.npy')).astype(np.float32)
     STD = np.load(os.path.join(PCA_DIR, 'stats/std.npy')).astype(np.float32)
@@ -346,11 +346,11 @@ if __name__ == "__main__":
     # test = np.load(PCA)
     # test = rearrange(test, 'c h w -> h w c')
     # test = test[:,:,2:5]
-    # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_viz_bands())
-    # rgb = hp.make_rgb(rgb["bands"])
-    # rgb = exposure.adjust_gamma(rgb, gamma=0.5)
-    # plt.imshow(rgb)
-    # plt.show()
+    rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_viz_bands())
+    rgb = hp.make_rgb(rgb["bands"])
+    rgb = exposure.adjust_gamma(rgb, gamma=0.5)
+    plt.imshow(rgb)
+    plt.show()
     plt.imshow(test)
     plt.show()
     print(test)

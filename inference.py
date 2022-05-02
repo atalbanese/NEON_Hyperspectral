@@ -4,6 +4,7 @@ import h5_helper as hp
 import utils as utils
 import matplotlib.pyplot as plt
 import numpy as np
+import torch.nn.functional as f
 import torch
 from einops import rearrange, reduce, repeat
 
@@ -35,22 +36,24 @@ def do_inference(model, file, reshape, pca, norm, **kwargs):
 def vit_inference(model, file, norm):
     model.eval()
     img = np.load(file)
+    img = img[:500,:500,...]
     img = torch.from_numpy(img).float()
     img = rearrange(img, 'h w c -> c h w')
+    img = f.interpolate(img.unsqueeze(0), size=(512, 512)).squeeze(0)
     mask = img != img
     #Set nans to 0
     img[mask] = 0
     img = norm(img)
     img[mask] = 0
 
-    img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=25, w=25, b1=40, b2=40)
-    mask = rearrange(mask, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=25, w=25,  b1=40, b2=40)
+    img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=32, w=32, b1=16, b2=16)
+    mask = rearrange(mask, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=32, w=32, b1=16, b2=16)
 
     img = model(img).detach()
 
     mask = mask[:,0,:,:]
     img[mask] = -1
-    img = rearrange(img, "(b1 b2) h w -> (b1 h) (b2 w)", h=25, w=25, b1=40, b2=40)
+    img = rearrange(img, "(b1 b2) h w -> (b1 h) (b2 w)",  h=32, w=32, b1=16, b2=16)
     img = img.numpy()
     return img
 

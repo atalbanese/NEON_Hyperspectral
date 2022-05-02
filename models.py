@@ -25,6 +25,115 @@ def get_classifications(x):
     return masks
 
 
+class TransEmbedConvSimSiam(pl.LightningModule):
+    def __init__(self, num_channels, batch_size = 512, emb_size=1024, img_size=256, output_classes=256):
+        super().__init__()
+        self.batch_size = batch_size
+        self.img_size = img_size
+        self.output_classes = output_classes
+
+        #self.up = nn.UpsamplingBilinear2d(scale_factor=2)
+        
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=num_channels, nhead=num_channels//5, dim_feedforward=num_channels*2, batch_first=True)
+        self.embed = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
+
+        self.flatten = Rearrange('b c h w -> b (h w) c')
+        self.unflatten = Rearrange('b (h w) c -> b c h w', h=self.img_size, w=self.img_size)
+
+        self.down_channel = nn.Sequential(nn.Linear(num_channels, num_channels//2),
+                                          nn.BatchNorm1d(img_size**2),
+                                          nn.ReLU(),
+                                          nn.Linear(num_channels//2, 3))
+        
+        self.encoder = net_gen.ResnetGenerator(3,3, norm_layer=nn.InstanceNorm2d, use_dropout=True, n_blocks=18)
+        
+       
+        self.proj = nn.Sequential(nn.Conv2d(3, 3, kernel_size=1),
+                                  nn.BatchNorm2d(3),
+                                  nn.ReLU(),
+                                  nn.Conv2d(3, 9, kernel_size=3, padding=1),
+                                  nn.BatchNorm2d(9),
+                                  nn.ReLU(),
+                                  nn.Conv2d(9, 20, kernel_size=3, padding=1))
+        #self.fusion = networks.Fusion(num_channels=output_classes)
+
+        self.pred = nn.Sequential(nn.Conv2d(20, 20, kernel_size=3, padding=1),
+                                  nn.BatchNorm2d(20, affine=False),
+                                  nn.ReLU(),
+                                  nn.Conv2d(20, 20, kernel_size=3, padding=1, bias=False))
+
+        self.softmax = nn.Softmax(dim=1)
+        self.logmax = nn.LogSoftmax(dim=1)
+        self.loss = networks.VitSiamLoss()
+ 
+
+            
+    def training_step(self, x):
+        #Mask is True where NANs existed before so we want to invert it
+        inp, inp_aug, mask = x['base'].squeeze(0), x['augment'].squeeze(0), ~x['mask'].squeeze(0)
+        mask = mask[:,0,:,:]
+        mask = mask.unsqueeze(dim=1)
+
+        mask = repeat(mask, 'b c h w -> b (repeat c) h w', repeat=self.output_classes)
+
+        z_1 = self.flatten(inp)
+        z_2 = self.flatten(inp_aug)
+        
+        z_1 = self.embed(z_1)
+        z_2 = self.embed(z_2)
+
+        z_1 = self.down_channel(z_1)
+        z_2 = self.down_channel(z_2)
+
+        z_1 = self.unflatten(z_1)
+        z_2 = self.unflatten(z_2)
+
+        z_1 = self.encoder(z_1)
+        z_2 = self.encoder(z_2)
+
+        z_1 = self.proj(z_1)
+        z_2 = self.proj(z_2)
+
+        p_1 = self.pred(z_1)
+        p_2 = self.pred(z_2)
+
+        
+
+
+        z_1, z_2, = z_1.detach(), z_2.detach()
+
+        loss = (self.loss(p_1[mask], z_2[mask]) + self.loss(p_2[mask], z_1[mask])) *0.5
+
+        self.log('train_loss', loss)
+
+        return loss/8
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=5e-5)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+
+    def depatch(self, x):
+        x = rearrange(x, 'b (h w) c -> b c h w', h=self.num_patches, w=self.num_patches)
+        #x = f.interpolate(x, scale_factor=2)
+        return x
+
+    def forward(self, x):
+        z_1 = self.flatten(x)
+       
+        z_1 = self.embed(z_1)
+       
+        z_1 = self.down_channel(z_1)
+   
+        z_1 = self.unflatten(z_1)
+
+        z_1 = self.encoder(z_1)
+ 
+        z_1 = self.proj(z_1)
+ 
+        p_1 = self.pred(z_1)
+        x = torch.argmax(x, dim=1)
+        return x
 
 
 class PatchedSimSiam(pl.LightningModule):
@@ -121,8 +230,11 @@ class PatchedSimSiam(pl.LightningModule):
         x = self.embed(x)
         x = self.t_enc(x)
         x = self.map(x)
-        x = self.depatch(x)
+        
         x = self.proj(x)
+        x = self.depatch(x)
+        x = self.up(x)
+        x = self.up(x)
         x = self.pred(x)
         x = torch.argmax(x, dim=1)
         return x

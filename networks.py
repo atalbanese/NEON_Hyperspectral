@@ -121,13 +121,13 @@ class DenseProjectorMLP(nn.Module):
     def __init__(self, num_channels=512):
         super(DenseProjectorMLP, self).__init__()
         self.layer1 = nn.Sequential(nn.Linear(num_channels, num_channels//2),
-                                    nn.BatchNorm1d(256),
+                                    nn.GroupNorm(16, 256),
                                     nn.ReLU())
         self.layer2 = nn.Sequential(nn.Linear(num_channels//2, num_channels//4),
-                                    nn.BatchNorm1d(256),
+                                    nn.GroupNorm(16, 256),
                                     nn.ReLU())
         self.layer3 = nn.Sequential(nn.Linear(num_channels//4, num_channels//4),
-                                    nn.BatchNorm1d(256),
+                                    nn.GroupNorm(16, 256),
                                     nn.ReLU())
 
     def forward(self, x):
@@ -273,7 +273,7 @@ class MapToken(nn.Module):
     def __init__(self, emb_size, patches=25):
         super(MapToken, self).__init__()
         self.layer1 = nn.Sequential(nn.Linear(emb_size * 2, emb_size),
-                                    nn.BatchNorm1d(patches),
+                                    nn.GroupNorm(8, patches),
                                     nn.ReLU(),
                                     nn.Linear(emb_size, emb_size))
 
@@ -313,13 +313,13 @@ class DenseVitPredict(nn.Module):
     def __init__(self, num_classes):
         super(DenseVitPredict, self).__init__()
         self.layer1 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1),
-                                    nn.BatchNorm2d(num_classes),
+                                    nn.GroupNorm(16, num_classes),
                                     nn.ReLU())
         self.layer2 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1),
-                                    nn.BatchNorm2d(num_classes),
+                                     nn.GroupNorm(16, num_classes),
                                     nn.ReLU())
         self.layer3 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False),
-                                    nn.BatchNorm2d(num_classes, affine=False))
+                                     nn.GroupNorm(16, num_classes, affine=False))
 
     def forward(self, x):
         x = self.layer1(x)
