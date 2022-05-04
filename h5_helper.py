@@ -6,23 +6,26 @@ from skimage import exposure
 import matplotlib.patches as mpatches
 
 
-
-
-
-
-
 #Finds index of nearest wavelength
 def find_nearest(dataset, search_val):
     diff_arr = np.absolute(dataset[:]-search_val)
     return diff_arr.argmin()
 
+def get_selection(data, spectral_bands, wavelengths):
+    select_bands = {band: find_nearest(spectral_bands, wavelength) for band, wavelength in wavelengths.items()}
+    band_data = {band: get_band(data, band_index, norm=False) for band, band_index in select_bands.items()}
+    return band_data
+
 
 #Gets band data, fixes nan values and normalizes to 0-1
-def get_band(dataset, band_index):
+def get_band(dataset, band_index, norm=True):
     extracted = dataset[:,:,band_index]
     extracted = extracted.astype(np.float32)
     extracted[extracted == -9999] = np.nan
-    return extracted / 10000
+    if norm:
+        return extracted / 10000
+    else:
+        return extracted
 
 # Given an upper and lower value, make a mask from the spectral bands metadata which captures those values
 def get_filter_range(dataset, lower, upper):
@@ -83,10 +86,11 @@ def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select
     #angles['azimuth'] = np.ones_like(angles['sensor_zenith']) *10
     #plt.imshow(zenith)
     #plt.show()
-    spectral_bands = meta_data['Spectral_Data']['Wavelength']
+    spectral_bands = meta_data['Spectral_Data']['Wavelength'][:]
     meta_data = {"map_info": meta_data['Coordinate_System']['Map_Info'][()].decode("utf-8"),
                     "proj": meta_data['Coordinate_System']['Proj4'][()].decode("utf-8"),
-                    "epsg": meta_data['Coordinate_System']['EPSG Code'][()].decode("utf-8")}
+                    "epsg": meta_data['Coordinate_System']['EPSG Code'][()].decode("utf-8"),
+                    'spectral_bands': spectral_bands}
     to_return["meta"] = meta_data
     if not get_all:
         if merging:

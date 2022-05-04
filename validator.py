@@ -1,6 +1,7 @@
 from matplotlib.widgets import Slider
+from sklearn import cluster
 import torch
-
+import pickle
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -12,6 +13,7 @@ import utils
 from skimage import exposure
 from scipy.stats import linregress
 from einops import rearrange
+from sklearn.decomposition import PCA, IncrementalPCA
 import torchvision.transforms as tt
 
 class Validator():
@@ -24,7 +26,8 @@ class Validator():
         self.plot_file = kwargs['plot_file']
         self.valid_data = self.get_plot_data()
         self.valid_files = self.get_valid_files()
-        self.cluster_dict = self.make_empty_dict()
+        #TODO: FIX THIS
+        #self.cluster_dict = self.make_empty_dict()
         self.cluster_groups = set()
         #self._confusion_matrix = None
     
@@ -61,16 +64,20 @@ class Validator():
         return data
 
     def get_plot_data(self):
-        data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'ninetyCrownDiameter', 'canopyPosition', 'taxonID', 'ninetyCrownDiameter'])
+        #data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'ninetyCrownDiameter', 'canopyPosition', 'taxonID', 'ninetyCrownDiameter'])
+        data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID'])
         data = data.loc[data['siteID'] == self.site_name]
-        data = data.loc[(data['canopyPosition'] == "Partially shaded") | (data['canopyPosition'] == "Full sun")]
-        data = data.loc[(data['plantStatus'] != 'Dead, broken bole') | (data['plantStatus'] != 'Downed')]
-        data = data.loc[~(data['ninetyCrownDiameter'] != data['ninetyCrownDiameter'])]
-        data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
+        #data = data.loc[(data['canopyPosition'] == "Partially shaded") | (data['canopyPosition'] == "Full sun")]
+        data = data.loc[(data['plantStatus'] != 'Dead, broken bole') & (data['plantStatus'] != 'Downed') & (data['plantStatus'] != 'No longer qualifies') & (data['plantStatus'] != 'Lost, fate unknown') & (data['plantStatus'] != 'Removed') & (data['plantStatus'] != 'Lost, presumed dead')]
 
-        props = data.groupby(['plotID', 'taxonID']).sum()
+        # data = data.loc[~(data['ninetyCrownDiameter'] != data['ninetyCrownDiameter'])]
+        # data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
+
+        props = data.groupby(['plotID', 'taxonID']).count()
         #props = props.groupby(level=0).apply(lambda x: 100*x/x.sum())
         props = pd.DataFrame(props.to_records())
+        props = props.drop('siteID', axis=1)
+        props = props.rename(columns={'plantStatus': 'taxonCount'})
 
         plots = pd.read_csv(self.plot_file, usecols=['plotID', 'siteID', 'subtype', 'easting', 'northing', 'plotSize'])
         plots = plots.loc[plots['siteID'] == self.site_name]
@@ -120,21 +127,54 @@ class Validator():
         first_row = df.iloc[0]
         coords = first_row['file_coords']
         open_file = os.path.join(img_dir, f'NEON_D01_HARV_DP3_{coords}_reflectance.h5')
-        all_bands = hp.pre_processing(open_file, get_all=True)['bands']
-        to_save = all_bands[first_row['x_min']:first_row['x_max'], first_row['y_min']:first_row['y_max'], :]
+        all_bands = hp.pre_processing(open_file, get_all=True)
+        all_bands['bands'] = all_bands['bands'][first_row['y_min']:first_row['y_max'], first_row['x_min']:first_row['x_max'], :]
+        all_bands['meta']['plotID'] = first_row['plotID']
+        all_bands['meta']['original_file'] = f'NEON_D01_HARV_DP3_{coords}_reflectance.h5'
         #save plot by name, centroid, and original file
-        save_name = f'plot_subset_{first_row["plotID"]}_eastingcentroid_{int(first_row["easting"])}_northingcentroid_{int(first_row["northing"])}_fromfile_{coords}.npy'
-        np.save(os.path.join(save_dir, save_name), to_save)
+        save_name = f'plot_subset_{first_row["plotID"]}_eastingcentroid_{int(first_row["easting"])}_northingcentroid_{int(first_row["northing"])}_fromfile_{coords}.pk'
+        #np.save(os.path.join(save_dir, save_name), all_bands)
+        with open(os.path.join(save_dir, save_name), 'wb') as f:
+            pickle.dump(all_bands, f)
 
     def extract_plots(self, save_dir):
         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
         grouped_files.apply(self._extract_plot, self.img_dir, save_dir)
 
-
-
-
+    @staticmethod
+    def _map_plot(df, img_dir, save_dir):
+        fig, ax = plt.subplots(figsize=(10, 10))
+        row = df.iloc[0]
+        coords = row['file_coords']
+        open_file = os.path.join(img_dir, f'NEON_D01_HARV_DP3_{coords}_reflectance.h5')
+        rgb = hp.pre_processing(open_file, wavelength_ranges=utils.get_viz_bands())
+        rgb = hp.make_rgb(rgb["bands"])
+        rgb = exposure.adjust_gamma(rgb, 0.5)
+        ax.imshow(rgb)
+        x = [row['x_min'], row['x_max'], row['x_max'], row['x_min'], row['x_min']]
+        y = [row['y_max'], row['y_max'], row['y_min'], row['y_min'], row['y_max']]
+        ax.plot(x, y)
+        ax.set_title(f'Original File: NEON_D01_HARV_DP3_{coords}_reflectance.h5 \n PlotID: {row["plotID"]}')
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_dir, f'NEON_D01_HARV_DP3_{coords}_Plot_{row["plotID"]}.png'))
+        plt.close()
 
     
+    def map_plots(self, save_dir):
+        grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
+        grouped_files.apply(self._map_plot, self.img_dir, save_dir)
+
+    def make_taxa_plots(self, save_dir):
+         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
+         grouped_files.apply(self._make_taxa_plot, save_dir)
+
+    @staticmethod
+    def _make_taxa_plot(df, save_dir):
+        ax = df.plot.bar(x='taxonID', y='taxonCount')
+        ax.set_title(df.iloc[0]['plotID'])
+        plt.savefig(os.path.join(save_dir, f'{df.iloc[0]["plotID"]}_taxon_count.png'))
+
+        return None    
 
     def plot_tree(self, coord, file, **kwargs):
      
@@ -221,7 +261,7 @@ class Validator():
             for plot in plots:
                 valid_plot = valid.loc[valid['plotID'] == plot]
                 row = valid_plot.iloc[0]
-                select = clustered[row['x_min']:row['x_max'], row['y_min']:row['y_max']]
+                select = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
                 groups, counts = np.unique(select, return_counts=True)
                 self.cluster_groups = self.cluster_groups.union(set(groups.astype(int)))
                 for j, group in np.ndenumerate(groups):
@@ -333,6 +373,86 @@ def show_file(f):
     plt.imshow(f)
     plt.show()
 
+def viz_and_save_plot(plot_dict, save_dir):
+    selected = hp.get_selection(plot_dict['bands'], plot_dict['meta']['spectral_bands'], utils.get_viz_bands())
+    rgb = hp.make_rgb(selected)
+    rgb = exposure.adjust_gamma(rgb, 0.5)
+    outname= os.path.join(save_dir, f'{plot_dict["meta"]["plotID"]}_{plot_dict["meta"]["original_file"]}.png')
+    plt.imsave(outname, rgb)
+
+def inc_pca_plots(plot_dir, save_dir):
+    transformer = IncrementalPCA(n_components=10)
+    for f in os.listdir(plot_dir):
+        if ".pk" in f:
+            with open(os.path.join(plot_dir, f), 'rb') as img:
+                plot = pickle.load(img)
+                all = plot['bands']
+                all = rearrange(all, 'h w c -> (h w) c')
+                transformer.fit(all)
+    for f in os.listdir(plot_dir):
+        if ".pk" in f:
+            with open(os.path.join(plot_dir, f), 'rb') as img:
+                plot = pickle.load(img)
+                all = plot['bands']
+                all = rearrange(all, 'h w c -> (h w) c')
+                proc = transformer.transform(all)
+                proc = rearrange(proc, '(h w) c -> h w c', h=40, w=40)
+                np.save(os.path.join(save_dir, f), proc)
+                to_img = (proc - np.min(proc))/np.ptp(proc)
+                plt.imsave(os.path.join(save_dir,'first_three_viz', f"{f.split('.')[0]}.png"),to_img[...,0:3])
+
+def ward_cluster_plots(plot_dir, save_dir):
+    for f in os.listdir(plot_dir):
+        if ".npy" in f:
+            plot = np.load(os.path.join(plot_dir,f))
+            plot = rearrange(plot, 'h w c -> (h w) c')
+            clustered = utils.ward_cluster(plot, n_clusters=6)
+            clustered = rearrange(clustered, '(h w) -> h w', h=40, w=40)
+            np.save(os.path.join(save_dir, f'cluster_{f}'), clustered)
+            plt.imsave(os.path.join(save_dir, 'viz',  f"{f.split('.')[0]}.png"),clustered)
+
+def pca_norm_cluster_plots(plot_dir, save_dir):
+    mean = np.load(os.path.join(plot_dir, 'stats/mean.npy')).astype(np.float32)
+    std = np.load(os.path.join(plot_dir, 'stats/std.npy')).astype(np.float32)
+
+    norm = tt.Normalize(mean, std)
+    for f in os.listdir(plot_dir):
+        if ".npy" in f:
+            plot = np.load(os.path.join(plot_dir,f))
+            plot = rearrange(plot, 'h w c -> c h w')
+            img = torch.from_numpy(plot).float()
+            #img = rearrange(img, 'h w c -> c h w')
+            img = norm(img)
+            mp = torch.nn.MaxPool2d(2)
+            img = mp(img)
+            up = torch.nn.UpsamplingBilinear2d(scale_factor=2)
+            img = up(img.unsqueeze(0))
+            img = torch.argmax(img.squeeze(0), dim=0)
+            img = img.numpy()
+            np.save(os.path.join(save_dir, f), img)
+            plt.imsave(os.path.join(save_dir, 'viz',  f"{f.split('.')[0]}.png"),img)
+
+def get_shadow_masks(plot_dir, save_dir):
+
+    return None
+
+def get_spectra_plots(plot_dir, save_dir):
+
+    return None
+                
+
+
+
+def handle_each_plot(plot_dir, fn, save_dir):
+    for f in os.listdir(plot_dir):
+        if ".pk" in f:
+            with open(os.path.join(plot_dir, f), 'rb') as img:
+                plot = pickle.load(img)
+                fn(plot, save_dir)
+
+
+
+
 
 
 
@@ -353,37 +473,55 @@ if __name__ == "__main__":
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
     CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
+    PLOT_SUBSET = os.path.join(PLOT_DIR, 'plot_subset_HARV_024_eastingcentroid_726037_northingcentroid_4704513_fromfile_726000_4704000.pk')
+    PLOT_VIZ = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plot_locations'
+    PLOT_PKLS = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plot_pickles'
+    PLOT_PCA = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca'
     #MODEL = inference.load_ckpt(models.TransEmbedConvSimSiam, 'ckpts\harv_trans_embed_conv_sim_epoch=1.ckpt', num_channels=30, img_size=32, output_classes=20)
 
-    MEAN = np.load(os.path.join(PCA_DIR, 'stats/mean.npy')).astype(np.float32)
-    STD = np.load(os.path.join(PCA_DIR, 'stats/std.npy')).astype(np.float32)
+    MEAN = np.load(os.path.join(PLOT_PCA, 'stats/mean.npy')).astype(np.float32)
+    STD = np.load(os.path.join(PLOT_PCA, 'stats/std.npy')).astype(np.float32)
 
     norm = tt.Normalize(MEAN, STD)
-    valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
-    #valid.extract_plots(PLOT_DIR)
+    valid = Validator(file=VALID_FILE, img_dir=SAVE_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
+    #valid.make_taxa_plots('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/taxon_plots')
+
+    #cluster_plots(PLOT_PCA, 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/clustered_plots')
+    #pca_norm_cluster_plots(PLOT_PCA, 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/pca_norm_clustered_plots')
+
+    # valid.extract_plots(PLOT_PKLS)
+    # handle_each_plot(PLOT_PKLS, viz_and_save_plot, 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/ind_plots_viz')
+
+    # inc_pca_plots(PLOT_PKLS, PLOT_PCA)
+
+
+    # with open(PLOT_SUBSET, 'rb') as f:
+    #     test = pickle.load(f)
+    
+    # print(test)
   
-    img = np.load(PCA)
-    img = torch.from_numpy(img).float()
-    img = rearrange(img, 'h w c -> c h w')
-    img = norm(img)
-    mp = torch.nn.MaxPool2d(3)
-    img = mp(img)
-    #img = img[3:7, ...]
-    test = torch.argmax(img, dim=0)
-    test = test.numpy()
-    #test = rearrange(test, 'c h w -> h w c')
+    # img = np.load(PCA)
+    # img = torch.from_numpy(img).float()
+    # img = rearrange(img, 'h w c -> c h w')
+    # img = norm(img)
+    # mp = torch.nn.MaxPool2d(3)
+    # img = mp(img)
+    # #img = img[3:7, ...]
+    # test = torch.argmax(img, dim=0)
+    # test = test.numpy()
+    # #test = rearrange(test, 'c h w -> h w c')
 
     
-    # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_viz_bands())
-    # rgb = hp.make_rgb(rgb["bands"])
-    # rgb = exposure.adjust_gamma(rgb, gamma=0.5)
-    # plt.imshow(rgb)
-    # plt.show()
-    for i in range(0, 30):
-        #test[test != i] = 0
-        #test[test == i] = 10
-        plt.imshow(test == i)
-        plt.show()
+    # # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_viz_bands())
+    # # rgb = hp.make_rgb(rgb["bands"])
+    # # rgb = exposure.adjust_gamma(rgb, gamma=0.5)
+    # # plt.imshow(rgb)
+    # # plt.show()
+    # for i in range(0, 30):
+    #     #test[test != i] = 0
+    #     #test[test == i] = 10
+    #     plt.imshow(test == i)
+    #     plt.show()
     # print(test)
    
     # print(len(valid.valid_data['taxonID'].unique()))
@@ -394,8 +532,6 @@ if __name__ == "__main__":
     #         print(key)
 
     
-    
-
 
     # for spec in valid.valid_data['taxonID'].unique():
     #     plot_species(valid, spec)

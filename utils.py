@@ -374,7 +374,9 @@ if __name__ == '__main__':
 
     OUT_DIR = 'W:/Classes/Research/datasets/hs/pca/harv_2022'
 
-    get_masks((IMG, IMG_DIR, MASK_DIR))
+    #get_masks((IMG, IMG_DIR, MASK_DIR))
+
+    img_stats('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca', 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca/stats', num_channels=10)
 
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, MASK_DIR], get_masks)
