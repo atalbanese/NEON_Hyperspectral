@@ -32,9 +32,9 @@ if __name__ == "__main__":
     pl.seed_everything(42)
     dataset = MaskedDenseVitDataset(pca_fold, 32, eval=False, batch_size=8)
     train_loader = DataLoader(dataset, batch_size=1, num_workers=6)
-    model = models.TransEmbedConvSimSiam(30, img_size=32, output_classes=20) #.load_from_checkpoint('ckpts/harv_sim_siam_masked_patched_vit_dense_vizepoch=2-v1.ckpt', num_channels=30, img_size=64, patch_size=4)
+    model = models.TransEmbedConvSimSiam(30, img_size=32, output_classes=20) #.load_from_checkpoint('ckpts\harv_trans_embed_conv_sim_epoch=4.ckpt', num_channels=30, img_size=32, output_classes=20)
 
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=25, callbacks=[checkpoint_callback, StochasticWeightAveraging(swa_lrs=1e-2)], accumulate_grad_batches=8)
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=125, callbacks=[checkpoint_callback, StochasticWeightAveraging(swa_lrs=1e-2)], accumulate_grad_batches=8)
     trainer.fit(model, train_loader)
 
     

@@ -1,4 +1,5 @@
 from matplotlib.widgets import Slider
+import torch
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -113,6 +114,25 @@ class Validator():
             return valid_files
         else:
             return None
+
+    @staticmethod
+    def _extract_plot(df, img_dir, save_dir):
+        first_row = df.iloc[0]
+        coords = first_row['file_coords']
+        open_file = os.path.join(img_dir, f'NEON_D01_HARV_DP3_{coords}_reflectance.h5')
+        all_bands = hp.pre_processing(open_file, get_all=True)['bands']
+        to_save = all_bands[first_row['x_min']:first_row['x_max'], first_row['y_min']:first_row['y_max'], :]
+        #save plot by name, centroid, and original file
+        save_name = f'plot_subset_{first_row["plotID"]}_eastingcentroid_{int(first_row["easting"])}_northingcentroid_{int(first_row["northing"])}_fromfile_{coords}.npy'
+        np.save(os.path.join(save_dir, save_name), to_save)
+
+    def extract_plots(self, save_dir):
+        grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
+        grouped_files.apply(self._extract_plot, self.img_dir, save_dir)
+
+
+
+
 
     
 
@@ -298,7 +318,7 @@ def plot_species(validator: Validator, species):
                 points[combo]['x'].append(int(expect.loc[combo[0]]))
                 points[combo]['y'].append(int(found.loc[combo[1]]))
     
-    fig, ax = plt.subplots(4, 5)
+    fig, ax = plt.subplots(6, 5, figsize=(15,15))
     ax = ax.flatten()
     for i, (combo, value) in enumerate(points.items()):
         if len(value['x'])>2:
@@ -327,36 +347,79 @@ if __name__ == "__main__":
     IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
     IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
-    SAVE_DIR = "validation/harv_transformer_fixed_augment"
-    VALID_FILE = "/data/shared/src/aalbanese/datasets/neon-allsites-appidv-latest.csv"
-    PLOT_FILE = '/data/shared/src/aalbanese/datasets/All_NEON_TOS_Plot_Centroids_V8.csv'
+    SAVE_DIR = "W:/Classes/Research/validation/harv_pca/"
+    PLOT_DIR = "C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022"
+    VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
+    PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
     CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
-    MODEL = inference.load_ckpt(models.TransEmbedConvSimSiam, 'ckpts\harv_trans_embed_conv_sim_epoch=2.ckpt', num_channels=30, img_size=32, output_classes=20)
+    #MODEL = inference.load_ckpt(models.TransEmbedConvSimSiam, 'ckpts\harv_trans_embed_conv_sim_epoch=1.ckpt', num_channels=30, img_size=32, output_classes=20)
 
     MEAN = np.load(os.path.join(PCA_DIR, 'stats/mean.npy')).astype(np.float32)
     STD = np.load(os.path.join(PCA_DIR, 'stats/std.npy')).astype(np.float32)
 
     norm = tt.Normalize(MEAN, STD)
+    valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
+    #valid.extract_plots(PLOT_DIR)
+  
+    img = np.load(PCA)
+    img = torch.from_numpy(img).float()
+    img = rearrange(img, 'h w c -> c h w')
+    img = norm(img)
+    mp = torch.nn.MaxPool2d(3)
+    img = mp(img)
+    #img = img[3:7, ...]
+    test = torch.argmax(img, dim=0)
+    test = test.numpy()
+    #test = rearrange(test, 'c h w -> h w c')
 
-    test = inference.vit_inference(MODEL, PCA, norm)
+    
+    # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_viz_bands())
+    # rgb = hp.make_rgb(rgb["bands"])
+    # rgb = exposure.adjust_gamma(rgb, gamma=0.5)
+    # plt.imshow(rgb)
+    # plt.show()
+    for i in range(0, 30):
+        #test[test != i] = 0
+        #test[test == i] = 10
+        plt.imshow(test == i)
+        plt.show()
+    # print(test)
+   
+    # print(len(valid.valid_data['taxonID'].unique()))
+    # for key in valid.valid_files.keys():
+    #     try:
+    #         valid.validate(key, os.path.join(SAVE_DIR, f'{key}.npy'))
+    #     except:
+    #         print(key)
 
-    #np.save('transformer_test.npy', test)
+    
+    
 
-    # test = np.load(PCA)
-    # test = rearrange(test, 'c h w -> h w c')
-    # test = test[:,:,2:5]
-    rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_viz_bands())
-    rgb = hp.make_rgb(rgb["bands"])
-    rgb = exposure.adjust_gamma(rgb, gamma=0.5)
-    plt.imshow(rgb)
-    plt.show()
-    plt.imshow(test)
-    plt.show()
-    print(test)
-    #valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
 
-    #testing = 'validation/harv_transformer_fixed_augment/harv_transformer_fixed_augment_60_classes_epoch=5'
+    # for spec in valid.valid_data['taxonID'].unique():
+    #     plot_species(valid, spec)
+    #     print('here')
+
+    # for plot in valid.valid_data['plotID'].unique():
+    #     side_by_side_bar(valid.confusion_matrix, plot)
+
+    # print('here')
+
+    # for k, f in valid.valid_files.items():
+    #     try:
+    #         img = np.load(f)
+    #         img = torch.from_numpy(img).float()
+    #         img = rearrange(img, 'h w c -> c h w')
+    #         img = norm(img)
+    #         test = torch.argmax(img, dim=0)
+    #         test = test.numpy()
+    #         np.save(os.path.join(SAVE_DIR, f'{k}.npy'), test)
+    #     except:
+    #         print(f)
+
+    print('here')
+
 
     # for file in os.listdir(testing):
     #     show_file(os.path.join(testing,file))

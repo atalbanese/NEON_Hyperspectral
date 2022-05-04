@@ -121,7 +121,7 @@ class TransEmbedConvSimSiam(pl.LightningModule):
     def forward(self, x):
         z_1 = self.flatten(x)
        
-        z_1 = self.embed(z_1)
+        #z_1 = self.embed(z_1)
        
         z_1 = self.down_channel(z_1)
    
@@ -132,7 +132,7 @@ class TransEmbedConvSimSiam(pl.LightningModule):
         z_1 = self.proj(z_1)
  
         p_1 = self.pred(z_1)
-        x = torch.argmax(x, dim=1)
+        x = torch.argmax(p_1, dim=1)
         return x
 
 

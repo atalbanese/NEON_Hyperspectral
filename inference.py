@@ -46,8 +46,11 @@ def vit_inference(model, file, norm):
     img = norm(img)
     img[mask] = 0
 
-    img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=32, w=32, b1=16, b2=16)
-    mask = rearrange(mask, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=32, w=32, b1=16, b2=16)
+    #img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=32, w=32, b1=16, b2=16)
+    #mask = rearrange(mask, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=32, w=32, b1=16, b2=16)
+
+    img = img.unsqueeze(0)
+    mask = mask.unsqueeze(0)
 
     img = model(img).detach()
 

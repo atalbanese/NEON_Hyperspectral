@@ -177,7 +177,7 @@ class ResnetPatchEmbed(nn.Module):
         self.positions = nn.Parameter(torch.randn((img_size // patch_size) **2 + 1, emb_size))
 
     def forward(self, x):
-        #b, _, _, _ = x.shape
+        b, _, _, _ = x.shape
         x = self.layer1(x)
         x= self.rearrange(x)
         cls_tokens = repeat(self.cls_token, '() n e -> b n e', b=b)

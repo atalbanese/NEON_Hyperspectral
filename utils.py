@@ -59,12 +59,13 @@ def han_2018(to_segment):
     #Calculate neighborhood valley threshold from Fan 2011
     thresh = neighborhood_valley_thresh(mpsi, 3)
     print(f'found threshold: {thresh}')
-    shadow_mask = mpsi.copy()
-    shadow_mask[shadow_mask<thresh] = 0
-    shadow_mask[shadow_mask>=thresh] = 1
+    # shadow_mask = mpsi.copy()
+    # shadow_mask[shadow_mask<thresh] = 0
+    # shadow_mask[shadow_mask>=thresh] = 1
 
     
-    return mpsi, shadow_mask
+    # return mpsi, shadow_mask
+    return mpsi<thresh
 
 
 def rescale(np_arr, max_val):
@@ -80,7 +81,7 @@ def get_ndvi(to_index):
 # Neighborhood valley threshold from Fan 2011, implemented based on Han 2018. Finds the threshold with the greatest neighboring variance
 # Unlike Otsu threshold, does not depend on a bimodal distribution
 def neighborhood_valley_thresh(image: np.ndarray, neighborhood_length: int):
-    num_pixels = image.size
+    num_pixels = np.count_nonzero(~np.isnan(image))
     # Calculate neighborhood search radius
     m = int(neighborhood_length//2)
     # Get greyscale histogram
@@ -246,26 +247,19 @@ def save_bands(args):
 def get_masks(args):
     file, in_dir, out_dir = args
     if ".h5" in file:
-        bare_file = file.split(".")[0] + '_bare_mask.npy'
-        shadow_file = file.split(".")[0] + '_shadow_mask.npy'
-        if not os.path.exists(os.path.join(out_dir,bare_file)):
+        #bare_file = file.split(".")[0] + '_bare_mask.npy'
+        shadow_file = file.split(".")[0] + '_sunlit_true_shadow_false.npy'
+        if not os.path.exists(os.path.join(out_dir,shadow_file)):
             img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=get_bareness_bands())["bands"]
-            #viz = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=get_viz_bands())["bands"]
-            #stack = hp.stack_all(img)
-            #nan_mask = stack != stack
-            # viz = hp.stack_all(viz)
-            # viz = exposure.adjust_gamma(viz, gamma=0.5)
             b_i = img['red'] + img['swir'] - img['nir']
-            bare = b_i > 0
+            bare = b_i > 0.3
             masked_img = {}
             for key, value in img.items():
                 value[bare] = np.nan
                 masked_img[key] = value
-            _, shadow_mask = han_2018(masked_img)
-
-            shadows = shadow_mask > 0
+            shadows = han_2018(masked_img)
             
-            np.save(os.path.join(out_dir, bare_file), bare)
+            #np.save(os.path.join(out_dir, bare_file), bare)
             np.save(os.path.join(out_dir, shadow_file), shadows)
             return True
 
@@ -342,7 +336,7 @@ def bulk_process(pool, dirs, fn, **kwargs):
 
     args_list = list(zip(files, *dirs))
 
-    future = pool.map(fn, args_list, timeout=60)
+    future = pool.map(fn, args_list, timeout=99)
     iterator = future.result()
     while True:
         try:
@@ -371,14 +365,23 @@ if __name__ == '__main__':
     #     bulk_process(pool, IN_DIR, OUT_DIR, get_masks)
 
     IN_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
-    MASK_DIR = '/data/shared/src/aalbanese/datasets/hs/masks/HARV'
+    MASK_DIR = 'C:/Users/tonyt/Documents/Research/datasets/masks/harv_2022'
     BANDS = get_shadow_bands()
 
-    IMG = 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5'
+    IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
+    IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
+
 
     OUT_DIR = 'W:/Classes/Research/datasets/hs/pca/harv_2022'
 
-    PCA_SOLVER = IncrementalPCA(n_components=30)
+    get_masks((IMG, IMG_DIR, MASK_DIR))
+
+    # with ProcessPool(4) as pool:
+    #     bulk_process(pool, [IN_DIR, MASK_DIR], get_masks)
+
+
+
+    #PCA_SOLVER = IncrementalPCA(n_components=30)
 
     # for f in tqdm(random.sample(os.listdir(IN_DIR), 40)):
     #     PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
@@ -393,7 +396,7 @@ if __name__ == '__main__':
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, OUT_DIR, BANDS], save_bands)
 
-    img_stats(OUT_DIR, 'W:/Classes/Research/datasets/hs/pca/harv_2022/stats', num_channels=30)
+    #img_stats(OUT_DIR, 'W:/Classes/Research/datasets/hs/pca/harv_2022/stats', num_channels=30)
 
 
     #get_bareness_mask((IMG, '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022', '/data/shared/src/aalbanese/datasets/hs/shadow_masks/harv'))
