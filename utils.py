@@ -65,7 +65,7 @@ def han_2018(to_segment):
 
     
     # return mpsi, shadow_mask
-    return mpsi<thresh
+    return mpsi #<thresh
 
 
 def rescale(np_arr, max_val):
@@ -298,7 +298,7 @@ def build_inc_pca(args):
 
         img = rearrange(img, 'h w c -> (h w) c')
         masked = ma.masked_invalid(img)
-        mask = masked.mask[:, 0:30]
+        #mask = masked.mask[:, 0:30]
         to_pca = ma.compress_rows(masked)
         pca_solver.partial_fit(to_pca)
 
@@ -314,7 +314,7 @@ def do_inc_pca(args):
             #bare_mask = np.load(os.path.join(mask_dir, bare_file))
             img = rearrange(img, 'h w c -> (h w) c')
             masked = ma.masked_invalid(img)
-            mask = masked.mask[:, 0:30]
+            mask = masked.mask[:, 0:10]
             to_pca = ma.compress_rows(masked)
             data = pca_solver.transform(to_pca)
             out = np.empty(mask.shape, dtype=np.float64)
@@ -372,33 +372,33 @@ if __name__ == '__main__':
     IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
 
 
-    OUT_DIR = 'W:/Classes/Research/datasets/hs/pca/harv_2022'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels'
 
     #get_masks((IMG, IMG_DIR, MASK_DIR))
 
-    img_stats('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca', 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca/stats', num_channels=10)
+    #img_stats('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca', 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca/stats', num_channels=10)
 
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, MASK_DIR], get_masks)
 
 
 
-    #PCA_SOLVER = IncrementalPCA(n_components=30)
+    PCA_SOLVER = IncrementalPCA(n_components=10)
 
-    # for f in tqdm(random.sample(os.listdir(IN_DIR), 40)):
-    #     PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
+    for f in tqdm(random.sample(os.listdir(IN_DIR), 50)):
+        PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
 
     # # print(PCA_SOLVER.mean_)
     # # print(PCA_SOLVER.var_)
 
-    # with ProcessPool(4) as pool:
-    #     bulk_process(pool, [IN_DIR, OUT_DIR, PCA_SOLVER], do_inc_pca)
+    with ProcessPool(4) as pool:
+        bulk_process(pool, [IN_DIR, OUT_DIR, PCA_SOLVER], do_inc_pca)
 
 
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, OUT_DIR, BANDS], save_bands)
 
-    #img_stats(OUT_DIR, 'W:/Classes/Research/datasets/hs/pca/harv_2022/stats', num_channels=30)
+    img_stats(OUT_DIR, os.path.join(OUT_DIR, 'stats'), num_channels=10)
 
 
     #get_bareness_mask((IMG, '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022', '/data/shared/src/aalbanese/datasets/hs/shadow_masks/harv'))

@@ -6,6 +6,113 @@ import net_gen
 from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange, Reduce
 import numpy as np
+import torchvision.transforms as tt
+import transforms as tr
+
+
+class SWaV(nn.Module):
+    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=64):
+        super(SWaV, self).__init__()
+        self.transforms_1 =  tt.Compose([tt.RandomHorizontalFlip(),
+                                    tt.RandomVerticalFlip()])
+
+        self.transforms_2 = tt.Compose([Rearrange('b c h w -> b (h w) c'),
+                                        tr.Blit(),
+                                        tr.Block(),
+                                        Rearrange('b (h w) c -> b c h w', h=img_size, w=img_size)])
+
+        self.patch_embed = nn.Sequential(
+            # break-down the image in s1 x s2 patches and flat them
+            Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
+            nn.Linear(patch_size * patch_size * in_channels, emb_size)
+        )
+
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=4, dim_feedforward=emb_size*2, batch_first=True)
+        self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
+
+        self.projector = nn.Sequential(nn.Linear(emb_size, emb_size),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_size, emb_size),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_size, emb_size))
+
+        self.prototypes = nn.Linear(emb_size, num_classes, bias=False)
+
+        self.softmax = nn.LogSoftmax(dim=1)
+        self.temp = temp
+        self.epsilon = epsilon
+        self.niters = sinkhorn_iters
+
+    #TODO: freeze protos for first epoch
+    @torch.no_grad()
+    def norm_prototypes(self):
+        w = self.prototypes.weight.data.clone()
+        w = f.normalize(w, dim=1, p=2)
+        self.prototypes.weight.copy_(w)
+
+
+    @torch.no_grad()
+    def sinkhorn(self, scores):
+        Q = torch.exp(scores/self.epsilon)
+        B = Q.shape[1] 
+        K = Q.shape[0]
+
+        sum_Q = torch.sum(Q)
+        Q /= sum_Q
+
+        for it in range(self.niters):
+            # normalize each row: total weight per prototype must be 1/K
+            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+            Q /= sum_of_rows
+            Q /= K
+
+            # normalize each column: total weight per sample must be 1/B
+            Q /= torch.sum(Q, dim=0, keepdim=True)
+            Q /= B
+
+        Q *= B # the colomns must sum to 1 so that Q is an assignment
+        return Q.t()
+
+
+    def forward_train(self, x):
+
+        b,_,_,_ = x.shape
+
+        x_t = self.transforms_1(x)
+        x_s = self.transforms_2(x_t)
+
+        inp = torch.cat((x_t, x_s))
+
+        inp = self.patch_embed(inp)
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+
+        scores_t = scores[:b]
+        scores_s = scores[b:]
+
+        q_t = self.sinkhorn(scores_t)
+        q_s = self.sinkhorn(scores_s)
+
+        p_t = self.softmax(scores_t/self.temp)
+        p_s = self.softmax(scores_s/self.temp)
+
+        loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
+
+        return loss
+
+    def forward(self, inp):
+        inp = self.patch_embed(inp)
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+        return scores
+        
+
 
 # Adapated from https://github.com/facebookresearch/simsiam/blob/main/simsiam/builder.py
 

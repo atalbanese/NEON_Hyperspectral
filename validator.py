@@ -432,13 +432,51 @@ def pca_norm_cluster_plots(plot_dir, save_dir):
             np.save(os.path.join(save_dir, f), img)
             plt.imsave(os.path.join(save_dir, 'viz',  f"{f.split('.')[0]}.png"),img)
 
-def get_shadow_masks(plot_dir, save_dir):
+def get_shadow_masks(plot_dict, save_dir):
+    selected = hp.get_selection(plot_dict['bands'], plot_dict['meta']['spectral_bands'], utils.get_shadow_bands())
+    rgb = hp.get_selection(plot_dict['bands'], plot_dict['meta']['spectral_bands'], utils.get_viz_bands())
+    rgb = utils.make_rgb(rgb)
+    mask = utils.han_2018(selected)
+    rgb =exposure.adjust_gamma(rgb, 0.5)
+
+    
+    plot_dict['shadow_mask'] = mask
 
     return None
 
-def get_spectra_plots(plot_dir, save_dir):
+def get_spectra_plots(plot_dict, save_dir):
+
+    wavelengths = plot_dict['meta']['spectral_bands']
+    data = plot_dict['bands']
+
+    data = rearrange(data, 'h w c -> (h w) c')
+
+    mean = data.mean(axis=0)
+    plt.plot(wavelengths, mean)
+    plt.xlabel('Wavelength')
+    plt.ylabel('Mean Value')
+    plt.title(plot_dict['meta']['plotID'])
+    plt.ylim(-0.01, 0.6)
+
+    plt.savefig(os.path.join(save_dir, f'{plot_dict["meta"]["plotID"]}.png'))
+    plt.close()
 
     return None
+
+def cluster_histograms(plot_dir, save_dir):
+    for f in os.listdir(plot_dir):
+        if ".npy" in f:
+            plot = np.load(os.path.join(plot_dir,f))
+            plt.bar(*np.unique(plot, return_counts=True))
+            plot_id = f.split("_")[2]+ " "+ f.split("_")[3]
+            plt.title(plot_id)
+            plt.xlabel('Classification')
+            plt.ylabel('Pixel Count')
+            plt.xlim(0, 10)
+
+            plt.savefig(os.path.join(save_dir, plot_id + ".png"))
+            plt.close()
+
                 
 
 
@@ -484,13 +522,14 @@ if __name__ == "__main__":
 
     norm = tt.Normalize(MEAN, STD)
     valid = Validator(file=VALID_FILE, img_dir=SAVE_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
+    #cluster_histograms('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/pca_norm_clustered_plots', 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/pca_norm_clustered_plots/hists')
     #valid.make_taxa_plots('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/taxon_plots')
 
     #cluster_plots(PLOT_PCA, 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/clustered_plots')
     #pca_norm_cluster_plots(PLOT_PCA, 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/pca_norm_clustered_plots')
 
     # valid.extract_plots(PLOT_PKLS)
-    # handle_each_plot(PLOT_PKLS, viz_and_save_plot, 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/ind_plots_viz')
+    handle_each_plot(PLOT_PKLS, get_shadow_masks, 'test')
 
     # inc_pca_plots(PLOT_PKLS, PLOT_PCA)
 
