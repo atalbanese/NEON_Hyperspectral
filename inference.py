@@ -61,6 +61,22 @@ def vit_inference(model, file, norm):
     return img
 
 
+def swav_inference(model, file):
+    model.eval()
+    img = np.load(file)
+    img = torch.from_numpy(img).float()
+    img = rearrange(img, 'h w c -> c h w')
+
+    img = img.unsqueeze(0)
+
+    img = model(img).detach()
+    img = rearrange(img, 'b (h w) c -> b c h w', h=20, w=20)
+    img = torch.argmax(img, dim=1)
+    img = img.squeeze().numpy()
+
+    return img
+
+
 
 
 def transformer_inshape(inp):
@@ -77,13 +93,17 @@ def transformer_outshape(inp):
 
 
 if __name__ == "__main__":
-    h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
-    ckpt = "/data/shared/src/aalbanese/lidar_hs_unsup_dl_model/lightning_logs/version_59/checkpoints/epoch=20-step=4494.ckpt"
-    h5_file = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL/NEON_D16_WREF_DP3_580000_5075000_reflectance.h5"
+    # h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
+    # ckpt = "/data/shared/src/aalbanese/lidar_hs_unsup_dl_model/lightning_logs/version_59/checkpoints/epoch=20-step=4494.ckpt"
+    # h5_file = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL/NEON_D16_WREF_DP3_580000_5075000_reflectance.h5"
 
-    test = torch.ones(1369, 1, 27, 27)
-    print(transformer_outshape(test).shape)
+    # test = torch.ones(1369, 1, 27, 27)
+    # print(transformer_outshape(test).shape)
+    ckpt = 'ckpts/harv_10_channels_swav_epoch=7.ckpt'
+    pca_file = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca/plot_subset_HARV_014_eastingcentroid_724775_northingcentroid_4705745_fromfile_724000_4705000.pk.npy'
+    MODEL = models.SWaVModel().load_from_checkpoint(ckpt)
 
+    swav_inference(MODEL, pca_file)
 
 
 

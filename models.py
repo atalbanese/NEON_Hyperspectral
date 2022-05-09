@@ -40,7 +40,7 @@ class SWaVModel(pl.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
 
     def on_before_optimizer_step(self, optimizer, optimizer_idx):
-        if self.current_epoch == 0:
+        if self.current_epoch < 5:
             for name, p in self.model.named_parameters():
                     if "prototypes" in name:
                         p.grad = None
