@@ -26,10 +26,11 @@ def get_classifications(x):
 
 class SWaVModel(pl.LightningModule):
     def __init__(self):
+        super().__init__()
         self.model = networks.SWaV()
 
     def training_step(self, x):
-        inp = x['base'].unsqueeze(0)
+        inp = x['base'].squeeze(0)
         loss = self.model.forward_train(inp)
         return loss
 
@@ -43,6 +44,9 @@ class SWaVModel(pl.LightningModule):
             for name, p in self.model.named_parameters():
                     if "prototypes" in name:
                         p.grad = None
+    
+    def on_train_batch_start(self, batch, batch_idx):
+        self.model.norm_prototypes()
 
     def forward(self, x):
         return self.model(x)

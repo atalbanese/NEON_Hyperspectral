@@ -1,4 +1,4 @@
-from dataloaders import HyperDataset, PreProcDataset, MaskedDataset, MaskedVitDataset, MaskedDenseVitDataset
+from dataloaders import HyperDataset, PreProcDataset, MaskedDataset, MaskedVitDataset, MaskedDenseVitDataset, DeepClusterDataset
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 import models
@@ -7,12 +7,12 @@ import inference
 
 
 if __name__ == "__main__":
-    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022'
+    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels'
     #h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
     h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022"
     checkpoint_callback = ModelCheckpoint(
         dirpath='ckpts', 
-        filename='harv_trans_embed_conv_sim_{epoch}',
+        filename='harv_10_channels_swav_{epoch}',
         every_n_epochs=1,
         save_on_train_epoch_end=True,
         save_top_k = -1
@@ -30,11 +30,14 @@ if __name__ == "__main__":
     # trainer = pl.Trainer(accelerator="cpu", max_epochs=10, callbacks=[checkpoint_callback])
     # trainer.fit(model, train_loader)
     pl.seed_everything(42)
-    dataset = MaskedDenseVitDataset(pca_fold, 32, eval=False, batch_size=8)
-    train_loader = DataLoader(dataset, batch_size=1, num_workers=6)
-    model = models.TransEmbedConvSimSiam(30, img_size=32, output_classes=20) #.load_from_checkpoint('ckpts\harv_trans_embed_conv_sim_epoch=4.ckpt', num_channels=30, img_size=32, output_classes=20)
+    # dataset = MaskedDenseVitDataset(pca_fold, 32, eval=False, batch_size=8)
+    # train_loader = DataLoader(dataset, batch_size=1, num_workers=6)
+    # model = models.TransEmbedConvSimSiam(30, img_size=32, output_classes=20) #.load_from_checkpoint('ckpts\harv_trans_embed_conv_sim_epoch=4.ckpt', num_channels=30, img_size=32, output_classes=20)
 
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=125, callbacks=[checkpoint_callback, StochasticWeightAveraging(swa_lrs=1e-2)], accumulate_grad_batches=8)
+    dataset = DeepClusterDataset(pca_fold, crop_size=40, eval=False, batch_size=64)
+    train_loader = DataLoader(dataset, batch_size=1, num_workers=2)
+    model = models.SWaVModel()
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=125, callbacks=[checkpoint_callback, StochasticWeightAveraging(swa_lrs=1e-2)])
     trainer.fit(model, train_loader)
 
     

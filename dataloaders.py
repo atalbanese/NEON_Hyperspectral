@@ -43,10 +43,10 @@ class DeepClusterDataset(Dataset):
                 to_remove.append(file)
             img = ma.masked_invalid(img)
             img = ma.compress_rows(img)
-            if img.shape[0] <995*995:
+            if img.shape[0] <1000*1000:
                 to_remove.append(file)
         self.files = list(set(self.files) - set(to_remove))
-        with open(os.path.join(self.pca_folder, 'stats/good_files.pkl'), 'wb') as f:
+        with open(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl'), 'wb') as f:
             pickle.dump(self.files, f)
 
 
@@ -62,7 +62,6 @@ class DeepClusterDataset(Dataset):
         img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
         random_select = self.rng.choice(range(0, img.shape[0]), size=self.batch_size, replace=False)
         img = img[random_select]
-        mask = mask[random_select]
 
         to_return = {}
         to_return["base"] = img

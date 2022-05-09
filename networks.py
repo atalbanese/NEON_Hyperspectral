@@ -53,7 +53,7 @@ class SWaV(nn.Module):
 
     @torch.no_grad()
     def sinkhorn(self, scores):
-        Q = torch.exp(scores/self.epsilon)
+        Q = torch.exp(scores/self.epsilon).t()
         B = Q.shape[1] 
         K = Q.shape[0]
 
@@ -93,15 +93,19 @@ class SWaV(nn.Module):
         scores_t = scores[:b]
         scores_s = scores[b:]
 
-        q_t = self.sinkhorn(scores_t)
-        q_s = self.sinkhorn(scores_s)
+        loss = 0
 
-        p_t = self.softmax(scores_t/self.temp)
-        p_s = self.softmax(scores_s/self.temp)
+        for i in range(b):
+            t, s = scores_t[i].detach(), scores_s[i].detach()
+            q_t = self.sinkhorn(t)
+            q_s = self.sinkhorn(s)
 
-        loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
+            p_t = self.softmax(scores_t[i]/self.temp)
+            p_s = self.softmax(scores_s[i]/self.temp)
 
-        return loss
+            loss += -0.5 * torch.mean(q_t * p_s + q_s * p_t)
+
+        return loss/b
 
     def forward(self, inp):
         inp = self.patch_embed(inp)
