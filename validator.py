@@ -65,7 +65,7 @@ class Validator():
 
     def get_plot_data(self):
         #data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'ninetyCrownDiameter', 'canopyPosition', 'taxonID', 'ninetyCrownDiameter'])
-        data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID'])
+        data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID', 'ninetyCrownDiameter', 'canopyPosition'])
         data = data.loc[data['siteID'] == self.site_name]
         #data = data.loc[(data['canopyPosition'] == "Partially shaded") | (data['canopyPosition'] == "Full sun")]
         data = data.loc[(data['plantStatus'] != 'Dead, broken bole') & (data['plantStatus'] != 'Downed') & (data['plantStatus'] != 'No longer qualifies') & (data['plantStatus'] != 'Lost, fate unknown') & (data['plantStatus'] != 'Removed') & (data['plantStatus'] != 'Lost, presumed dead')]

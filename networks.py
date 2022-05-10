@@ -11,7 +11,7 @@ import transforms as tr
 
 
 class SWaV(nn.Module):
-    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=10):
+    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=24):
         super(SWaV, self).__init__()
         self.transforms_1 =  tt.Compose([tt.RandomHorizontalFlip(),
                                     tt.RandomVerticalFlip()])

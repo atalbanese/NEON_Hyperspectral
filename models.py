@@ -27,7 +27,7 @@ def get_classifications(x):
 class SWaVModel(pl.LightningModule):
     def __init__(self):
         super().__init__()
-        self.model = networks.SWaV()
+        self.model = networks.SWaV(patch_size=4)
 
     def training_step(self, x):
         inp = x['base'].squeeze(0)
@@ -35,8 +35,8 @@ class SWaVModel(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=5e-5)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=5e-3)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 40, eta_min=5e-6)
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
 
     def on_before_optimizer_step(self, optimizer, optimizer_idx):

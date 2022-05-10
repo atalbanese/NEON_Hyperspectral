@@ -64,15 +64,19 @@ def vit_inference(model, file, norm):
 def swav_inference(model, file):
     model.eval()
     img = np.load(file)
+    img = img[500:,250:750,...]
     img = torch.from_numpy(img).float()
     img = rearrange(img, 'h w c -> c h w')
 
     img = img.unsqueeze(0)
 
     img = model(img).detach()
-    img = rearrange(img, 'b (h w) c -> b c h w', h=20, w=20)
+    img = rearrange(img, 'b (h w) c -> b c h w', h=125, w=125)
+    img = f.interpolate(img, size=(500, 500), mode='bicubic')
     img = torch.argmax(img, dim=1)
     img = img.squeeze().numpy()
+    plt.imshow(img)
+    plt.show()
 
     return img
 
@@ -89,8 +93,6 @@ def transformer_outshape(inp):
     return unbatched
 
 
-    
-
 
 if __name__ == "__main__":
     # h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
@@ -99,8 +101,8 @@ if __name__ == "__main__":
 
     # test = torch.ones(1369, 1, 27, 27)
     # print(transformer_outshape(test).shape)
-    ckpt = 'ckpts/harv_10_channels_swav_epoch=7.ckpt'
-    pca_file = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca/plot_subset_HARV_014_eastingcentroid_724775_northingcentroid_4705745_fromfile_724000_4705000.pk.npy'
+    ckpt = 'ckpts\harv_10_channels_10_classes_swav_patch_size_4_epoch=99.ckpt'
+    pca_file = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels/NEON_D01_HARV_DP3_726000_4704000_reflectance_pca.npy'
     MODEL = models.SWaVModel().load_from_checkpoint(ckpt)
 
     swav_inference(MODEL, pca_file)
