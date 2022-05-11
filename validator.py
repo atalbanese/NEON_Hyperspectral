@@ -30,72 +30,50 @@ class Validator():
         #self.cluster_dict = self.make_empty_dict()
         self.cluster_groups = set()
         #self._confusion_matrix = None
-    
-    #BEING DEPRECATED
-    def open_file(self):
-        data = pd.read_csv(self.file, usecols=['siteID', 'easting', 'northing', 'taxonID', 'ninetyCrownDiameter'])
-        data = data.loc[data['siteID'] == self.site_name]
-        data = data.dropna()
-        data["pixels"] = (data['ninetyCrownDiameter']**2)//1
-        data["file_west_bound"] = data["easting"] - data["easting"] % 1000
-        data["file_south_bound"] = data["northing"] - data["northing"] % 1000
-        data['x_min'] = (data["easting"] %1000-data["ninetyCrownDiameter"]/2)//1
-        data['y_min'] = ((1000-data["northing"] %1000)-data["ninetyCrownDiameter"]/2)//1
-        data['x_max'] = data['x_min'] + data["ninetyCrownDiameter"]//1
-        data['y_max'] = data['y_min'] + data["ninetyCrownDiameter"]//1
-        index_names = data[(data['x_min'] <0) | (data['y_min']<0) | (data['x_max'] >999) | (data['y_max']>999)].index
-        data = data.drop(index_names)
-        data = data.astype({"file_west_bound": int,
-                            "file_south_bound": int,
-                            'x_min': int,
-                            'x_max': int,
-                            'y_min': int,
-                            'y_max': int})
-
-        data = data.astype({"file_west_bound": str,
-                            "file_south_bound": str})
-        # data['x_coords'] = [data['x_min'], data['x_max'], data['x_max'], data['x_min'], data['x_min']]
-        # data['y_coords'] = [data['y_max'], data['y_max'], data['y_min'], data['y_min'], data['y_max']]
-
-        
-
-        data['file_coords'] = data['file_west_bound'] + '_' + data['file_south_bound']
-
-        return data
 
     def get_plot_data(self):
         #data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'ninetyCrownDiameter', 'canopyPosition', 'taxonID', 'ninetyCrownDiameter'])
-        data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID', 'ninetyCrownDiameter', 'canopyPosition'])
+        data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID', 'ninetyCrownDiameter', 'canopyPosition', 'easting', 'northing'])
         data = data.loc[data['siteID'] == self.site_name]
         #data = data.loc[(data['canopyPosition'] == "Partially shaded") | (data['canopyPosition'] == "Full sun")]
         data = data.loc[(data['plantStatus'] != 'Dead, broken bole') & (data['plantStatus'] != 'Downed') & (data['plantStatus'] != 'No longer qualifies') & (data['plantStatus'] != 'Lost, fate unknown') & (data['plantStatus'] != 'Removed') & (data['plantStatus'] != 'Lost, presumed dead')]
 
         # data = data.loc[~(data['ninetyCrownDiameter'] != data['ninetyCrownDiameter'])]
-        # data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
+        data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
 
-        props = data.groupby(['plotID', 'taxonID']).count()
-        #props = props.groupby(level=0).apply(lambda x: 100*x/x.sum())
-        props = pd.DataFrame(props.to_records())
-        props = props.drop('siteID', axis=1)
-        props = props.rename(columns={'plantStatus': 'taxonCount'})
+        # props = data.groupby(['plotID', 'taxonID']).count()
+        # #props = props.groupby(level=0).apply(lambda x: 100*x/x.sum())
+        # props = pd.DataFrame(props.to_records())
+        # props = props.drop('siteID', axis=1)
+        # props = props.rename(columns={'plantStatus': 'taxonCount'})
 
         plots = pd.read_csv(self.plot_file, usecols=['plotID', 'siteID', 'subtype', 'easting', 'northing', 'plotSize'])
         plots = plots.loc[plots['siteID'] == self.site_name]
         plots = plots.loc[plots['subtype'] == 'basePlot']
 
-        data = props.merge(plots, how='left', on='plotID')
+        data = data.merge(plots, how='left', on='plotID')
 
-        data["file_west_bound"] = data["easting"] - data["easting"] % 1000
-        data["file_south_bound"] = data["northing"] - data["northing"] % 1000
+        data = data.rename(columns={
+                                    'easting_x': 'easting_tree',
+                                    'northing_x': 'northing_tree',
+                                    'easting_y': 'easting_plot',
+                                    'northing_y': 'northing_plot'
+        })
+
+        data["file_west_bound"] = data["easting_plot"] - data["easting_plot"] % 1000
+        data["file_south_bound"] = data["northing_plot"] - data["northing_plot"] % 1000
 
         data = data.astype({"file_west_bound": int,
                             "file_south_bound": int})
 
-        data['x_min'] = (data['easting']//1 - data['file_west_bound']) - (data['plotSize']**(1/2)/2)
+        data['x_min'] = (data['easting_plot']//1 - data['file_west_bound']) - (data['plotSize']**(1/2)/2)
         data['x_max'] = data['x_min'] + data['plotSize']**(1/2)
 
-        data['y_min'] = 1000- (data['northing']//1 - data['file_south_bound']) - (data['plotSize']**(1/2)/2)
+        data['y_min'] = 1000- (data['northing_plot']//1 - data['file_south_bound']) - (data['plotSize']**(1/2)/2)
         data['y_max'] = data['y_min'] + data['plotSize']**(1/2)
+
+        data['tree_x'] = data['easting_tree']//1 - data['file_west_bound']
+        data['tree_y'] = 1000 - (data['northing_tree']//1 - data['file_south_bound'])
 
         data = data.astype({"file_west_bound": str,
                             "file_south_bound": str,
@@ -108,6 +86,7 @@ class Validator():
         data = data.drop(index_names)
 
         data['file_coords'] = data['file_west_bound'] + '_' + data['file_south_bound']
+        data['sun'] = data['canopyPosition'].str.contains('sun')
 
         return data
 
@@ -160,6 +139,61 @@ class Validator():
         plt.close()
 
     
+    @staticmethod
+    def _map_trees(df, img_dir, save_dir):
+        fig, ax = plt.subplots(figsize=(10, 10))
+        row = df.iloc[0]
+        coords = row['file_coords']
+        open_file = os.path.join(img_dir, f'NEON_D01_HARV_DP3_{coords}_reflectance.h5')
+        rgb = hp.pre_processing(open_file, wavelength_ranges=utils.get_viz_bands())
+        rgb = hp.make_rgb(rgb["bands"])
+        rgb = exposure.adjust_gamma(rgb, 0.5)
+        rgb = rgb[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
+        df['tree_x'] = df['tree_x'] - df['x_min']
+        df['tree_y'] = df['tree_y'] - df['y_min']
+
+        trees_df = df.loc[(df['tree_x'] == df['tree_x'])]
+        for ix, row in trees_df.iterrows():
+            ax.plot(row['tree_x'], row['tree_y'], marker="o")
+            ax.annotate(row['taxonID'], (row['tree_x'], row['tree_y']), textcoords='offset points', xytext= (0, 5), ha='center')
+        ax.imshow(rgb)
+        plt.show()
+
+
+
+    def map_trees(self, save_dir):
+        grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
+        grouped_files.apply(self._map_trees, self.img_dir, save_dir)
+
+    def do_plot_inference(self, save_dir, model):
+        grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
+        grouped_files.apply(self._plot_inference, self, save_dir, model)
+
+    @staticmethod
+    def _plot_inference(df, validator, save_dir, model):
+        row = df.iloc[0]
+        file_key = row['file_coords']
+        plot_id = row['plotID']
+        f = validator.valid_files[file_key]
+        clustered = inference.swav_inference_big(model, f)
+        plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
+       
+        clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
+        plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
+        plt.bar(*np.unique(clustered, return_counts=True))
+        
+        plt.title(plot_id)
+        plt.xlabel('Classification')
+        plt.ylabel('Pixel Count')
+        #plt.xlim(0, 10)
+
+        plt.savefig(os.path.join(save_dir, plot_id + "_hist.png"))
+        plt.close()
+
+
+        #plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
+
+    
     def map_plots(self, save_dir):
         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
         grouped_files.apply(self._map_plot, self.img_dir, save_dir)
@@ -168,6 +202,8 @@ class Validator():
          grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
          grouped_files.apply(self._make_taxa_plot, save_dir)
 
+
+
     @staticmethod
     def _make_taxa_plot(df, save_dir):
         ax = df.plot.bar(x='taxonID', y='taxonCount')
@@ -175,6 +211,38 @@ class Validator():
         plt.savefig(os.path.join(save_dir, f'{df.iloc[0]["plotID"]}_taxon_count.png'))
 
         return None    
+
+    def make_taxa_area_hists(self, save_dir):
+        grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
+        grouped_files.apply(self._make_area_hist, save_dir)
+
+    @staticmethod
+    def _make_area_hist(df, save_dir):
+        df = df.loc[df['approx_sq_m'] == df['approx_sq_m']]
+        
+        taxon_sums = df.groupby('taxonID').sum()
+        taxon_sums = taxon_sums.reset_index()
+        ax = taxon_sums.plot.bar(x='taxonID', y='ninetyCrownDiameter')
+        ax.set_title(df.iloc[0]['plotID'])
+        ax.set_ylabel('Pixel Count')
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_dir, f'{df.iloc[0]["plotID"]}_taxon_area.png'))
+
+        sun_sums = df.groupby('sun').sum()
+        sun_sums = sun_sums.reset_index()
+        sun_sums['sun'].loc[sun_sums['sun'] == True] = 'Sun'
+        sun_sums['sun'].loc[sun_sums['sun'] == False] = 'Shade'
+        ax = sun_sums.plot.bar(x='sun', y='ninetyCrownDiameter')
+        ax.set_title(df.iloc[0]['plotID'])
+        ax.set_ylabel('Pixel Count')
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_dir, f'{df.iloc[0]["plotID"]}_sun_area.png'))
+
+
+
+
+        
+        print('here')
 
     def plot_tree(self, coord, file, **kwargs):
      
@@ -411,6 +479,24 @@ def ward_cluster_plots(plot_dir, save_dir):
             np.save(os.path.join(save_dir, f'cluster_{f}'), clustered)
             plt.imsave(os.path.join(save_dir, 'viz',  f"{f.split('.')[0]}.png"),clustered)
 
+def plot_inference(validator, save_dir, model):
+    for key, f in validator.valid_files.items():
+        clustered = inference.swav_inference_big(model, f)
+        plt.bar(*np.unique(clustered, return_counts=True))
+        plot_id = f.split("_")[2]+ " "+ f.split("_")[3]
+        plt.title(plot_id)
+        plt.xlabel('Classification')
+        plt.ylabel('Pixel Count')
+        #plt.xlim(0, 10)
+
+        plt.savefig(os.path.join(save_dir, plot_id + ".png"))
+        plt.close()
+
+
+        plt.imsave(os.path.join(save_dir, 'viz',  f"{plot_id}.png"),clustered, cmap='tab20')
+
+
+
 def pca_norm_cluster_plots(plot_dir, save_dir):
     mean = np.load(os.path.join(plot_dir, 'stats/mean.npy')).astype(np.float32)
     std = np.load(os.path.join(plot_dir, 'stats/std.npy')).astype(np.float32)
@@ -500,28 +586,36 @@ def handle_each_plot(plot_dir, fn, save_dir):
 if __name__ == "__main__":
     NUM_CLUSTERS = 60
     NUM_CHANNELS = 30
-    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022'
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels'
     PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance_pca.npy')
     IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
     IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
-    SAVE_DIR = "W:/Classes/Research/validation/harv_pca/"
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/swav_12_classes'
     PLOT_DIR = "C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022"
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
     CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
     PLOT_SUBSET = os.path.join(PLOT_DIR, 'plot_subset_HARV_024_eastingcentroid_726037_northingcentroid_4704513_fromfile_726000_4704000.pk')
-    PLOT_VIZ = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plot_locations'
+    PLOT_VIZ = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/area_plots'
+
     PLOT_PKLS = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plot_pickles'
     PLOT_PCA = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca'
     #MODEL = inference.load_ckpt(models.TransEmbedConvSimSiam, 'ckpts\harv_trans_embed_conv_sim_epoch=1.ckpt', num_channels=30, img_size=32, output_classes=20)
 
-    MEAN = np.load(os.path.join(PLOT_PCA, 'stats/mean.npy')).astype(np.float32)
-    STD = np.load(os.path.join(PLOT_PCA, 'stats/std.npy')).astype(np.float32)
+    # MEAN = np.load(os.path.join(PLOT_PCA, 'stats/mean.npy')).astype(np.float32)
+    # STD = np.load(os.path.join(PLOT_PCA, 'stats/std.npy')).astype(np.float32)
 
-    norm = tt.Normalize(MEAN, STD)
-    valid = Validator(file=VALID_FILE, img_dir=SAVE_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
+    # norm = tt.Normalize(MEAN, STD)
+    valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
+    valid.map_trees('test')
+    ckpt = 'ckpts\harv_10_channels_12_classes_swav_patch_size_4_epoch=49.ckpt'
+    MODEL = models.SWaVModel().load_from_checkpoint(ckpt)
+    #valid.do_plot_inference(SAVE_DIR, MODEL)
+
+    #plot_inference(PLOT_PCA, 'test', MODEL)
+    #valid.make_taxa_area_hists(PLOT_VIZ)
     #cluster_histograms('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/pca_norm_clustered_plots', 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/pca_norm_clustered_plots/hists')
     #valid.make_taxa_plots('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/taxon_plots')
 
@@ -529,7 +623,7 @@ if __name__ == "__main__":
     #pca_norm_cluster_plots(PLOT_PCA, 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/pca_norm_clustered_plots')
 
     # valid.extract_plots(PLOT_PKLS)
-    handle_each_plot(PLOT_PKLS, get_shadow_masks, 'test')
+    #handle_each_plot(PLOT_PKLS, get_shadow_masks, 'test')
 
     # inc_pca_plots(PLOT_PKLS, PLOT_PCA)
 

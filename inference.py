@@ -61,22 +61,58 @@ def vit_inference(model, file, norm):
     return img
 
 
-def swav_inference(model, file):
+def swav_inference_big(model, file):
     model.eval()
     img = np.load(file)
-    img = img[500:,250:750,...]
+    img = torch.from_numpy(img).float()
+    
+    img = rearrange(img, '(k1 h) (k2 w) c -> (k1 k2) c h w', k1=2, k2=2)
+    imgs = []
+    #img_shape = list(img.shape)
+    #img_shape[1] = 24
+    #img_shape = (4, 24, 500, 500)
+    #holder = torch.empty(img_shape, dtype=img.dtype)
+
+    for i, x in enumerate(img):
+
+
+        x = x.unsqueeze(0).clone()
+
+        x = model(x).detach()
+        #print(holder.shape)
+        #print(x.shape)
+        x = rearrange(x, 'b (h w) c -> b c h w', h=125, w=125)
+        #print(x.shape)
+        x = f.interpolate(x, size=(500, 500), mode='bilinear')
+        #print(x.shape)
+        imgs.append(torch.argmax(x.squeeze(0), dim=0).numpy())
+    #img = rearrange(holder, '(k1 k2) c h w -> c (h k1) (w k2)', k1=2, k2=2)
+    #img = torch.argmax(img, dim=0)
+    #img = img.numpy()
+    row_1 = np.hstack((imgs[0], imgs[1]))
+    row_2 = np.hstack((imgs[2], imgs[3]))
+    img = np.vstack((row_1,row_2))
+    #plt.imshow(img, cmap='tab20')
+    #plt.show()
+
+    return img
+
+def swav_inference_small(model, file):
+    model.eval()
+    img = np.load(file)
+    #img = img[500:,250:750,...]
     img = torch.from_numpy(img).float()
     img = rearrange(img, 'h w c -> c h w')
 
     img = img.unsqueeze(0)
 
     img = model(img).detach()
-    img = rearrange(img, 'b (h w) c -> b c h w', h=125, w=125)
-    img = f.interpolate(img, size=(500, 500), mode='bicubic')
+    img = rearrange(img, 'b (h w) c -> b c h w', h=10, w=10)
+    img = f.interpolate(img, size=(40, 40), mode='bilinear')
     img = torch.argmax(img, dim=1)
     img = img.squeeze().numpy()
-    plt.imshow(img)
-    plt.show()
+    #plt.imshow(img)
+    #plt.show()
 
     return img
 
@@ -101,11 +137,11 @@ if __name__ == "__main__":
 
     # test = torch.ones(1369, 1, 27, 27)
     # print(transformer_outshape(test).shape)
-    ckpt = 'ckpts\harv_10_channels_10_classes_swav_patch_size_4_epoch=99.ckpt'
-    pca_file = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels/NEON_D01_HARV_DP3_726000_4704000_reflectance_pca.npy'
+    ckpt = 'ckpts\harv_10_channels_12_classes_swav_patch_size_4_epoch=49.ckpt'
+    pca_file = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels/NEON_D01_HARV_DP3_730000_4701000_reflectance_pca.npy'
     MODEL = models.SWaVModel().load_from_checkpoint(ckpt)
 
-    swav_inference(MODEL, pca_file)
+    swav_inference_big(MODEL, pca_file)
 
 
 
