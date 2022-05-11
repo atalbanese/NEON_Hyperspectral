@@ -24,6 +24,33 @@ def get_classifications(x):
     # masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
+class SWaVModelRes(pl.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.model = networks.SWaVResnet()
+
+    def training_step(self, x):
+        inp = x['base'].squeeze(0)
+        loss = self.model.forward_train(inp)
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=5e-4)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10, eta_min=5e-7)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+
+    def on_before_optimizer_step(self, optimizer, optimizer_idx):
+        if self.current_epoch < 1:
+            for name, p in self.model.named_parameters():
+                    if "prototypes" in name:
+                        p.grad = None
+    
+    def on_train_batch_start(self, batch, batch_idx):
+        self.model.norm_prototypes()
+
+    def forward(self, x):
+        return self.model(x)
+
 class SWaVModel(pl.LightningModule):
     def __init__(self):
         super().__init__()

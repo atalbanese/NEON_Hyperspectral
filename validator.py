@@ -16,6 +16,8 @@ from einops import rearrange
 from sklearn.decomposition import PCA, IncrementalPCA
 import torchvision.transforms as tt
 
+#TODO: Clean this mess up
+#Switch plots to plotly? Good for overlays
 class Validator():
     def __init__(self, **kwargs):
         self.file = kwargs["file"]
@@ -38,14 +40,7 @@ class Validator():
         #data = data.loc[(data['canopyPosition'] == "Partially shaded") | (data['canopyPosition'] == "Full sun")]
         data = data.loc[(data['plantStatus'] != 'Dead, broken bole') & (data['plantStatus'] != 'Downed') & (data['plantStatus'] != 'No longer qualifies') & (data['plantStatus'] != 'Lost, fate unknown') & (data['plantStatus'] != 'Removed') & (data['plantStatus'] != 'Lost, presumed dead')]
 
-        # data = data.loc[~(data['ninetyCrownDiameter'] != data['ninetyCrownDiameter'])]
         data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
-
-        # props = data.groupby(['plotID', 'taxonID']).count()
-        # #props = props.groupby(level=0).apply(lambda x: 100*x/x.sum())
-        # props = pd.DataFrame(props.to_records())
-        # props = props.drop('siteID', axis=1)
-        # props = props.rename(columns={'plantStatus': 'taxonCount'})
 
         plots = pd.read_csv(self.plot_file, usecols=['plotID', 'siteID', 'subtype', 'easting', 'northing', 'plotSize'])
         plots = plots.loc[plots['siteID'] == self.site_name]

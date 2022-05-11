@@ -10,6 +10,108 @@ import torchvision.transforms as tt
 import transforms as tr
 
 
+
+class SWaVResnet(nn.Module):
+    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12):
+        super(SWaVResnet, self).__init__()
+        self.transforms_1 =  tt.Compose([tt.RandomHorizontalFlip(),
+                                    tt.RandomVerticalFlip()])
+
+        self.transforms_2 = tt.Compose([Rearrange('b c h w -> b (h w) c'),
+                                        tr.Blit(),
+                                        tr.Block(),
+                                        Rearrange('b (h w) c -> b c h w', h=img_size, w=img_size)])
+
+
+        self.encoder = net_gen.ResnetGenerator(in_channels, num_classes, n_blocks=3)
+
+        self.projector = DenseProjector(num_channels=num_classes)
+
+        self.prototypes = nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False)
+
+        self.softmax = nn.LogSoftmax(dim=1)
+
+        self.flatten = Rearrange('c h w -> c (h w)')
+        self.temp = temp
+        self.epsilon = epsilon
+        self.niters = sinkhorn_iters
+
+    #TODO: freeze protos for first epoch
+    @torch.no_grad()
+    def norm_prototypes(self):
+        w = self.prototypes.weight.data.clone()
+        w = f.normalize(w, dim=1, p=2)
+        self.prototypes.weight.copy_(w)
+
+
+    @torch.no_grad()
+    def sinkhorn(self, scores):
+        Q = torch.exp(scores/self.epsilon).t()
+        B = Q.shape[1] 
+        K = Q.shape[0]
+
+        sum_Q = torch.sum(Q)
+        Q /= sum_Q
+
+        for it in range(self.niters):
+            # normalize each row: total weight per prototype must be 1/K
+            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+            Q /= sum_of_rows
+            Q /= K
+
+            # normalize each column: total weight per sample must be 1/B
+            Q /= torch.sum(Q, dim=0, keepdim=True)
+            Q /= B
+
+        Q *= B # the colomns must sum to 1 so that Q is an assignment
+        return Q.t()
+
+
+    def forward_train(self, x):
+
+        b,_,_,_ = x.shape
+
+        x_t = self.transforms_1(x)
+        x_s = self.transforms_2(x_t)
+
+        inp = torch.cat((x_t, x_s))
+
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+
+        scores_t = scores[:b]
+        scores_s = scores[b:]
+
+        loss = 0
+
+        for i in range(b):
+            t, s = scores_t[i].detach(), scores_s[i].detach()
+            t = self.flatten(t)
+            s = self.flatten(s)
+            q_t = self.sinkhorn(t)
+            q_s = self.sinkhorn(s)
+
+            p_t = self.softmax(scores_t[i]/self.temp)
+            p_s = self.softmax(scores_s[i]/self.temp)
+
+            p_t = self.flatten(p_t)
+            p_s = self.flatten(p_s)
+
+            loss += -0.5 * torch.mean(q_t * p_s + q_s * p_t)
+
+        return loss/b
+
+    def forward(self, inp):
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+        return scores
+
 class SWaV(nn.Module):
     def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12):
         super(SWaV, self).__init__()
@@ -188,7 +290,7 @@ class Predictor(nn.Module):
 
 #Projector g from https://arxiv.org/pdf/2203.11075.pdf
 class DenseProjector(nn.Module):
-    def __init__(self, num_channels = 512, num_classes= 10):
+    def __init__(self, num_channels = 512):
         super(DenseProjector, self).__init__()
         self.layer1 = nn.Sequential(nn.Conv2d(num_channels, num_channels, kernel_size=1),
                                     nn.BatchNorm2d(num_channels),
@@ -207,7 +309,7 @@ class DenseProjector(nn.Module):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
-        x = f.interpolate(x, (25, 25))
+        #x = f.interpolate(x, (25, 25))
         return x
 
 #Predictor h - just guessing as to whats this is supposed to be like
@@ -215,13 +317,9 @@ class DensePredictor(nn.Module):
     def __init__(self, num_classes =10):
         super(DensePredictor, self).__init__()
         self.layer1 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1),
-                                    nn.BatchNorm2d(num_classes),
                                     nn.ReLU()
                                     )
-        self.layer2 = nn.Sequential(nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False),
-                                    nn.BatchNorm2d(num_classes),
-                                    nn.ReLU()
-                                    )
+        self.layer2 = nn.Conv2d(num_classes, num_classes, kernel_size=1, bias=False)
     def forward(self, x):
         x = self.layer1(x)
         x = self.layer2(x)
