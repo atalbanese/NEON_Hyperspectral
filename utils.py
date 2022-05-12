@@ -1,4 +1,3 @@
-from multiprocessing.sharedctypes import Value
 import h5_helper as hp
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,6 +16,7 @@ from skimage.color import rgb2hsv
 from skimage import exposure
 import numpy.ma as ma
 import random 
+import rasterio as rs
 
 def get_features(inp, feature_band=2):
     return np.reshape(inp, (-1,inp.shape[feature_band]))
@@ -228,6 +228,22 @@ def img_stats(dir, out_dir, num_channels=30):
     np.save(os.path.join(out_dir, "mean.npy"), total_mean)
     np.save(os.path.join(out_dir, "std.npy"), total_std)
 
+def img_stats_chm(in_dir):
+    files = os.listdir(in_dir)
+    max = 0
+    for file in tqdm(files):
+        if ".tif" in file:
+            try:
+                chm_open = rs.open(os.path.join(in_dir, file))
+                img = chm_open.read().astype(np.float32)
+                if img.max() > max:
+                    max = img.max()
+            except ValueError as e:
+                print(e)
+                continue
+    #count = num_files *1000 * 1000
+    print(f'max value found: {max}')
+
 def save_bands(args):
     file, in_dir, out_dir, bands = args
 
@@ -326,6 +342,16 @@ def do_inc_pca(args):
             return pca_file
 
 
+def save_solar_stats(args):
+    file, in_dir, out_dir = args
+    if ".h5" in file:
+        sol_file = file.split(".")[0] + '_solar.npy'
+        if not os.path.exists(os.path.join(out_dir, sol_file)):
+            img = hp.pre_processing(os.path.join(in_dir,file), meta_only=True)["meta"]
+            np.save(os.path.join(out_dir, sol_file), img['azimuth'])
+            return sol_file
+
+
 
 
 
@@ -336,7 +362,7 @@ def bulk_process(pool, dirs, fn, **kwargs):
 
     args_list = list(zip(files, *dirs))
 
-    future = pool.map(fn, args_list, timeout=99)
+    future = pool.map(fn, args_list, timeout=1000)
     iterator = future.result()
     while True:
         try:
@@ -372,7 +398,13 @@ if __name__ == '__main__':
     IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
 
 
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv_2022'
+
+    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022'
+    img_stats_chm(chm_fold)
+
+    # with ProcessPool(6) as pool:
+    #     bulk_process(pool, [IN_DIR, OUT_DIR], save_solar_stats)
 
     #get_masks((IMG, IMG_DIR, MASK_DIR))
 
@@ -383,22 +415,15 @@ if __name__ == '__main__':
 
 
 
-    PCA_SOLVER = IncrementalPCA(n_components=10)
+    # PCA_SOLVER = IncrementalPCA(n_components=10)
 
-    for f in tqdm(random.sample(os.listdir(IN_DIR), 50)):
-        PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
-
-    # # print(PCA_SOLVER.mean_)
-    # # print(PCA_SOLVER.var_)
-
-    with ProcessPool(4) as pool:
-        bulk_process(pool, [IN_DIR, OUT_DIR, PCA_SOLVER], do_inc_pca)
-
+    # for f in tqdm(random.sample(os.listdir(IN_DIR), 50)):
+    #     PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
 
     # with ProcessPool(4) as pool:
-    #     bulk_process(pool, [IN_DIR, OUT_DIR, BANDS], save_bands)
+    #     bulk_process(pool, [IN_DIR, OUT_DIR, PCA_SOLVER], do_inc_pca)
 
-    img_stats(OUT_DIR, os.path.join(OUT_DIR, 'stats'), num_channels=10)
+    # img_stats(OUT_DIR, os.path.join(OUT_DIR, 'stats'), num_channels=10)
 
 
     #get_bareness_mask((IMG, '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022', '/data/shared/src/aalbanese/datasets/hs/shadow_masks/harv'))

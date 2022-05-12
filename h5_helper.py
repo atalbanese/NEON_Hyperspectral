@@ -58,7 +58,7 @@ def stack_all(band_dict, axis=2):
 
 #TODO: this is getting unwieldy. Split it up
 #Open hyperspectral file, get the supplied wavelengths, merge them into bands, and return them along with metadata for the file
-def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select_bands=None, get_all=False):
+def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select_bands=None, get_all=False, meta_only=False):
     was_str = False
     to_return = {}
     if isinstance(f, str):
@@ -69,20 +69,20 @@ def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select
 
     #Get values out of h5
     meta_data = f[group_key]["Reflectance"]["Metadata"]
-    refl_values = f[group_key]["Reflectance"]["Reflectance_Data"]
+    if not meta_only:
+        refl_values = f[group_key]["Reflectance"]["Reflectance_Data"]
 
     if mosaic:
         zenith = meta_data['to-sensor_zenith_angle']
         spectral = meta_data['Spectral_Data']
         #TODO: FIx Missing angles (-1)
-        # angles = get_solar_stats(meta_data)
-        # angles['sensor_zenith'] = meta_data['to-sensor_zenith_angle'][:]
-        # angles['azimuth'] = np.abs(meta_data['to-sensor_azimuth_angle'][:]-180.0-angles['azimuth'])
+        angles = get_solar_stats(meta_data)
+        angles['sensor_zenith'] = meta_data['to-sensor_zenith_angle'][:]
+        angles['azimuth'] = np.abs(meta_data['to-sensor_azimuth_angle'][:]-180.0-angles['azimuth'])
     else:
         angles = 'Getting angle metadata from flightline files still in development'
     
-    angles = 'Getting angles still in dev'
-
+    
     #angles['azimuth'] = np.ones_like(angles['sensor_zenith']) *10
     #plt.imshow(zenith)
     #plt.show()
@@ -90,8 +90,11 @@ def pre_processing(f, wavelength_ranges=None, mosaic=True, merging=False, select
     meta_data = {"map_info": meta_data['Coordinate_System']['Map_Info'][()].decode("utf-8"),
                     "proj": meta_data['Coordinate_System']['Proj4'][()].decode("utf-8"),
                     "epsg": meta_data['Coordinate_System']['EPSG Code'][()].decode("utf-8"),
-                    'spectral_bands': spectral_bands}
+                    "azimuth": angles['azimuth'],
+                    "spectral_bands": spectral_bands}
     to_return["meta"] = meta_data
+    if meta_only:
+        return to_return
     if not get_all:
         if merging:
             #Get masks to select specific bands as defined by wavelength_ranges
@@ -123,7 +126,7 @@ def get_solar_stats(metadata):
     # Get index mask - each integer represents a specific flight log, indexed by Data_Files
     data_index = metadata["Ancillary_Imagery"]["Data_Selection_Index"]
     # Get flight logs index
-    data_index_list = data_index.attrs['Data_Files'].split(',')
+    data_index_list = str(data_index.attrs['Data_Files']).split(',')
     data_index_list = [index.split('_')[-2] for index in data_index_list]
 
     # Get actual flight logs and extract solar angles
@@ -135,6 +138,8 @@ def get_solar_stats(metadata):
 
     # Correlate flight logs index to solar angles from flight logs
     flight_index = {i:flight_angles[data_index_list[i]] for i in range(len(data_index_list)) if data_index_list[i] in flight_angles}
+    #Handle missing data (-1)
+    flight_index[-1] = {'azimuth': np.nan, 'zenith': np.nan, 'flight_time': np.nan}
 
     #Get actual index integer values
     index_values = data_index[:]

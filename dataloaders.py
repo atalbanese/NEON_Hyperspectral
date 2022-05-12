@@ -12,6 +12,7 @@ import transforms as tr
 import torch.nn.functional as f
 import torchvision.transforms as tt
 from einops import rearrange
+import rasterio as rs
 import numpy.ma as ma
 import pickle
 from einops.layers.torch import Rearrange, Reduce
@@ -31,7 +32,20 @@ class StructureDataset(Dataset):
         self.rng = np.random.default_rng()
         self.crop_size = crop_size
 
-       
+        def make_dict(file_list, param_1, param_2):
+            return {(file.split('_')[param_1], file.split('_')[param_2]): file for file in file_list}
+
+        self.chm_files = [os.path.join(tif_folder, file) for file in os.listdir(tif_folder) if ".tif" in file]
+        self.azimuth_files = [os.path.join(azimuth_folder, file) for file in os.listdir(azimuth_folder) if ".npy" in file]
+
+        self.files_dict = make_dict(self.files, -4, -3)
+        self.chm_dict = make_dict(self.chm_files, -3, -2)
+        self.azimuth_dict = make_dict(self.azimuth_files, -4, -3)
+
+        self.all_files = list(set(self.files_dict.keys()) & set(self.chm_dict.keys()) & set(self.azimuth_dict.keys()))
+
+        
+
 
     def check_files(self):
         to_remove = []
@@ -52,21 +66,45 @@ class StructureDataset(Dataset):
 
 
     def __len__(self):
-        return len(self.files)
+        return len(self.all_files)
 
     def __getitem__(self, index):
-        img = np.load(self.files[index]).astype(np.float32)
+        key = self.all_files[index]
+
+        #PCA
+        img = np.load(self.files_dict[key]).astype(np.float32)
         img = rearrange(img, 'h w c -> c h w')
-        img = torch.from_numpy(img)     
+        img = torch.from_numpy(img)
+
+        #Azimuth
+        azimuth = np.load(self.azimuth_dict[key]).astype(np.float32)
+        #Make -1 to 1
+        azimuth = (torch.from_numpy(azimuth)-180)/180
+
+        #CHM
+        chm_open = rs.open(self.chm_dict[key])
+        chm = chm_open.read().astype(np.float32)
+        #Make 0 to 1 - 47.33... is max height in dataset
+        chm = torch.from_numpy(chm).squeeze(0)/47.33000183105469
+             
 
         img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+        azimuth = rearrange(azimuth, '(b1 h) (b2 w) -> (b1 b2) h w', h=self.crop_size, w=self.crop_size)
+        chm = rearrange(chm, '(b1 h) (b2 w) -> (b1 b2) h w', h=self.crop_size, w=self.crop_size)
+
         random_select = self.rng.choice(range(0, img.shape[0]), size=self.batch_size, replace=False)
         img = img[random_select]
+        chm = chm[random_select]
+        azimuth = azimuth[random_select]
 
         to_return = {}
         to_return["base"] = img
+        to_return['chm'] = chm
+        to_return['azimuth'] = azimuth
 
         return to_return
+
+
 
 class DeepClusterDataset(Dataset):
     def __init__(self, pca_folder, crop_size, eval=False, **kwargs):
@@ -525,8 +563,13 @@ class HyperDataset(Dataset):
 
 if __name__ == "__main__":
 
-    pca_fold = '/data/shared/src/aalbanese/datasets/hs/pca/harv_masked_2022'
-    test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
+    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels/'
+    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022'
+    az_fold = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv_2022'
+
+    test = StructureDataset(pca_fold, chm_fold, az_fold, 40)
+
+    # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 
     print(test.__getitem__(69).shape)
     #test = pylas.read('/data/shared/src/aalbanese/datasets/lidar/NEON_lidar-point-cloud-line/NEON.D16.WREF.DP1.30003.001.2021-07.basic.20220330T163527Z.PROVISIONAL/NEON_D16_WREF_DP1_L001-1_2021071815_unclassified_point_cloud.las')    
