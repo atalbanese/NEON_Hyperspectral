@@ -1,3 +1,4 @@
+from requests import patch
 import torch
 import torch.nn as nn
 from torchvision import models
@@ -9,15 +10,17 @@ import numpy as np
 import torchvision.transforms as tt
 import transforms as tr
 
-class SWaVStructure(nn.Module):
+class SWaVStruct(nn.Module):
     def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12):
-        super(SWaV, self).__init__()
-        self.transforms_1 =  tt.Compose([tt.RandomHorizontalFlip(),
-                                    tt.RandomVerticalFlip()])
+        super(SWaVStruct, self).__init__()
 
-        self.transforms_2 = tt.Compose([Rearrange('b c h w -> b (h w) c'),
+        self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
                                         tr.Blit(),
                                         tr.Block(),
+                                        Rearrange('b (h w) c -> b c h w', h=img_size, w=img_size)])
+
+        self.transforms_embed = tt.Compose([Rearrange('b c h w -> b (h w) c'),
+                                        tr.Blit(),
                                         Rearrange('b (h w) c -> b c h w', h=img_size, w=img_size)])
 
         self.patch_embed = nn.Sequential(
@@ -25,6 +28,19 @@ class SWaVStructure(nn.Module):
             Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
             nn.Linear(patch_size * patch_size * in_channels, emb_size)
         )
+
+        self.azm_embed = nn.Sequential(
+            # break-down the image in s1 x s2 patches and flat them
+            Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
+            nn.Linear(patch_size * patch_size, emb_size)
+        )
+
+        self.chm_embed = nn.Sequential(
+            # break-down the image in s1 x s2 patches and flat them
+            Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
+            nn.Linear(patch_size * patch_size, emb_size)
+        )
+
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=4, dim_feedforward=emb_size*2, batch_first=True)
         self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
@@ -73,16 +89,32 @@ class SWaVStructure(nn.Module):
         return Q.t()
 
 
-    def forward_train(self, x):
+    def forward_train(self, x, chm, azm):
 
         b,_,_,_ = x.shape
 
-        x_t = self.transforms_1(x)
-        x_s = self.transforms_2(x_t)
+        x_s = self.transforms_main(x)
 
-        inp = torch.cat((x_t, x_s))
+        chm_s = self.transforms_embed(chm)
+        azm_s = self.transforms_embed(azm)
 
-        inp = self.patch_embed(inp)
+
+        chm = self.chm_embed(chm)
+        chm_s = self.chm_embed(chm_s)
+
+        azm = self.azm_embed(azm)
+        azm_s = self.azm_embed(azm_s)
+
+        x = self.patch_embed(x)
+        x_s = self.patch_embed(x_s)
+
+        x += chm
+        x += azm
+
+        x_s += chm_s
+        x_s += azm_s
+
+        inp = torch.cat((x, x_s))
         inp = self.encoder(inp)
         inp = self.projector(inp)
         inp = nn.functional.normalize(inp, dim=1, p=2)

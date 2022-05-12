@@ -1,4 +1,5 @@
 import h5_helper as hp
+import warnings
 #import pylas
 from torch.utils.data import Dataset
 import os
@@ -13,6 +14,9 @@ import torch.nn.functional as f
 import torchvision.transforms as tt
 from einops import rearrange
 import rasterio as rs
+from rasterio import logging
+
+
 import numpy.ma as ma
 import pickle
 from einops.layers.torch import Rearrange, Reduce
@@ -21,7 +25,7 @@ from einops.layers.torch import Rearrange, Reduce
 class StructureDataset(Dataset):
     def __init__(self, pca_folder, tif_folder, azimuth_folder, crop_size, eval=False, **kwargs):
         self.pca_folder = pca_folder
-        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 128
+        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 256
         if os.path.exists(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl')):
             with open(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl'), 'rb') as f:
                 self.files = pickle.load(f)
@@ -44,7 +48,7 @@ class StructureDataset(Dataset):
 
         self.all_files = list(set(self.files_dict.keys()) & set(self.chm_dict.keys()) & set(self.azimuth_dict.keys()))
 
-        
+       
 
 
     def check_files(self):
@@ -80,12 +84,16 @@ class StructureDataset(Dataset):
         azimuth = np.load(self.azimuth_dict[key]).astype(np.float32)
         #Make -1 to 1
         azimuth = (torch.from_numpy(azimuth)-180)/180
+        azimuth[azimuth != azimuth] = 0
 
         #CHM
-        chm_open = rs.open(self.chm_dict[key])
-        chm = chm_open.read().astype(np.float32)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            chm_open = rs.open(self.chm_dict[key])
+            chm = chm_open.read().astype(np.float32)
         #Make 0 to 1 - 47.33... is max height in dataset
         chm = torch.from_numpy(chm).squeeze(0)/47.33000183105469
+        chm[chm != chm] = 0
              
 
         img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
