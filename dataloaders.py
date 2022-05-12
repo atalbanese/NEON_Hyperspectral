@@ -17,6 +17,57 @@ import pickle
 from einops.layers.torch import Rearrange, Reduce
 #from torch_geometric.data import Data
 
+class StructureDataset(Dataset):
+    def __init__(self, pca_folder, tif_folder, azimuth_folder, crop_size, eval=False, **kwargs):
+        self.pca_folder = pca_folder
+        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 128
+        if os.path.exists(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl')):
+            with open(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl'), 'rb') as f:
+                self.files = pickle.load(f)
+        else:
+            self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+            if not eval:
+                self.check_files()
+        self.rng = np.random.default_rng()
+        self.crop_size = crop_size
+
+       
+
+    def check_files(self):
+        to_remove = []
+        for file in self.files:
+            try:
+                img = np.load(file)
+                img = rearrange(img, 'h w c -> (h w) c')
+            except ValueError as e:
+                to_remove.append(file)
+            img = ma.masked_invalid(img)
+            img = ma.compress_rows(img)
+            if img.shape[0] <1000*1000:
+                to_remove.append(file)
+        self.files = list(set(self.files) - set(to_remove))
+        with open(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl'), 'wb') as f:
+            pickle.dump(self.files, f)
+
+
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, index):
+        img = np.load(self.files[index]).astype(np.float32)
+        img = rearrange(img, 'h w c -> c h w')
+        img = torch.from_numpy(img)     
+
+        img = rearrange(img, 'c (b1 h) (b2 w) -> (b1 b2) c h w', h=self.crop_size, w=self.crop_size)
+        random_select = self.rng.choice(range(0, img.shape[0]), size=self.batch_size, replace=False)
+        img = img[random_select]
+
+        to_return = {}
+        to_return["base"] = img
+
+        return to_return
+
 class DeepClusterDataset(Dataset):
     def __init__(self, pca_folder, crop_size, eval=False, **kwargs):
         self.pca_folder = pca_folder

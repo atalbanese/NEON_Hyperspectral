@@ -116,6 +116,25 @@ def swav_inference_small(model, file):
 
     return img
 
+def swav_inference_res(model, file):
+    model.eval()
+    img = np.load(file)
+    #img = img[500:,250:750,...]
+    img = torch.from_numpy(img).float()
+    img = rearrange(img, 'h w c -> c h w')
+
+    img = img.unsqueeze(0)
+
+    img = model(img).detach()
+    img = torch.argmax(img, dim=1)
+    img = img.squeeze().numpy()
+    plt.imshow(img, cmap='PRGn')
+    plt.show()
+
+    return img
+
+
+
 
 
 
@@ -137,11 +156,11 @@ if __name__ == "__main__":
 
     # test = torch.ones(1369, 1, 27, 27)
     # print(transformer_outshape(test).shape)
-    ckpt = 'ckpts\harv_10_channels_12_classes_swav_patch_size_4_epoch=49.ckpt'
+    ckpt = 'ckpts\harv_10_channels_12_classes_swav_resnet_epoch=0.ckpt'
     pca_file = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels/NEON_D01_HARV_DP3_730000_4701000_reflectance_pca.npy'
-    MODEL = models.SWaVModel().load_from_checkpoint(ckpt)
+    MODEL = models.SWaVModelRes().load_from_checkpoint(ckpt)
 
-    swav_inference_big(MODEL, pca_file)
+    swav_inference_res(MODEL, pca_file)
 
 
 

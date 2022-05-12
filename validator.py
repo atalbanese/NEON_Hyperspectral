@@ -143,16 +143,19 @@ class Validator():
         rgb = hp.pre_processing(open_file, wavelength_ranges=utils.get_viz_bands())
         rgb = hp.make_rgb(rgb["bands"])
         rgb = exposure.adjust_gamma(rgb, 0.5)
+
         rgb = rgb[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
+        plt.imshow(rgb)
         df['tree_x'] = df['tree_x'] - df['x_min']
         df['tree_y'] = df['tree_y'] - df['y_min']
 
         trees_df = df.loc[(df['tree_x'] == df['tree_x'])]
         for ix, row in trees_df.iterrows():
             ax.plot(row['tree_x'], row['tree_y'], marker="o")
-            ax.annotate(row['taxonID'], (row['tree_x'], row['tree_y']), textcoords='offset points', xytext= (0, 5), ha='center')
-        ax.imshow(rgb)
-        plt.show()
+            ax.annotate(row['taxonID'], (row['tree_x'], row['tree_y']), textcoords='offset points', xytext= (0, 5), ha='center', color='white', fontsize='xx-large')
+        fig.tight_layout()
+        plt.savefig(os.path.join(save_dir, f'{row["plotID"]}_{coords}_trees.png'))
+        plt.close()
 
 
 
@@ -604,7 +607,7 @@ if __name__ == "__main__":
 
     # norm = tt.Normalize(MEAN, STD)
     valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
-    valid.map_trees('test')
+    valid.map_trees('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/ind_plots_viz')
     ckpt = 'ckpts\harv_10_channels_12_classes_swav_patch_size_4_epoch=49.ckpt'
     MODEL = models.SWaVModel().load_from_checkpoint(ckpt)
     #valid.do_plot_inference(SAVE_DIR, MODEL)
