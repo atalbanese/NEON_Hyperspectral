@@ -1,3 +1,4 @@
+import rasterio as rs
 import pytorch_lightning as pl
 import models
 import h5_helper as hp
@@ -134,6 +135,65 @@ def swav_inference_res(model, file):
     return img
 
 
+def swav_inference_big_struct(model, file, chm, azm):
+    model.eval()
+     #PCA
+    img = np.load(file).astype(np.float32)
+    #img = rearrange(img, 'h w c -> c h w')
+    img = torch.from_numpy(img)
+
+    #Azimuth
+    azimuth = np.load(azm).astype(np.float32)
+    #Make -1 to 1
+    azimuth = (torch.from_numpy(azimuth)-180)/180
+    azimuth[azimuth != azimuth] = 0
+
+    #CHM
+ 
+    chm_open = rs.open(chm)
+    chm = chm_open.read().astype(np.float32)
+    #Make 0 to 1 - 47.33... is max height in dataset
+    chm = torch.from_numpy(chm).squeeze(0)/47.33000183105469
+    chm[chm != chm] = 0
+    
+    img = rearrange(img, '(k1 h) (k2 w) c -> (k1 k2) c h w', k1=2, k2=2)
+    chm = rearrange(chm, '(k1 h) (k2 w) -> (k1 k2) h w', k1=2, k2=2).unsqueeze(1).unsqueeze(1)
+    azm = rearrange(azimuth, '(k1 h) (k2 w) -> (k1 k2) h w', k1=2, k2=2).unsqueeze(1).unsqueeze(1)
+    imgs = []
+    #img_shape = list(img.shape)
+    #img_shape[1] = 24
+    #img_shape = (4, 24, 500, 500)
+    #holder = torch.empty(img_shape, dtype=img.dtype)
+
+    for i, x in enumerate(img):
+
+
+        x = x.unsqueeze(0).clone()
+
+        x = f.interpolate(x, size=(501, 501), mode='bilinear')
+        c = f.interpolate(chm[i], size=(501, 501), mode='bilinear')
+        a = f.interpolate(azm[i], size=(501, 501), mode='bilinear')
+
+
+        x = model(x, c, a).detach()
+        #print(holder.shape)
+        #print(x.shape)
+        x = rearrange(x, 'b (h w) c -> b c h w', h=125, w=125)
+        #print(x.shape)
+        x = f.interpolate(x, size=(500, 500), mode='bilinear')
+        #print(x.shape)
+        imgs.append(torch.argmax(x.squeeze(0), dim=0).numpy())
+    #img = rearrange(holder, '(k1 k2) c h w -> c (h k1) (w k2)', k1=2, k2=2)
+    #img = torch.argmax(img, dim=0)
+    #img = img.numpy()
+    row_1 = np.hstack((imgs[0], imgs[1]))
+    row_2 = np.hstack((imgs[2], imgs[3]))
+    img = np.vstack((row_1,row_2))
+    #plt.imshow(img, cmap='tab20')
+    #plt.show()
+
+    return img
+
 
 
 
@@ -156,11 +216,13 @@ if __name__ == "__main__":
 
     # test = torch.ones(1369, 1, 27, 27)
     # print(transformer_outshape(test).shape)
-    ckpt = 'ckpts\harv_10_channels_12_classes_swav_resnet_epoch=0.ckpt'
+    ckpt = 'ckpts\harv_10_channels_12_classes_swav_structure_patch_size_3epoch=16.ckpt'
     pca_file = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels/NEON_D01_HARV_DP3_730000_4701000_reflectance_pca.npy'
-    MODEL = models.SWaVModelRes().load_from_checkpoint(ckpt)
+    chm_file = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022/NEON_D01_HARV_DP3_730000_4701000_CHM.tif'
+    azm_file = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv_2022/NEON_D01_HARV_DP3_730000_4701000_reflectance_solar.npy'
+    MODEL = models.SWaVModelStruct(patch_size=3, img_size=30).load_from_checkpoint(ckpt, patch_size=3, img_size=30)
 
-    swav_inference_res(MODEL, pca_file)
+    swav_inference_big_struct(MODEL, pca_file, chm_file, azm_file)
 
 
 

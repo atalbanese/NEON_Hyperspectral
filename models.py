@@ -54,6 +54,7 @@ class SWaVModelStruct(pl.LightningModule):
 
 
         loss = self.model.forward_train(inp, chm, az)
+        self.log('train_loss', loss)
         return loss
 
     def configure_optimizers(self):
@@ -70,8 +71,8 @@ class SWaVModelStruct(pl.LightningModule):
     def on_train_batch_start(self, batch, batch_idx):
         self.model.norm_prototypes()
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, x, chm, azm):
+        return self.model(x, chm, azm)
 
 
 class SWaVModelRes(pl.LightningModule):

@@ -18,7 +18,7 @@ if __name__ == "__main__":
     h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022"
     checkpoint_callback = ModelCheckpoint(
         dirpath='ckpts', 
-        filename='harv_10_channels_12_classes_swav_structure_patch_size_3{epoch}',
+        filename='harv_10_channels_12_classes_swav_structure_patch_size_3_no_mlp{epoch}',
         every_n_epochs=1,
         save_on_train_epoch_end=True,
         save_top_k = -1
@@ -41,9 +41,9 @@ if __name__ == "__main__":
     # model = models.TransEmbedConvSimSiam(30, img_size=32, output_classes=20) #.load_from_checkpoint('ckpts\harv_trans_embed_conv_sim_epoch=4.ckpt', num_channels=30, img_size=32, output_classes=20)
 
     dataset = StructureDataset(pca_fold, chm_fold, az_fold, 40)
-    train_loader = DataLoader(dataset, batch_size=1, num_workers=6, pin_memory=True)
+    train_loader = DataLoader(dataset, batch_size=1, num_workers=4, pin_memory=True)
     model = models.SWaVModelStruct(3, 30)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=50, callbacks=[checkpoint_callback]) #, accumulate_grad_batches=4
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=200, callbacks=[checkpoint_callback]) #, accumulate_grad_batches=4
     trainer.fit(model, train_loader)
 
     
