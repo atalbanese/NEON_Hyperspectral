@@ -63,9 +63,45 @@ if __name__ == "__main__":
          'num_workers': 4,
          'img_size': 40,
          'extra_labels': 'chm_only'
+         },
+         {'num_channels': 10,
+         'num_classes': 12,
+         'azm': False,
+         'chm': False,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'extra_labels': 'no_structure'
+         },
+         {'num_channels': 10,
+         'num_classes': 12,
+         'azm': True,
+         'chm': True,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'use_queue': True,
+         'extra_labels': 'all_struct_queue'
+         },
+         {'num_channels': 10,
+         'num_classes': 12,
+         'azm': False,
+         'chm': False,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'use_queue': True,
+         'extra_labels': 'no_struct_queue'
          }
     ]
-
+    
+    #TODO: self.same_embed??
     for config in configs:
         do_training(**config)
 

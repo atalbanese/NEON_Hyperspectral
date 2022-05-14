@@ -26,10 +26,13 @@ def get_classifications(x):
     return masks
 
 class SWaVModelStruct(pl.LightningModule):
-    def __init__(self, patch_size, img_size, azm=True, chm=True):
+    def __init__(self, patch_size, img_size, azm=True, chm=True, pop_queue_start=10, queue_start=15, use_queue=False):
         super().__init__()
         self.model = networks.SWaVStruct(patch_size=patch_size, img_size=img_size, azm=azm, chm=chm)
         self.img_size = img_size
+        self.use_queue = use_queue
+        self.pop_queue_start = pop_queue_start
+        self.queue_start = 15
         #self.chm_embed = nn.Conv2d(1, 1, kernel_size=patch_size, stride=1)
         #self.azm_embed = nn.Conv2d(1, 1, kernel_size=patch_size, stride=1)
 
@@ -70,6 +73,11 @@ class SWaVModelStruct(pl.LightningModule):
     
     def on_train_batch_start(self, batch, batch_idx):
         self.model.norm_prototypes()
+        if self.use_queue:
+            if self.current_epoch == self.pop_queue_start:
+                self.model.populate_queue = True
+            if self.current_epoch == self.queue_start:
+                self.model.use_queue = True
 
     def forward(self, x, chm, azm):
         return self.model(x, chm, azm)

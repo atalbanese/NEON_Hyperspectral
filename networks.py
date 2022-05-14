@@ -168,11 +168,16 @@ class SWaVStructMLP(nn.Module):
 
 #TODO: Make experimental interface (w/azm, w/o azm, etc...)
 class SWaVStruct(nn.Module):
-    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True):
+    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, queue_length = 256*4):
         super(SWaVStruct, self).__init__()
-
+        self.populate_queue = False
+        self.use_queue = False
+        self.num_patches = (img_size*img_size)//(patch_size*patch_size)
+        self.queue_base = torch.zeros(queue_length, self.num_patches, emb_size).cuda()
+        self.queue_mod = torch.zeros(queue_length, self.num_patches, emb_size).cuda()
         self.chm = chm
         self.azm = azm
+       
 
         self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
                                         tr.Blit(),
@@ -279,16 +284,47 @@ class SWaVStruct(nn.Module):
         inp = nn.functional.normalize(inp, dim=1, p=2)
 
         scores = self.prototypes(inp)
+        #scores = scores.detach()
+
+        if self.populate_queue:
+            self.queue_base[b:] = self.queue_base[:-b].clone()
+            self.queue_base[:b] = inp[:b].detach()
+            self.queue_mod[b:] = self.queue_mod[:-b].clone()
+            self.queue_mod[:b] = inp[b:].detach()
 
         scores_t = scores[:b]
         scores_s = scores[b:]
 
+        t = scores_t.detach()
+        s = scores_s.detach()
+
         loss = 0
 
         for i in range(b):
-            t, s = scores_t[i].detach(), scores_s[i].detach()
-            q_t = self.sinkhorn(t)
-            q_s = self.sinkhorn(s)
+            t_i, s_i = t[i], s[i]
+
+            if self.use_queue:
+                t_i = torch.cat((
+                    torch.mm(
+                        self.queue_base[i],
+                        self.prototypes.weight.t()
+                    ),
+                    t_i
+                ))
+
+                s_i = torch.cat((
+                    torch.mm(
+                        self.queue_mod[i],
+                        self.prototypes.weight.t()
+                    ),
+                    s_i
+                ))
+
+                q_t = self.sinkhorn(t_i)[-self.num_patches:]
+                q_s = self.sinkhorn(s_i)[-self.num_patches:]
+            else:
+                q_t = self.sinkhorn(t_i)
+                q_s = self.sinkhorn(s_i)
 
             p_t = self.softmax(scores_t[i]/self.temp)
             p_s = self.softmax(scores_s[i]/self.temp)
