@@ -266,11 +266,11 @@ if __name__ == "__main__":
 
     # test = torch.ones(1369, 1, 27, 27)
     # print(transformer_outshape(test).shape)
-    ckpt = 'ckpts\harv_10_channels_12_classes_swav_structure_patch_size_4_positions_epoch=24.ckpt'
+    ckpt = 'ckpts\harv_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_epoch=49.ckpt'
     pca_file = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels/NEON_D01_HARV_DP3_730000_4701000_reflectance_pca.npy'
     chm_file = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022/NEON_D01_HARV_DP3_730000_4701000_CHM.tif'
     azm_file = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv_2022/NEON_D01_HARV_DP3_730000_4701000_reflectance_solar.npy'
-    MODEL = models.SWaVModelStruct(patch_size=4, img_size=40).load_from_checkpoint(ckpt, patch_size=4, img_size=40)
+    MODEL = models.SWaVModelStruct(patch_size=4, img_size=40, azm=False, chm=False, use_queue=True).load_from_checkpoint(ckpt, patch_size=4, img_size=40, azm=False, chm=False, use_queue=True)
 
     swav_inference_big_struct_4(MODEL, pca_file, chm_file, azm_file)
 

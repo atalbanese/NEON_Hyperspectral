@@ -168,7 +168,7 @@ class SWaVStructMLP(nn.Module):
 
 #TODO: Make experimental interface (w/azm, w/o azm, etc...)
 class SWaVStruct(nn.Module):
-    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, queue_length = 256*4):
+    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, queue_length = 256*6, same_embed=False, concat=False, queue_chunks=1):
         super(SWaVStruct, self).__init__()
         self.populate_queue = False
         self.use_queue = False
@@ -177,7 +177,12 @@ class SWaVStruct(nn.Module):
         self.queue_mod = torch.zeros(queue_length, self.num_patches, emb_size).cuda()
         self.chm = chm
         self.azm = azm
-       
+
+
+        self.same_embed = same_embed
+        self.concat = concat
+        self.add_channel = 2 if self.concat else 0
+        self.queue_chunks = queue_chunks
 
         self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
                                         tr.Blit(),
@@ -191,7 +196,7 @@ class SWaVStruct(nn.Module):
         self.patch_embed = nn.Sequential(
             # break-down the image in s1 x s2 patches and flat them
             Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
-            nn.Linear(patch_size * patch_size * in_channels, emb_size)
+            nn.Linear(patch_size * patch_size * (in_channels+self.add_channel), emb_size)
         )
         if self.azm:
             self.azm_embed = nn.Sequential(
@@ -200,7 +205,7 @@ class SWaVStruct(nn.Module):
                 nn.Linear(patch_size * patch_size, emb_size)
             )
         
-        if self.chm:
+        if self.chm and not self.same_embed:
             self.chm_embed = nn.Sequential(
                 # break-down the image in s1 x s2 patches and flat them
                 Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
@@ -259,18 +264,26 @@ class SWaVStruct(nn.Module):
 
         b,_,_,_ = x.shape
 
+        if self.concat:
+            x = torch.cat((x, chm), dim=1)
+            x= torch.cat((x, azm), dim=1)
+
         x_s = self.transforms_main(x)
         x = self.patch_embed(x)
         x_s = self.patch_embed(x_s)
 
-        if self.chm:
+        if self.chm and not self.concat:
             chm_s = self.transforms_embed(chm)
-            chm = self.chm_embed(chm)
-            chm_s = self.chm_embed(chm_s)
+            if not self.same_embed:
+                chm = self.chm_embed(chm)
+                chm_s = self.chm_embed(chm_s)
+            else:
+                chm = self.azm_embed(chm)
+                chm_s = self.azm_embed(chm_s)
             x += chm
             x_s += chm_s
 
-        if self.azm:
+        if self.azm and not self.concat:
             azm_s = self.transforms_embed(azm)
             azm = self.azm_embed(azm)
             azm_s = self.azm_embed(azm_s)
@@ -303,10 +316,15 @@ class SWaVStruct(nn.Module):
         for i in range(b):
             t_i, s_i = t[i], s[i]
 
+            
+
             if self.use_queue:
+                qb_items = torch.cat(([self.queue_base[i+j] for j in range(self.queue_chunks)]))
+                qm_items = torch.cat(([self.queue_mod[i+j] for j in range(self.queue_chunks)]))
+
                 t_i = torch.cat((
                     torch.mm(
-                        self.queue_base[i],
+                        qb_items,
                         self.prototypes.weight.t()
                     ),
                     t_i
@@ -314,7 +332,7 @@ class SWaVStruct(nn.Module):
 
                 s_i = torch.cat((
                     torch.mm(
-                        self.queue_mod[i],
+                        qm_items,
                         self.prototypes.weight.t()
                     ),
                     s_i
