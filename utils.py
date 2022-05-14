@@ -228,7 +228,7 @@ def img_stats(dir, out_dir, num_channels=30):
     np.save(os.path.join(out_dir, "mean.npy"), total_mean)
     np.save(os.path.join(out_dir, "std.npy"), total_std)
 
-def img_stats_chm(in_dir):
+def img_stats_chm_max(in_dir):
     files = os.listdir(in_dir)
     max = 0
     for file in tqdm(files):
@@ -243,6 +243,32 @@ def img_stats_chm(in_dir):
                 continue
     #count = num_files *1000 * 1000
     print(f'max value found: {max}')
+
+def img_stats_chm(in_dir):
+    files = os.listdir(in_dir)
+    psum = 0
+    sq = 0
+    count= 0
+    for file in tqdm(files):
+        if ".tif" in file:
+            try:
+                chm_open = rs.open(os.path.join(in_dir, file))
+                img = chm_open.read().astype(np.float32)
+                img[img==-9999] =np.nan
+                sum = np.nansum(img)
+                psum += sum
+                sq += np.nansum((img**2))
+                count+= np.count_nonzero(~np.isnan(img))
+            except ValueError as e:
+                print(e)
+                continue
+    total_mean = psum/count
+    total_var = (sq/count) - (total_mean**2)
+    total_std = np.sqrt(total_var)
+
+    print(f'mean: {total_mean}')
+    print(f'std: {total_std}')
+
 
 def save_bands(args):
     file, in_dir, out_dir, bands = args

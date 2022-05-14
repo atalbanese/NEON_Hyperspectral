@@ -91,8 +91,10 @@ class StructureDataset(Dataset):
             warnings.simplefilter("ignore")
             chm_open = rs.open(self.chm_dict[key])
             chm = chm_open.read().astype(np.float32)
-        #Make 0 to 1 - 47.33... is max height in dataset
-        chm = torch.from_numpy(chm).squeeze(0)/47.33000183105469
+            chm[chm==-9999] = np.nan
+        #Mean =  15.696561055743224
+        #Std = 9.548285574843716
+        chm = (torch.from_numpy(chm).squeeze(0)- 15.696561055743224)/9.548285574843716
         chm[chm != chm] = 0
              
 

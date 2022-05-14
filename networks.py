@@ -61,6 +61,8 @@ class SWaVStructMLP(nn.Module):
 
         self.prototypes = nn.Linear(emb_size, num_classes, bias=False)
 
+        
+
         self.softmax = nn.LogSoftmax(dim=1)
         self.temp = temp
         self.epsilon = epsilon
@@ -164,9 +166,13 @@ class SWaVStructMLP(nn.Module):
         scores = self.prototypes(inp)
         return scores
 
+#TODO: Make experimental interface (w/azm, w/o azm, etc...)
 class SWaVStruct(nn.Module):
-    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12):
+    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True):
         super(SWaVStruct, self).__init__()
+
+        self.chm = chm
+        self.azm = azm
 
         self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
                                         tr.Blit(),
@@ -182,18 +188,19 @@ class SWaVStruct(nn.Module):
             Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
             nn.Linear(patch_size * patch_size * in_channels, emb_size)
         )
-
-        self.azm_embed = nn.Sequential(
-            # break-down the image in s1 x s2 patches and flat them
-            Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
-            nn.Linear(patch_size * patch_size, emb_size)
-        )
-
-        self.chm_embed = nn.Sequential(
-            # break-down the image in s1 x s2 patches and flat them
-            Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
-            nn.Linear(patch_size * patch_size, emb_size)
-        )
+        if self.azm:
+            self.azm_embed = nn.Sequential(
+                # break-down the image in s1 x s2 patches and flat them
+                Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
+                nn.Linear(patch_size * patch_size, emb_size)
+            )
+        
+        if self.chm:
+            self.chm_embed = nn.Sequential(
+                # break-down the image in s1 x s2 patches and flat them
+                Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
+                nn.Linear(patch_size * patch_size, emb_size)
+            )
 
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=4, dim_feedforward=emb_size*2, batch_first=True)
@@ -248,26 +255,23 @@ class SWaVStruct(nn.Module):
         b,_,_,_ = x.shape
 
         x_s = self.transforms_main(x)
-
-        chm_s = self.transforms_embed(chm)
-        azm_s = self.transforms_embed(azm)
-
-
-        chm = self.chm_embed(chm)
-        chm_s = self.chm_embed(chm_s)
-
-        azm = self.azm_embed(azm)
-        azm_s = self.azm_embed(azm_s)
-
-        #TODO: probably have to do some feedforward shit here
         x = self.patch_embed(x)
         x_s = self.patch_embed(x_s)
 
-        x += chm
-        x += azm
+        if self.chm:
+            chm_s = self.transforms_embed(chm)
+            chm = self.chm_embed(chm)
+            chm_s = self.chm_embed(chm_s)
+            x += chm
+            x_s += chm_s
 
-        x_s += chm_s
-        x_s += azm_s
+        if self.azm:
+            azm_s = self.transforms_embed(azm)
+            azm = self.azm_embed(azm)
+            azm_s = self.azm_embed(azm_s)
+            x += azm
+            x_s += azm_s
+
 
         inp = torch.cat((x, x_s))
         inp = self.encoder(inp)
@@ -295,10 +299,12 @@ class SWaVStruct(nn.Module):
 
     def forward(self, inp, chm, azm):
         inp = self.patch_embed(inp)
-        chm = self.chm_embed(chm)
-        azm= self.azm_embed(azm)
-        inp += chm
-        inp += azm
+        if self.chm:
+            chm = self.chm_embed(chm)
+            inp += chm
+        if self.azm:
+            azm= self.azm_embed(azm)
+            inp += azm
         inp = self.encoder(inp)
         inp = self.projector(inp)
         inp = nn.functional.normalize(inp, dim=1, p=2)

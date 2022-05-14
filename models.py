@@ -26,9 +26,9 @@ def get_classifications(x):
     return masks
 
 class SWaVModelStruct(pl.LightningModule):
-    def __init__(self, patch_size, img_size):
+    def __init__(self, patch_size, img_size, azm=True, chm=True):
         super().__init__()
-        self.model = networks.SWaVStruct(patch_size=patch_size, img_size=img_size)
+        self.model = networks.SWaVStruct(patch_size=patch_size, img_size=img_size, azm=azm, chm=chm)
         self.img_size = img_size
         #self.chm_embed = nn.Conv2d(1, 1, kernel_size=patch_size, stride=1)
         #self.azm_embed = nn.Conv2d(1, 1, kernel_size=patch_size, stride=1)
@@ -38,9 +38,9 @@ class SWaVModelStruct(pl.LightningModule):
         chm = x['chm'].squeeze(0).unsqueeze(1)
         az = x['azimuth'].squeeze(0).unsqueeze(1)
 
-        inp = TF.center_crop(inp, self.img_size)
-        chm = TF.center_crop(chm, self.img_size)
-        az = TF.center_crop(az, self.img_size)
+        # inp = TF.center_crop(inp, self.img_size)
+        # chm = TF.center_crop(chm, self.img_size)
+        # az = TF.center_crop(az, self.img_size)
 
         if torch.rand(1) > 0.5:
             inp = TF.vflip(inp)
