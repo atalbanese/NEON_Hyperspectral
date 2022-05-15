@@ -168,7 +168,7 @@ class SWaVStructMLP(nn.Module):
 
 #TODO: Make experimental interface (w/azm, w/o azm, etc...)
 class SWaVStruct(nn.Module):
-    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, queue_length = 256*6, same_embed=False, concat=False, queue_chunks=1):
+    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, queue_length = 256*6, same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False):
         super(SWaVStruct, self).__init__()
         self.populate_queue = False
         self.use_queue = False
@@ -177,11 +177,19 @@ class SWaVStruct(nn.Module):
         self.queue_mod = torch.zeros(queue_length, self.num_patches, emb_size).cuda()
         self.chm = chm
         self.azm = azm
-
+        self.azm_concat = azm_concat
+        self.chm_concat = chm_concat
 
         self.same_embed = same_embed
-        self.concat = concat
-        self.add_channel = 2 if self.concat else 0
+        # self.concat = concat
+        # self.add_channel = 2 if self.concat else 0
+
+        self.add_channel = 0
+        if self.azm_concat:
+            self.add_channel += 1
+        if self.chm_concat:
+            self.add_channel +=1
+
         self.queue_chunks = queue_chunks
 
         self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
@@ -264,15 +272,16 @@ class SWaVStruct(nn.Module):
 
         b,_,_,_ = x.shape
 
-        if self.concat:
+        if self.chm_concat:
             x = torch.cat((x, chm), dim=1)
+        if self.azm_concat:
             x= torch.cat((x, azm), dim=1)
 
         x_s = self.transforms_main(x)
         x = self.patch_embed(x)
         x_s = self.patch_embed(x_s)
 
-        if self.chm and not self.concat:
+        if self.chm and not self.chm_concat:
             chm_s = self.transforms_embed(chm)
             if not self.same_embed:
                 chm = self.chm_embed(chm)
@@ -283,7 +292,7 @@ class SWaVStruct(nn.Module):
             x += chm
             x_s += chm_s
 
-        if self.azm and not self.concat:
+        if self.azm and not self.azm_concat:
             azm_s = self.transforms_embed(azm)
             azm = self.azm_embed(azm)
             azm_s = self.azm_embed(azm_s)
@@ -352,19 +361,19 @@ class SWaVStruct(nn.Module):
         return loss/b
 
     def forward(self, inp, chm, azm):
-        #TODO: HANDLE NEW EMBEDDING OPTIONS
-        if self.concat:
+        if self.chm_concat:
             x = torch.cat((inp, chm), dim=1)
+        if self.azm_concat:
             x= torch.cat((inp, azm), dim=1)
 
         inp = self.patch_embed(inp)
-        if self.chm and not self.concat:
+        if self.chm and not self.chm_concat:
             if not self.same_embed:
                 chm = self.chm_embed(chm)
             else:
                 chm = self.azm_embed(chm)
             inp += chm
-        if self.azm and not self.concat:
+        if self.azm and not self.azm_concat:
             azm= self.azm_embed(azm)
             inp += azm
         inp = self.encoder(inp)

@@ -42,6 +42,8 @@ class Validator():
 
         self.cluster_groups = set()
 
+        self.last_cluster = {}
+
     def get_plot_data(self):
         #data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'ninetyCrownDiameter', 'canopyPosition', 'taxonID', 'ninetyCrownDiameter'])
         data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID', 'ninetyCrownDiameter', 'canopyPosition', 'easting', 'northing'])
@@ -181,13 +183,17 @@ class Validator():
         row = df.iloc[0]
         file_key = row['file_coords']
         plot_id = row['plotID']
-        f = validator.valid_files[file_key]
-        if not validator.struct:
-            clustered = inference.swav_inference_big(model, f)
+        if file_key not in validator.last_cluster:
+            f = validator.valid_files[file_key]
+            if not validator.struct:
+                clustered = inference.swav_inference_big(model, f)
+            else:
+                c = validator.chm_dict[file_key]
+                a = validator.azm_dict[file_key]
+                clustered = inference.swav_inference_big_struct_4(model, f, c, a)
+            validator.last_cluster[file_key] = clustered
         else:
-            c = validator.chm_dict[file_key]
-            a = validator.azm_dict[file_key]
-            clustered = inference.swav_inference_big_struct_4(model, f, c, a)
+            clustered = validator.last_cluster[file_key]
         plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
        
         clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
@@ -600,48 +606,8 @@ if __name__ == "__main__":
     PLOT_PCA = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca'
 
     SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct'
-
+    #TODO: Automate saving these from training
     configs = [
-        {'num_channels': 10,
-        'num_classes': 12,
-        'azm': False,
-        'chm': True,
-        'patch_size': 4,
-        'log_every': 10,
-        'max_epochs': 50,
-        'num_workers': 4,
-        'img_size': 40,
-        'extra_labels': 'chm_only',
-        'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/chm_only',
-        'ckpt': 'ckpts/exp_1/harv_10_channels_12_classes_swav_structure_patch_size_4_chm_only_epoch=49.ckpt'
-        },
-        {'num_channels': 10,
-        'num_classes': 12,
-        'azm': False,
-        'chm': False,
-        'patch_size': 4,
-        'log_every': 10,
-        'max_epochs': 50,
-        'num_workers': 4,
-        'img_size': 40,
-        'extra_labels': 'no_structure',
-        'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/no_struct',
-        'ckpt': 'ckpts/exp_1/harv_10_channels_12_classes_swav_structure_patch_size_4_no_structure_epoch=49.ckpt'
-        },
-        {'num_channels': 10,
-        'num_classes': 12,
-        'azm': True,
-        'chm': True,
-        'patch_size': 4,
-        'log_every': 10,
-        'max_epochs': 50,
-        'num_workers': 4,
-        'img_size': 40,
-        'use_queue': True,
-        'extra_labels': 'all_struct_queue',
-        'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_queue',
-        'ckpt': 'ckpts/exp_1/harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_queue_epoch=49.ckpt'
-        },
         {'num_channels': 10,
         'num_classes': 12,
         'azm': False,
@@ -662,8 +628,12 @@ if __name__ == "__main__":
     
     for config in configs:
         ckpt = 'ckpts\exp_1\harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_queue_epoch=49.ckpt'
-        MODEL = models.SWaVModelStruct(**config).load_from_checkpoint(**config)
-        valid.do_plot_inference(config['save_dir'], MODEL)
+        MODEL = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
+        try:
+            valid.last_cluster = {}
+            valid.do_plot_inference(config['save_dir'], MODEL)
+        except KeyError as e:
+            continue
 
 
 
