@@ -19,19 +19,28 @@ import torchvision.transforms as tt
 #TODO: Clean this mess up
 #Switch plots to plotly? Good for overlays
 class Validator():
-    def __init__(self, **kwargs):
+    def __init__(self, struct=False, **kwargs):
         self.file = kwargs["file"]
         self.img_dir = kwargs["img_dir"]
-        #self.pca_dir = kwargs['pca_dir']
+        self.struct = struct
+        
         self.num_clusters = kwargs["num_clusters"]
         self.site_name = kwargs["site_name"]
         self.plot_file = kwargs['plot_file']
         self.valid_data = self.get_plot_data()
         self.valid_files = self.get_valid_files()
-        #TODO: FIX THIS
-        #self.cluster_dict = self.make_empty_dict()
+
+        def make_dict(file_list, param_1, param_2):
+            return {f"{file.split('_')[param_1]}_{file.split('_')[param_2]}": file for file in file_list}
+
+        if struct:
+            self.chm_files = [os.path.join(kwargs['chm'], file) for file in os.listdir(kwargs['chm']) if ".tif" in file]
+            self.azm_files = [os.path.join(kwargs['azm'], file) for file in os.listdir(kwargs['azm']) if ".npy" in file]
+
+            self.chm_dict = make_dict(self.chm_files, -3, -2)
+            self.azm_dict = make_dict(self.azm_files, -4, -3)
+
         self.cluster_groups = set()
-        #self._confusion_matrix = None
 
     def get_plot_data(self):
         #data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'ninetyCrownDiameter', 'canopyPosition', 'taxonID', 'ninetyCrownDiameter'])
@@ -173,7 +182,12 @@ class Validator():
         file_key = row['file_coords']
         plot_id = row['plotID']
         f = validator.valid_files[file_key]
-        clustered = inference.swav_inference_big(model, f)
+        if not validator.struct:
+            clustered = inference.swav_inference_big(model, f)
+        else:
+            c = validator.chm_dict[file_key]
+            a = validator.azm_dict[file_key]
+            clustered = inference.swav_inference_big_struct_4(model, f, c, a)
         plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
        
         clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
@@ -295,24 +309,6 @@ class Validator():
         for key, value in self.valid_files.items():
             self.plot_tree(key, value, **kwargs)
 
-        
-
-    #DEPRECATED FOR PLOT VALIDATION
-    # def validate(self, file_coords, f):
-    #     valid = self.valid_data.loc[self.valid_data["file_coords"] == file_coords]
-    #     if len(valid.index>0):
-    #         if isinstance(f, str):
-    #             clustered = np.load(f)
-    #         elif isinstance(f, np.ndarray):
-    #             clustered = f
-    #         else:
-    #             return False
-    #         for _, row in valid.iterrows():
-    #             select = clustered[row['x_min']:row['x_max'], row['y_min']:row['y_max']]
-    #             taxon = row['taxonID']
-    #             groups, counts = np.unique(select, return_counts=True)
-    #             for j, group in np.ndenumerate(groups):
-    #                 self.cluster_dict[taxon][int(group)] += int(counts[j])
 
     def validate(self, file_coords, f):
         valid = self.valid_data.loc[self.valid_data["file_coords"] == file_coords]
@@ -589,7 +585,7 @@ if __name__ == "__main__":
     IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
     IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/swav_12_classes'
+   
     PLOT_DIR = "C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022"
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
@@ -597,20 +593,81 @@ if __name__ == "__main__":
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
     PLOT_SUBSET = os.path.join(PLOT_DIR, 'plot_subset_HARV_024_eastingcentroid_726037_northingcentroid_4704513_fromfile_726000_4704000.pk')
     PLOT_VIZ = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/area_plots'
+    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022/'
+    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv_2022/'
 
     PLOT_PKLS = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plot_pickles'
     PLOT_PCA = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca'
-    #MODEL = inference.load_ckpt(models.TransEmbedConvSimSiam, 'ckpts\harv_trans_embed_conv_sim_epoch=1.ckpt', num_channels=30, img_size=32, output_classes=20)
 
-    # MEAN = np.load(os.path.join(PLOT_PCA, 'stats/mean.npy')).astype(np.float32)
-    # STD = np.load(os.path.join(PLOT_PCA, 'stats/std.npy')).astype(np.float32)
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct'
 
-    # norm = tt.Normalize(MEAN, STD)
-    valid = Validator(file=VALID_FILE, img_dir=IMG_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE)
-    valid.map_trees('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/ind_plots_viz')
-    ckpt = 'ckpts\harv_10_channels_12_classes_swav_patch_size_4_epoch=49.ckpt'
-    MODEL = models.SWaVModel().load_from_checkpoint(ckpt)
-    #valid.do_plot_inference(SAVE_DIR, MODEL)
+    configs = [
+        {'num_channels': 10,
+        'num_classes': 12,
+        'azm': False,
+        'chm': True,
+        'patch_size': 4,
+        'log_every': 10,
+        'max_epochs': 50,
+        'num_workers': 4,
+        'img_size': 40,
+        'extra_labels': 'chm_only',
+        'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/chm_only',
+        'ckpt': 'ckpts/exp_1/harv_10_channels_12_classes_swav_structure_patch_size_4_chm_only_epoch=49.ckpt'
+        },
+        {'num_channels': 10,
+        'num_classes': 12,
+        'azm': False,
+        'chm': False,
+        'patch_size': 4,
+        'log_every': 10,
+        'max_epochs': 50,
+        'num_workers': 4,
+        'img_size': 40,
+        'extra_labels': 'no_structure',
+        'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/no_struct',
+        'ckpt': 'ckpts/exp_1/harv_10_channels_12_classes_swav_structure_patch_size_4_no_structure_epoch=49.ckpt'
+        },
+        {'num_channels': 10,
+        'num_classes': 12,
+        'azm': True,
+        'chm': True,
+        'patch_size': 4,
+        'log_every': 10,
+        'max_epochs': 50,
+        'num_workers': 4,
+        'img_size': 40,
+        'use_queue': True,
+        'extra_labels': 'all_struct_queue',
+        'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_queue',
+        'ckpt': 'ckpts/exp_1/harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_queue_epoch=49.ckpt'
+        },
+        {'num_channels': 10,
+        'num_classes': 12,
+        'azm': False,
+        'chm': False,
+        'patch_size': 4,
+        'log_every': 10,
+        'max_epochs': 50,
+        'num_workers': 4,
+        'img_size': 40,
+        'use_queue': True,
+        'extra_labels': 'no_struct_queue',
+        'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/no_struct_queue',
+        'ckpt': 'ckpts/exp_1/harv_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_epoch=49.ckpt'
+        }
+    ]
+
+    valid = Validator(file=VALID_FILE, img_dir=PCA_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE, struct=True, azm=AZM_DIR, chm=CHM_DIR)
+    
+    for config in configs:
+        ckpt = 'ckpts\exp_1\harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_queue_epoch=49.ckpt'
+        MODEL = models.SWaVModelStruct(**config).load_from_checkpoint(**config)
+        valid.do_plot_inference(config['save_dir'], MODEL)
+
+
+
+    #valid.map_trees('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/ind_plots_viz')
 
     #plot_inference(PLOT_PCA, 'test', MODEL)
     #valid.make_taxa_area_hists(PLOT_VIZ)

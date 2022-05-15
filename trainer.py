@@ -23,7 +23,7 @@ def do_training(num_channels=10, num_classes=12, azm=True, chm=True, patch_size=
 
     dataset = StructureDataset(pca_fold, chm_fold, az_fold, img_size)
     train_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, pin_memory=True)
-    model = models.SWaVModelStruct(patch_size, img_size, azm=azm, chm=chm, use_queue=use_queue, same_embed=same_embed, concat=concat, queue_chunks=queue_chunks)
+    model = models.SWaVModelStruct(patch_size, img_size, azm=azm, chm=chm, use_queue=use_queue, same_embed=same_embed, concat=concat, queue_chunks=queue_chunks, num_classes=num_classes)
     trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback]) #, accumulate_grad_batches=4
     trainer.fit(model, train_loader)
 
@@ -201,6 +201,20 @@ if __name__ == "__main__":
          'img_size': 40,
          'use_queue': True,
          'same_embed': False,
+         'concat': True,
+         'extra_labels': 'struct_concat_queue'
+         },
+         {'num_channels': 10,
+         'num_classes': 12,
+         'azm': True,
+         'chm': True,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'use_queue': True,
+         'same_embed': False,
          'concat': False,
          'queue_chunks': 5,
          'extra_labels': 'struct_queue_5_chunks'
@@ -219,11 +233,9 @@ if __name__ == "__main__":
          'concat': False,
          'queue_chunks': 5,
          'extra_labels': 'no_struct_queue_5_chunks'
-         },
-
-    ]
+         }
+        ]
     
-    #TODO: self.same_embed??
     for config in configs:
         do_training(**config)
 

@@ -26,9 +26,9 @@ def get_classifications(x):
     return masks
 
 class SWaVModelStruct(pl.LightningModule):
-    def __init__(self, patch_size, img_size, azm=True, chm=True, pop_queue_start=10, queue_start=15, use_queue=False,  same_embed=False, concat=False, queue_chunks=1):
+    def __init__(self, patch_size, img_size, azm=True, chm=True, pop_queue_start=10, queue_start=15, use_queue=False,  same_embed=False, concat=False, queue_chunks=1, num_classes=12):
         super().__init__()
-        self.model = networks.SWaVStruct(patch_size=patch_size, img_size=img_size, azm=azm, chm=chm, same_embed=same_embed, concat=concat, queue_chunks=queue_chunks)
+        self.model = networks.SWaVStruct(patch_size=patch_size, img_size=img_size, azm=azm, chm=chm, same_embed=same_embed, concat=concat, queue_chunks=queue_chunks, num_classes=num_classes)
         self.img_size = img_size
         self.use_queue = use_queue
         self.pop_queue_start = pop_queue_start

@@ -352,11 +352,19 @@ class SWaVStruct(nn.Module):
         return loss/b
 
     def forward(self, inp, chm, azm):
+        #TODO: HANDLE NEW EMBEDDING OPTIONS
+        if self.concat:
+            x = torch.cat((inp, chm), dim=1)
+            x= torch.cat((inp, azm), dim=1)
+
         inp = self.patch_embed(inp)
-        if self.chm:
-            chm = self.chm_embed(chm)
+        if self.chm and not self.concat:
+            if not self.same_embed:
+                chm = self.chm_embed(chm)
+            else:
+                chm = self.azm_embed(chm)
             inp += chm
-        if self.azm:
+        if self.azm and not self.concat:
             azm= self.azm_embed(azm)
             inp += azm
         inp = self.encoder(inp)

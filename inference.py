@@ -200,6 +200,7 @@ def swav_inference_big_struct_3(model, file, chm, azm):
 def swav_inference_big_struct_4(model, file, chm, azm):
     model.eval()
      #PCA
+    print(file)
     img = np.load(file).astype(np.float32)
     #img = rearrange(img, 'h w c -> c h w')
     img = torch.from_numpy(img)
@@ -214,8 +215,9 @@ def swav_inference_big_struct_4(model, file, chm, azm):
  
     chm_open = rs.open(chm)
     chm = chm_open.read().astype(np.float32)
-    #Make 0 to 1 - 47.33... is max height in dataset
-    chm = torch.from_numpy(chm).squeeze(0)/47.33000183105469
+    #Standardize (-mean/std)
+    chm = (torch.from_numpy(chm).squeeze(0)- 15.696561055743224)/9.548285574843716
+    
     chm[chm != chm] = 0
     
     img = rearrange(img, '(k1 h) (k2 w) c -> (k1 k2) c h w', k1=2, k2=2)
@@ -240,8 +242,8 @@ def swav_inference_big_struct_4(model, file, chm, azm):
     img = f.interpolate(img.unsqueeze(0), size=(1000,1000), mode='bilinear')
     img = torch.argmax(img.squeeze(0), dim=0)
     img = img.detach().numpy()
-    plt.imshow(img, cmap='tab20')
-    plt.show()
+    # plt.imshow(img, cmap='tab20')
+    # plt.show()
 
     return img
 
