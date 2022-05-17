@@ -1,5 +1,13 @@
+import wave
 from matplotlib.widgets import Slider
+from matplotlib import colors
 from sklearn import cluster
+import geopandas as gpd
+from rasterio.plot import show
+import rasterio as rs
+from rasterio.transform import from_origin
+import rasterio.features as rf
+from rasterio.crs import CRS
 import torch
 import pickle
 import matplotlib.pyplot as plt
@@ -23,6 +31,7 @@ class Validator():
         self.file = kwargs["file"]
         self.img_dir = kwargs["img_dir"]
         self.struct = struct
+        self.curated = kwargs['curated']
         
         self.num_clusters = kwargs["num_clusters"]
         self.site_name = kwargs["site_name"]
@@ -46,13 +55,50 @@ class Validator():
 
     def get_plot_data(self):
         #data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'ninetyCrownDiameter', 'canopyPosition', 'taxonID', 'ninetyCrownDiameter'])
-        data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID', 'ninetyCrownDiameter', 'canopyPosition', 'easting', 'northing'])
+        data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID', 'ninetyCrownDiameter', 'canopyPosition', 'easting', 'northing', 'height'])
         data = data.loc[data['siteID'] == self.site_name]
-        #data = data.loc[(data['canopyPosition'] == "Partially shaded") | (data['canopyPosition'] == "Full sun")]
+        curated = pd.read_csv(self.curated)
+        curated = curated.rename(columns={'adjEasting': 'easting',
+                                          'adjNorthing': 'northing'})
+        data_with_coords = curated.loc[(curated.easting == curated.easting) & (curated.northing==curated.northing)]
+       
         data = data.loc[(data['plantStatus'] != 'Dead, broken bole') & (data['plantStatus'] != 'Downed') & (data['plantStatus'] != 'No longer qualifies') & (data['plantStatus'] != 'Lost, fate unknown') & (data['plantStatus'] != 'Removed') & (data['plantStatus'] != 'Lost, presumed dead')]
+        #data_with_coords = data.loc[(data.easting == data.easting) & (data.height == data.height) & (data.ninetyCrownDiameter == data.ninetyCrownDiameter)]
+        data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting, data_with_coords.northing), crs='EPSG:32618')
+        #data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['ninetyCrownDiameter']/2)
+        data_gdf['crowns'] = data_gdf.geometry.buffer(5)
+
+
+        test_gdf = data_gdf.loc[(data_gdf.easting > 731000) & (data_gdf.easting < 732000) & (data_gdf.northing > 4713000) & (data_gdf.northing < 4714000)]
+        #test_gdf = data_gdf.loc[data_gdf.plotID == 'HARV_034']
+        img_loc = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022/NEON_D01_HARV_DP3_731000_4713000_reflectance.h5'
+        test = hp.pre_processing(img_loc, wavelength_ranges=utils.get_viz_bands())
+        test_rgb = hp.make_rgb(test['bands'])
+        test_rgb = rearrange(test_rgb, 'h w c -> c h w')
+        transform = from_origin(731000, 4714000, 1, 1)
+        test_rgb = exposure.adjust_gamma(test_rgb, 0.5)
+        #crs_code = CRS.from_string(test['meta']['proj'])
+        #need to replace UTM with utm in proj string
+        rs_test = rs.open('test1.tif', 'w+', driver='GTiff',
+                            height = test_rgb.shape[1], width = test_rgb.shape[2], 
+                            count=3, dtype=np.float32,
+                            crs='+proj=utm +zone=18 +ellps=WGS84 +datum=WGS84 +units=m +no_defs',
+                            transform=transform)
+        rs_test.write(test_rgb)
+
+        tree_outlines = rf.geometry_mask(test_gdf.crowns, (1000,1000), transform=rs_test.transform, invert=True, all_touched=True)
+        trees = np.ma.masked_where(tree_outlines == False, tree_outlines)
+        cmap = colors.ListedColormap(['red'])
+        fig, ax = plt.subplots(figsize=(20,20))
+        ax.imshow(rearrange(rs_test.read(), 'c h w -> h w c'))
+        im = ax.imshow(trees, cmap=cmap, alpha=0.2)
+        slider = self._make_slider(fig, im)
+        plt.show()
+
 
         data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
 
+        
         plots = pd.read_csv(self.plot_file, usecols=['plotID', 'siteID', 'subtype', 'easting', 'northing', 'plotSize'])
         plots = plots.loc[plots['siteID'] == self.site_name]
         plots = plots.loc[plots['subtype'] == 'basePlot']
@@ -297,7 +343,7 @@ class Validator():
             label='Alpha',
             valmin=0.0,
             valmax=1.0,
-            valstep=0.2,
+            valstep=0.05,
             valinit=.2,
         )
         def update(val):
@@ -594,6 +640,7 @@ if __name__ == "__main__":
    
     PLOT_DIR = "C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022"
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
+    CURATED_FILE = "W:/Classes/Research/neon_mapped_harv.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
     CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
@@ -606,34 +653,235 @@ if __name__ == "__main__":
     PLOT_PCA = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca'
 
     SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct'
-    #TODO: Automate saving these from training
-    configs = [
-        {'num_channels': 10,
-        'num_classes': 12,
-        'azm': False,
-        'chm': False,
-        'patch_size': 4,
-        'log_every': 10,
-        'max_epochs': 50,
-        'num_workers': 4,
-        'img_size': 40,
-        'use_queue': True,
-        'extra_labels': 'no_struct_queue',
-        'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/no_struct_queue',
-        'ckpt': 'ckpts/exp_1/harv_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_epoch=49.ckpt'
-        }
-    ]
 
-    valid = Validator(file=VALID_FILE, img_dir=PCA_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE, struct=True, azm=AZM_DIR, chm=CHM_DIR)
+    valid = Validator(file=VALID_FILE, img_dir=PCA_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE, struct=True, azm=AZM_DIR, chm=CHM_DIR, curated=CURATED_FILE)
+    #TODO: Automate saving these from training
+    # configs = [
+    #     {'num_channels': 10,
+    #     'num_classes': 12,
+    #     'azm': False,
+    #     'chm': False,
+    #     'patch_size': 4,
+    #     'log_every': 10,
+    #     'max_epochs': 50,
+    #     'num_workers': 4,
+    #     'img_size': 40,
+    #     'use_queue': True,
+    #     'extra_labels': 'no_struct_queue',
+    #     'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/no_struct_queue',
+    #     'ckpt': 'ckpts/exp_1/harv_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_epoch=49.ckpt'
+    #     }
+    # ]
+
+    # configs = [
+    #      {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': True,
+    #      'extra_labels': 'struct_concat',
+    #      'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/struct_concat',
+    #      'ckpt': 'ckpts/exp_2/harv_10_channels_12_classes_swav_structure_patch_size_4_struct_concat_epoch=49.ckpt'
+    #      },
+    #      {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': True,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': True,
+    #      'extra_labels': 'struct_concat_queue',
+    #      'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/struct_concat_queue',
+    #      'ckpt': 'ckpts/exp_2/harv_10_channels_12_classes_swav_structure_patch_size_4_struct_concat_queue_epoch=49.ckpt'
+    #      },
+    #      {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': True,
+    #      'same_embed': False,
+    #      'concat': False,
+    #      'queue_chunks': 5,
+    #      'extra_labels': 'struct_queue_5_chunks',
+    #      'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/struct_5_chunk_queue',
+    #      'ckpt': 'ckpts/exp_2/harv_10_channels_12_classes_swav_structure_patch_size_4_struct_queue_5_chunks_epoch=49.ckpt'
+    #      },
+    #      {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': False,
+    #      'chm': False,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': True,
+    #      'same_embed': False,
+    #      'concat': False,
+    #      'queue_chunks': 5,
+    #      'extra_labels': 'no_struct_queue_5_chunks',
+    #      'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/no_struct_5_chunk_queue',
+    #      'ckpt': 'ckpts/exp_2/harv_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_5_chunks_epoch=49.ckpt'
+    #      }
+    #     ]
+
+    # configs = [
+        # {'num_channels': 10,
+        #  'num_classes': 12,
+        #  'azm': True,
+        #  'chm': True,
+        #  'patch_size': 4,
+        #  'log_every': 10,
+        #  'max_epochs': 50,
+        #  'num_workers': 4,
+        #  'img_size': 40,
+        #  'use_queue': True,
+        #  'same_embed': False,
+        #  'azm_concat': True,
+        #  'chm_concat': True,
+        #  'queue_chunks': 5,
+        #  'extra_labels': 'all_struct_concat_queue_5_chunks',
+        #  'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_concat_queue_5_chunks',
+        #  'ckpt': 'ckpts/exp_3/harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_concat_queue_5_chunks_epoch=49.ckpt'
+        #  },
+        #  {'num_channels': 10,
+        #  'num_classes': 12,
+        #  'azm': True,
+        #  'chm': True,
+        #  'patch_size': 4,
+        #  'log_every': 10,
+        #  'max_epochs': 50,
+        #  'num_workers': 4,
+        #  'img_size': 40,
+        #  'use_queue': False,
+        #  'same_embed': False,
+        #  'azm_concat': False,
+        #  'chm_concat': True,
+        #  'queue_chunks': 5,
+        #  'extra_labels': 'azm_add_chm_concat_no_queue',
+        #  'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/azm_add_chm_concat_no_queue',
+        #  'ckpt': 'ckpts/exp_3/harv_10_channels_12_classes_swav_structure_patch_size_4_azm_add_chm_concat_no_queue_epoch=49.ckpt'
+        #  },
+    #       {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': False,
+    #      'queue_chunks': 5,
+    #      'extra_labels': 'chm_add_azm_concat_no_queue',
+    #       'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/chm_add_azm_concat_no_queue',
+    #      'ckpt': 'ckpts/exp_3/harv_10_channels_12_classes_swav_structure_patch_size_4_chm_add_azm_concat_no_queue_epoch=49.ckpt'
+    #      },
+    #       {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': False,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': False,
+    #      'chm_concat': True,
+    #      'queue_chunks': 5,
+    #      'extra_labels': 'chm_concat_only_no_queue',
+    #       'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/chm_concat_only_no_queue',
+    #      'ckpt': 'ckpts/exp_3/harv_10_channels_12_classes_swav_structure_patch_size_4_chm_concat_only_no_queue_epoch=49.ckpt'
+    #      },
+    #       {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': False,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': False,
+    #      'queue_chunks': 5,
+    #      'extra_labels': 'azm_concat_only_no_queue',
+    #       'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/azm_concat_only_no_queue',
+    #      'ckpt': 'ckpts/exp_3/harv_10_channels_12_classes_swav_structure_patch_size_4_azm_concat_only_no_queue_epoch=49.ckpt'
+    #      },
+    #       {'num_channels': 10,
+    #      'num_classes': 60,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': True,
+    #      'queue_chunks': 5,
+    #      'extra_labels': 'all_concat_60_classes_no_queue',
+    #       'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_concat_60_classes_no_queue',
+    #      'ckpt': 'ckpts/exp_3/harv_10_channels_60_classes_swav_structure_patch_size_4_all_concat_60_classes_no_queue_epoch=49.ckpt'
+    #      },
+    #       {'num_channels': 10,
+    #      'num_classes': 256,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': True,
+    #      'queue_chunks': 5,
+    #      'extra_labels': 'all_concat_256_classes_no_queue',
+    #       'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_concat_256_classes_no_queue',
+    #      'ckpt': 'ckpts/exp_3/harv_10_channels_256_classes_swav_structure_patch_size_4_all_concat_256_classes_no_queue_epoch=49.ckpt'
+    #      },
+    # ]
+
+   
     
-    for config in configs:
-        ckpt = 'ckpts\exp_1\harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_queue_epoch=49.ckpt'
-        MODEL = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
-        try:
-            valid.last_cluster = {}
-            valid.do_plot_inference(config['save_dir'], MODEL)
-        except KeyError as e:
-            continue
+    # for config in configs:
+    #     MODEL = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
+    #     try:
+    #         valid.last_cluster = {}
+    #         valid.do_plot_inference(config['save_dir'], MODEL)
+    #     except KeyError as e:
+    #         continue
 
 
 

@@ -362,9 +362,9 @@ class SWaVStruct(nn.Module):
 
     def forward(self, inp, chm, azm):
         if self.chm_concat:
-            x = torch.cat((inp, chm), dim=1)
+            inp = torch.cat((inp, chm), dim=1)
         if self.azm_concat:
-            x= torch.cat((inp, azm), dim=1)
+            inp = torch.cat((inp, azm), dim=1)
 
         inp = self.patch_embed(inp)
         if self.chm and not self.chm_concat:
