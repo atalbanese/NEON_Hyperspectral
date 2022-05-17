@@ -6,7 +6,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, StochasticWeightAveragi
 import inference
 import warnings
 
-def do_training(num_channels=10, num_classes=12, azm=True, chm=True, patch_size=4, log_every=5, max_epochs=50, num_workers=4, img_size=40, extra_labels='', use_queue=False,  same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False, main_brightness=False, aug_brightness=False):
+def do_training(num_channels=10, num_classes=12, azm=True, chm=True, patch_size=4, log_every=5, max_epochs=50, num_workers=4, img_size=40, extra_labels='', use_queue=False,  same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False, main_brightness=False, aug_brightness=False, rescale_pca=False):
     pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels'
     chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022'
     az_fold = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv_2022'
@@ -21,7 +21,7 @@ def do_training(num_channels=10, num_classes=12, azm=True, chm=True, patch_size=
 
     pl.seed_everything(42)
 
-    dataset = StructureDataset(pca_fold, chm_fold, az_fold, img_size)
+    dataset = StructureDataset(pca_fold, chm_fold, az_fold, img_size, rescale_pca=rescale_pca)
     train_loader = DataLoader(dataset, batch_size=1, num_workers=num_workers, pin_memory=True)
     model = models.SWaVModelStruct(patch_size, img_size, azm=azm, chm=chm, use_queue=use_queue, same_embed=same_embed, concat=concat, queue_chunks=queue_chunks, num_classes=num_classes, azm_concat=azm_concat, chm_concat=chm_concat, main_brightness=main_brightness, aug_brightness=aug_brightness)
     trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback]) #, accumulate_grad_batches=4
@@ -368,6 +368,7 @@ if __name__ == "__main__":
          'queue_chunks': 1,
          'main_brightness': True,
          'aug_brightness': True,
+         'rescale_pca': True,
          'extra_labels': 'all_struct_concat_both_brightness'
          },
          {'num_channels': 10,
@@ -386,6 +387,7 @@ if __name__ == "__main__":
          'queue_chunks': 1,
          'main_brightness': False,
          'aug_brightness': True,
+         'rescale_pca': True,
          'extra_labels': 'all_struct_concat_only_aug_brightness'
          },
          {'num_channels': 10,
@@ -404,7 +406,27 @@ if __name__ == "__main__":
          'queue_chunks': 1,
          'main_brightness': True,
          'aug_brightness': False,
+         'rescale_pca': True,
          'extra_labels': 'all_struct_concat_only_main_brightness'
+         },
+         {'num_channels': 10,
+         'num_classes': 12,
+         'azm': True,
+         'chm': True,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'use_queue': False,
+         'same_embed': False,
+         'azm_concat': True,
+         'chm_concat': True,
+         'queue_chunks': 1,
+         'main_brightness': False,
+         'aug_brightness': False,
+         'rescale_pca': True,
+         'extra_labels': 'concat_only_rescale'
          }
      ]
     

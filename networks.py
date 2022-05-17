@@ -192,18 +192,17 @@ class SWaVStruct(nn.Module):
 
         self.queue_chunks = queue_chunks
 
-        if not aug_brightness:
-            self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
-                                        tr.Blit(),
-                                        tr.Block(),
-                                        Rearrange('b (h w) c -> b c h w', h=img_size, w=img_size)])
+        if aug_brightness:
+            self.aug_brightness = tr.BrightnessAugment()
         else:
-            self.transforms_main = tt.Compose([tr.BrightnessAugment(),
-                                        Rearrange('b c h w -> b (h w) c'),
+            self.aug_brightness = None
+
+
+        self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
                                         tr.Blit(),
                                         tr.Block(),
                                         Rearrange('b (h w) c -> b c h w', h=img_size, w=img_size)])
-
+        
 
         self.transforms_embed = tt.Compose([Rearrange('b c h w -> b (h w) c'),
                                         tr.Blit(),
@@ -279,6 +278,9 @@ class SWaVStruct(nn.Module):
     def forward_train(self, x, chm, azm):
 
         b,_,_,_ = x.shape
+
+        if self.aug_brightness is not None:
+            x = self.aug_brightness(x)
 
         if self.chm_concat:
             x = torch.cat((x, chm), dim=1)

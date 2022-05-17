@@ -180,14 +180,14 @@ def down_all(inp, step_size):
 
 
 
-if __name__ == "__main__":
-    select_bands = {"i":i for i in range(0,426)}
-    h5_file = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL/NEON_D16_WREF_DP3_590000_5077000_reflectance.h5"
+# if __name__ == "__main__":
+#     select_bands = {"i":i for i in range(0,426)}
+#     h5_file = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL/NEON_D16_WREF_DP3_590000_5077000_reflectance.h5"
 
-    data,_,_ = pre_processing(h5_file, get_all=True)
-    data = get_features(data)
-    #data = stack_all(data)
-    lower_dim, var = pca(data, n_components=30, whiten=True)
-    print(lower_dim)
+#     data,_,_ = pre_processing(h5_file, get_all=True)
+#     data = get_features(data)
+#     #data = stack_all(data)
+#     lower_dim, var = pca(data, n_components=30, whiten=True)
+#     print(lower_dim)
 
 

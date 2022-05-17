@@ -228,6 +228,29 @@ def img_stats(dir, out_dir, num_channels=30):
     np.save(os.path.join(out_dir, "mean.npy"), total_mean)
     np.save(os.path.join(out_dir, "std.npy"), total_std)
 
+def img_stats_min_max(dir, out_dir, num_channels=10):
+    files = os.listdir(dir)
+    max = -9999
+    min = 9999
+    for file in tqdm(files):
+        if ".npy" in file:
+            try:
+                img = np.load(os.path.join(dir, file))
+                im_min = img.min()
+                im_max = img.max()
+
+                if im_min < min:
+                    min = im_min
+                
+                if im_max > max:
+                    max = im_max
+            except ValueError as e:
+                print(e)
+                continue
+    #count = num_files *1000 * 1000
+    print(f'Min: {min}')
+    print(f'Max: {max}')
+
 def img_stats_chm_max(in_dir):
     files = os.listdir(in_dir)
     max = 0
@@ -427,7 +450,9 @@ if __name__ == '__main__':
     OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv_2022'
 
     chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022'
-    img_stats_chm(chm_fold)
+    #img_stats_chm(chm_fold)
+    img_stats_min_max('C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels', '')
+
 
     # with ProcessPool(6) as pool:
     #     bulk_process(pool, [IN_DIR, OUT_DIR], save_solar_stats)

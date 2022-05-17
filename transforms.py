@@ -14,7 +14,7 @@ class BrightnessAugment(torch.nn.Module):
     
     def forward(self, arr):
         if torch.rand(1) < self.p:
-            change = (1.2 - 0.8) * torch.rand(1) + 0.8
+            change = (1.2 - 0.8) * torch.rand(1).cuda() + 0.8
             a = torch.logit(arr) + torch.logit(change-0.5)
             b = torch.sigmoid(a)
             arr = b

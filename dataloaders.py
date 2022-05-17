@@ -23,8 +23,9 @@ from einops.layers.torch import Rearrange, Reduce
 #from torch_geometric.data import Data
 
 class StructureDataset(Dataset):
-    def __init__(self, pca_folder, tif_folder, azimuth_folder, crop_size, eval=False, **kwargs):
+    def __init__(self, pca_folder, tif_folder, azimuth_folder, crop_size, eval=False, rescale_pca=False, **kwargs):
         self.pca_folder = pca_folder
+        self.rescale_pca = rescale_pca
         self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 256
         if os.path.exists(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl')):
             with open(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl'), 'rb') as f:
@@ -79,6 +80,16 @@ class StructureDataset(Dataset):
         img = np.load(self.files_dict[key]).astype(np.float32)
         img = rearrange(img, 'h w c -> c h w')
         img = torch.from_numpy(img)
+
+        #Testing rescaling 0 to 1
+        #Don't know if this will actually work with PCA, since its not image data but w/e 
+        if self.rescale_pca:
+            pca_min = -7.15022986754737
+            pca_max = 18.434569044781508
+
+            img = img-pca_min
+            img /= (pca_max-pca_min)
+
 
         #Azimuth
         azimuth = np.load(self.azimuth_dict[key]).astype(np.float32)
