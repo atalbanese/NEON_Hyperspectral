@@ -1,9 +1,6 @@
 from select import select
 import h5py as hp
 import numpy as np
-import matplotlib.pyplot as plt
-from skimage import exposure
-import matplotlib.patches as mpatches
 
 
 #Finds index of nearest wavelength

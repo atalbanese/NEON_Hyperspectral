@@ -197,13 +197,19 @@ def swav_inference_big_struct_3(model, file, chm, azm):
 
     return img
 
-def swav_inference_big_struct_4(model, file, chm, azm):
+def swav_inference_big_struct_4(model, file, chm, azm, rescale=False):
     model.eval()
      #PCA
     print(file)
     img = np.load(file).astype(np.float32)
     #img = rearrange(img, 'h w c -> c h w')
     img = torch.from_numpy(img)
+    if rescale: 
+        pca_min = -7.15022986754737
+        pca_max = 18.434569044781508
+
+        img = img-pca_min
+        img /= (pca_max-pca_min)
 
     #Azimuth
     azimuth = np.load(azm).astype(np.float32)
