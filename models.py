@@ -7,6 +7,7 @@ import torch.nn.functional as f
 import torchvision.transforms.functional as TF
 import pytorch_lightning as pl
 import torchvision as tv
+import transforms as tr
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 #import cv2 as cv
@@ -27,13 +28,17 @@ def get_classifications(x):
 
 #TODO: On train end, log results and run validation
 class SWaVModelStruct(pl.LightningModule):
-    def __init__(self, patch_size, img_size, azm=True, chm=True, pop_queue_start=10, queue_start=15, use_queue=False,  same_embed=False, concat=False, queue_chunks=1, num_classes=12, azm_concat=False, chm_concat=False, **kwargs):
+    def __init__(self, patch_size, img_size, azm=True, chm=True, pop_queue_start=10, queue_start=15, use_queue=False,  same_embed=False, concat=False, queue_chunks=1, num_classes=12, azm_concat=False, chm_concat=False, aug_brightness=False, main_brightness=False, **kwargs):
         super().__init__()
-        self.model = networks.SWaVStruct(patch_size=patch_size, img_size=img_size, azm=azm, chm=chm, same_embed=same_embed, concat=concat, queue_chunks=queue_chunks, num_classes=num_classes, azm_concat=azm_concat, chm_concat=chm_concat)
+        self.model = networks.SWaVStruct(patch_size=patch_size, img_size=img_size, azm=azm, chm=chm, same_embed=same_embed, concat=concat, queue_chunks=queue_chunks, num_classes=num_classes, azm_concat=azm_concat, chm_concat=chm_concat, aug_brightness=aug_brightness)
         self.img_size = img_size
         self.use_queue = use_queue
         self.pop_queue_start = pop_queue_start
         self.queue_start = 15
+        if main_brightness:
+            self.brightness = tr.BrightnessAugment()
+        else:
+            self.brightness = None
         #self.chm_embed = nn.Conv2d(1, 1, kernel_size=patch_size, stride=1)
         #self.azm_embed = nn.Conv2d(1, 1, kernel_size=patch_size, stride=1)
 
@@ -45,6 +50,9 @@ class SWaVModelStruct(pl.LightningModule):
         # inp = TF.center_crop(inp, self.img_size)
         # chm = TF.center_crop(chm, self.img_size)
         # az = TF.center_crop(az, self.img_size)
+
+        if self.brightness is not None:
+            inp = self.brightness(inp)
 
         if torch.rand(1) > 0.5:
             inp = TF.vflip(inp)

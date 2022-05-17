@@ -168,7 +168,7 @@ class SWaVStructMLP(nn.Module):
 
 #TODO: Make experimental interface (w/azm, w/o azm, etc...)
 class SWaVStruct(nn.Module):
-    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, queue_length = 256*6, same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False):
+    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, queue_length = 256*6, same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False, aug_brightness=False):
         super(SWaVStruct, self).__init__()
         self.populate_queue = False
         self.use_queue = False
@@ -192,10 +192,18 @@ class SWaVStruct(nn.Module):
 
         self.queue_chunks = queue_chunks
 
-        self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
+        if not aug_brightness:
+            self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
                                         tr.Blit(),
                                         tr.Block(),
                                         Rearrange('b (h w) c -> b c h w', h=img_size, w=img_size)])
+        else:
+            self.transforms_main = tt.Compose([tr.BrightnessAugment(),
+                                        Rearrange('b c h w -> b (h w) c'),
+                                        tr.Blit(),
+                                        tr.Block(),
+                                        Rearrange('b (h w) c -> b c h w', h=img_size, w=img_size)])
+
 
         self.transforms_embed = tt.Compose([Rearrange('b c h w -> b (h w) c'),
                                         tr.Blit(),

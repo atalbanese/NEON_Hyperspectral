@@ -1,7 +1,25 @@
 import torch
 import torchvision.transforms.functional as F
+
+
 import random
 import numpy as np
+
+#From https://www.sciencedirect.com/science/article/pii/S0034425721000407
+class BrightnessAugment(torch.nn.Module):
+    def __init__(self, p=0.5):
+        super().__init__()
+        self.p = p
+        
+    
+    def forward(self, arr):
+        if torch.rand(1) < self.p:
+            change = (1.2 - 0.8) * torch.rand(1) + 0.8
+            a = torch.logit(arr) + torch.logit(change-0.5)
+            b = torch.sigmoid(a)
+            arr = b
+        return arr
+
 
 class RandomRectangleMask(torch.nn.Module):
     def __init__(self, p=.5):

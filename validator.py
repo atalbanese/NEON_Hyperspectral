@@ -66,7 +66,7 @@ class Validator():
         #data_with_coords = data.loc[(data.easting == data.easting) & (data.height == data.height) & (data.ninetyCrownDiameter == data.ninetyCrownDiameter)]
         data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting, data_with_coords.northing), crs='EPSG:32618')
         #data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['ninetyCrownDiameter']/2)
-        data_gdf['crowns'] = data_gdf.geometry.buffer(5)
+        data_gdf['crowns'] = data_gdf.geometry.buffer(1)
 
 
         test_gdf = data_gdf.loc[(data_gdf.easting > 731000) & (data_gdf.easting < 732000) & (data_gdf.northing > 4713000) & (data_gdf.northing < 4714000)]
