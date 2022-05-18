@@ -430,11 +430,33 @@ if __name__ == "__main__":
     #      }
     #  ]
 
+    # configs = [
+    #     {'num_channels': 10,
+    #      'num_classes': 30,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': False,
+    #      'queue_chunks': 1,
+    #      'main_brightness': True,
+    #      'aug_brightness': False,
+    #      'rescale_pca': True,
+    #      'extra_labels': 'concat_azm_add_chm_main_brightness_30_classes'
+    #      },
+    # ]
+
     configs = [
         {'num_channels': 10,
-         'num_classes': 30,
-         'azm': True,
-         'chm': True,
+         'num_classes': 12,
+         'azm': False,
+         'chm': False,
          'patch_size': 4,
          'log_every': 10,
          'max_epochs': 50,
@@ -445,12 +467,14 @@ if __name__ == "__main__":
          'azm_concat': True,
          'chm_concat': False,
          'queue_chunks': 1,
-         'main_brightness': True,
+         'main_brightness': False,
          'aug_brightness': False,
          'rescale_pca': True,
-         'extra_labels': 'concat_azm_add_chm_main_brightness_30_classes'
+         'extra_labels': 'rescale_no_struct'
          },
     ]
+
+    #TODO: No struct rescale
     
     for config in configs:
         do_training(**config)

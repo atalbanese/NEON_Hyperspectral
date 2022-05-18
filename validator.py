@@ -150,6 +150,32 @@ class Validator():
 
         data_gdf =  data_gdf.drop(list(to_remove))
 
+        img_loc = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022/NEON_D01_HARV_DP3_731000_4713000_reflectance.h5'
+
+        test = hp.pre_processing(img_loc, wavelength_ranges=utils.get_viz_bands())
+        test_rgb = hp.make_rgb(test['bands'])
+        test_rgb = rearrange(test_rgb, 'h w c -> c h w')
+        transform = from_origin(731000, 4714000, 1, 1)
+        test_rgb = exposure.adjust_gamma(test_rgb, 0.5)
+        #crs_code = CRS.from_string(test['meta']['proj'])
+        #need to replace UTM with utm in proj string
+        rs_test = rs.open('test1.tif', 'w+', driver='GTiff',
+                            height = test_rgb.shape[1], width = test_rgb.shape[2], 
+                            count=3, dtype=np.float32,
+                            crs='+proj=utm +zone=18 +ellps=WGS84 +datum=WGS84 +units=m +no_defs',
+                            transform=transform)
+        rs_test.write(test_rgb)
+
+        tree_outlines = rf.geometry_mask(data_gdf.crowns, (1000,1000), transform=rs_test.transform, invert=True)
+        trees = np.ma.masked_where(tree_outlines == False, tree_outlines)
+        cmap = colors.ListedColormap(['red'])
+        fig, ax = plt.subplots(figsize=(20,20))
+        ax.imshow(rearrange(rs_test.read(), 'c h w -> h w c'))
+        # ax.imshow(chm_open.read()[0])
+        im = ax.imshow(trees, cmap=cmap, alpha=0.2)
+        slider = self._make_slider(fig, im)
+        plt.show()
+
         
         data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
 
@@ -283,33 +309,35 @@ class Validator():
     def _plot_inference(df, validator, save_dir, model):
         row = df.iloc[0]
         file_key = row['file_coords']
-        plot_id = row['plotID']
-        if file_key not in validator.last_cluster:
-            f = validator.valid_files[file_key]
-            if not validator.struct:
-                clustered = inference.swav_inference_big(model, f)
+        if file_key in validator.valid_files:
+            plot_id = row['plotID']
+            if file_key not in validator.last_cluster:
+                f = validator.valid_files[file_key]
+                if not validator.struct:
+                    clustered = inference.swav_inference_big(model, f)
+                else:
+                    c = validator.chm_dict[file_key]
+                    a = validator.azm_dict[file_key]
+                    clustered = inference.swav_inference_big_struct_4(model, f, c, a, rescale=validator.rescale)
+                    validator.validate_from_gdf(file_key, clustered)
+
+                validator.last_cluster[file_key] = clustered
             else:
-                c = validator.chm_dict[file_key]
-                a = validator.azm_dict[file_key]
-                clustered = inference.swav_inference_big_struct_4(model, f, c, a, rescale=validator.rescale)
-                validator.validate_from_gdf(file_key, clustered)
-
-            validator.last_cluster[file_key] = clustered
-        else:
-            clustered = validator.last_cluster[file_key]
-        plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
-       
-        clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
-        plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
-        plt.bar(*np.unique(clustered, return_counts=True))
+                clustered = validator.last_cluster[file_key]
+            plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
         
-        plt.title(plot_id)
-        plt.xlabel('Classification')
-        plt.ylabel('Pixel Count')
-        #plt.xlim(0, 10)
+            clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
+            plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
+            plt.bar(*np.unique(clustered, return_counts=True))
+            
+            plt.title(plot_id)
+            plt.xlabel('Classification')
+            plt.ylabel('Pixel Count')
+            #plt.xlim(0, 10)
 
-        plt.savefig(os.path.join(save_dir, plot_id + "_hist.png"))
-        plt.close()
+            plt.savefig(os.path.join(save_dir, plot_id + "_hist.png"))
+            plt.close()
+        return df
 
 
         #plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
@@ -677,6 +705,24 @@ def handle_each_plot(plot_dir, fn, save_dir):
                 plot = pickle.load(img)
                 fn(plot, save_dir)
 
+def make_valid_df(valid_dict, num_classes):
+    class_columns = list(range(num_classes))
+    base = ['species', 'expected']
+    columns = base + class_columns
+    df = pd.DataFrame(columns=columns)
+
+    for key, value in valid_dict.items():
+        species_dict = {}
+        species_dict['species'] = key
+        species_dict['expected'] = value['expected']
+        for j, l in value['found'].items():
+            if j < num_classes:
+                species_dict[j] = l
+        df = pd.concat((df, pd.Series(species_dict).to_frame().T))
+
+    df.to_csv('test_kappa.csv')
+    return df
+
 
 
 
@@ -712,9 +758,101 @@ if __name__ == "__main__":
     SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct'
 
 
+    # with open('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_concat_both_brightness/valid_stats.pk', 'rb') as f:
+    #     content = pickle.load(f)
+    #     make_valid_df(content, 12)
+
+
+    # configs = [
+    #     {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': True,
+    #      'queue_chunks': 1,
+    #      'main_brightness': True,
+    #      'aug_brightness': True,
+    #      'rescale_pca': True,
+    #      'extra_labels': 'all_struct_concat_both_brightness',
+    #      'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_concat_both_brightness',
+    #      'ckpt': 'ckpts/exp_4/harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_concat_both_brightness_epoch=49.ckpt'
+    #      },
+    #      {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': True,
+    #      'queue_chunks': 1,
+    #      'main_brightness': False,
+    #      'aug_brightness': True,
+    #      'rescale_pca': True,
+    #      'extra_labels': 'all_struct_concat_only_aug_brightness',
+    #      'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_concat_only_aug_brightness',
+    #      'ckpt': 'ckpts/exp_4/harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_concat_only_aug_brightness_epoch=49.ckpt'
+    #      },
+    #      {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': True,
+    #      'queue_chunks': 1,
+    #      'main_brightness': True,
+    #      'aug_brightness': False,
+    #      'rescale_pca': True,
+    #      'extra_labels': 'all_struct_concat_only_main_brightness',
+    #      'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_concat_only_main_brightness',
+    #      'ckpt': 'ckpts/exp_4/harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_concat_only_main_brightness_epoch=49.ckpt'
+    #      },
+    #      {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': True,
+    #      'queue_chunks': 1,
+    #      'main_brightness': False,
+    #      'aug_brightness': False,
+    #      'rescale_pca': True,
+    #      'extra_labels': 'concat_only_rescale',
+    #      'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/concat_only_rescale',
+    #      'ckpt': 'ckpts/exp_4/harv_10_channels_12_classes_swav_structure_patch_size_4_concat_only_rescale_epoch=49.ckpt'
+    #      }
+    #  ]
+
     configs = [
         {'num_channels': 10,
-         'num_classes': 12,
+         'num_classes': 30,
          'azm': True,
          'chm': True,
          'patch_size': 4,
@@ -725,94 +863,30 @@ if __name__ == "__main__":
          'use_queue': False,
          'same_embed': False,
          'azm_concat': True,
-         'chm_concat': True,
-         'queue_chunks': 1,
-         'main_brightness': True,
-         'aug_brightness': True,
-         'rescale_pca': True,
-         'extra_labels': 'all_struct_concat_both_brightness',
-         'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_concat_both_brightness',
-         'ckpt': 'ckpts/exp_4/harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_concat_both_brightness_epoch=49.ckpt'
-         },
-         {'num_channels': 10,
-         'num_classes': 12,
-         'azm': True,
-         'chm': True,
-         'patch_size': 4,
-         'log_every': 10,
-         'max_epochs': 50,
-         'num_workers': 4,
-         'img_size': 40,
-         'use_queue': False,
-         'same_embed': False,
-         'azm_concat': True,
-         'chm_concat': True,
-         'queue_chunks': 1,
-         'main_brightness': False,
-         'aug_brightness': True,
-         'rescale_pca': True,
-         'extra_labels': 'all_struct_concat_only_aug_brightness',
-         'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_concat_only_aug_brightness',
-         'ckpt': 'ckpts/exp_4/harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_concat_only_aug_brightness_epoch=49.ckpt'
-         },
-         {'num_channels': 10,
-         'num_classes': 12,
-         'azm': True,
-         'chm': True,
-         'patch_size': 4,
-         'log_every': 10,
-         'max_epochs': 50,
-         'num_workers': 4,
-         'img_size': 40,
-         'use_queue': False,
-         'same_embed': False,
-         'azm_concat': True,
-         'chm_concat': True,
+         'chm_concat': False,
          'queue_chunks': 1,
          'main_brightness': True,
          'aug_brightness': False,
          'rescale_pca': True,
-         'extra_labels': 'all_struct_concat_only_main_brightness',
-         'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_concat_only_main_brightness',
-         'ckpt': 'ckpts/exp_4/harv_10_channels_12_classes_swav_structure_patch_size_4_all_struct_concat_only_main_brightness_epoch=49.ckpt'
+         'extra_labels': 'concat_azm_add_chm_main_brightness_30_classes',
+         'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/concat_azm_add_chm_main_brightness_30_classes',
+         'ckpt': 'ckpts/harv_10_channels_30_classes_swav_structure_patch_size_4_concat_azm_add_chm_main_brightness_30_classes_epoch=49.ckpt'
          },
-         {'num_channels': 10,
-         'num_classes': 12,
-         'azm': True,
-         'chm': True,
-         'patch_size': 4,
-         'log_every': 10,
-         'max_epochs': 50,
-         'num_workers': 4,
-         'img_size': 40,
-         'use_queue': False,
-         'same_embed': False,
-         'azm_concat': True,
-         'chm_concat': True,
-         'queue_chunks': 1,
-         'main_brightness': False,
-         'aug_brightness': False,
-         'rescale_pca': True,
-         'extra_labels': 'concat_only_rescale',
-         'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/concat_only_rescale',
-         'ckpt': 'ckpts/exp_4/harv_10_channels_12_classes_swav_structure_patch_size_4_concat_only_rescale_epoch=49.ckpt'
-         }
-     ]
-
-
+    ]
     valid = Validator(file=VALID_FILE, img_dir=PCA_DIR, site_name='HARV', num_clusters=NUM_CLUSTERS, plot_file=PLOT_FILE, struct=True, azm=AZM_DIR, chm=CHM_DIR, curated=CURATED_FILE, rescale=True)
 
-    for config in configs:
-        MODEL = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
-        try:
-            valid.last_cluster = {}
-            valid.do_plot_inference(config['save_dir'], MODEL)
-            with open(os.path.join(config['save_dir'], 'valid_stats.pk'), 'wb') as f:
-                pickle.dump(valid.valid_dict, f)
-            print(valid.valid_dict)
-            valid.valid_dict = valid.make_valid_dict()
-        except KeyError as e:
-            continue
+    # for config in configs:
+    #     MODEL = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
+    #     try:
+    #         valid.last_cluster = {}
+    #         valid.do_plot_inference(config['save_dir'], MODEL)
+    #         with open(os.path.join(config['save_dir'], 'valid_stats.pk'), 'wb') as f:
+    #             pickle.dump(valid.valid_dict, f)
+    #         print(valid.valid_dict)
+    #         valid.valid_dict = valid.make_valid_dict()
+    #     except KeyError as e:
+    #         print(e)
+    #         continue
     #valid.validate_from_gdf('731000_4713000', np.random.rand(1000,1000))
     #TODO: Automate saving these from training
     # configs = [
