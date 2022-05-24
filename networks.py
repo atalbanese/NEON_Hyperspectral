@@ -168,13 +168,13 @@ class SWaVStructMLP(nn.Module):
 
 #TODO: Make experimental interface (w/azm, w/o azm, etc...)
 class SWaVStruct(nn.Module):
-    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, queue_length = 256*6, same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False, aug_brightness=False):
+    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False, aug_brightness=False):
         super(SWaVStruct, self).__init__()
         self.populate_queue = False
         self.use_queue = False
         self.num_patches = (img_size*img_size)//(patch_size*patch_size)
-        self.queue_base = torch.zeros(queue_length, self.num_patches, emb_size).cuda()
-        self.queue_mod = torch.zeros(queue_length, self.num_patches, emb_size).cuda()
+        self.queue_base = torch.zeros((queue_chunks+1)*256, self.num_patches, emb_size).cuda()
+        self.queue_mod = torch.zeros((queue_chunks+1)*256, self.num_patches, emb_size).cuda()
         self.chm = chm
         self.azm = azm
         self.azm_concat = azm_concat
@@ -319,10 +319,11 @@ class SWaVStruct(nn.Module):
         #scores = scores.detach()
 
         if self.populate_queue:
-            self.queue_base[b:] = self.queue_base[:-b].clone()
-            self.queue_base[:b] = inp[:b].detach()
-            self.queue_mod[b:] = self.queue_mod[:-b].clone()
-            self.queue_mod[:b] = inp[b:].detach()
+            with torch.no_grad():
+                self.queue_base[b:] = self.queue_base[:-b].clone()
+                self.queue_base[:b] = inp[:b].detach()
+                self.queue_mod[b:] = self.queue_mod[:-b].clone()
+                self.queue_mod[:b] = inp[b:].detach()
 
         scores_t = scores[:b]
         scores_s = scores[b:]

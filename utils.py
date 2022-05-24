@@ -157,7 +157,7 @@ def get_shadow_bands():
     return {"red": 654,
             "green": 561, 
             "blue": 482,
-            "nir": 865}
+            "nir": 825}
 
 def get_landsat_viz():
     return  {"blue": {"lower": 452, "upper": 512},
@@ -439,19 +439,18 @@ if __name__ == '__main__':
     #     OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/masks/HARV'
     #     bulk_process(pool, IN_DIR, OUT_DIR, get_masks)
 
-    IN_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
+    IN_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D16.ABBY.DP3.30006.001.2021-07.basic.20220522T204614Z.PROVISIONAL'
     MASK_DIR = 'C:/Users/tonyt/Documents/Research/datasets/masks/harv_2022'
     BANDS = get_shadow_bands()
 
-    IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
-    IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
+    
 
 
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv_2022'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/abby'
 
-    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022'
-    #img_stats_chm(chm_fold)
-    img_stats_min_max('C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels', '')
+    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/abby'
+    img_stats_chm(chm_fold)
+    #img_stats_min_max('C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels', '')
 
 
     # with ProcessPool(6) as pool:

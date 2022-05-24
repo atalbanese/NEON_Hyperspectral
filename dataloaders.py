@@ -103,9 +103,14 @@ class StructureDataset(Dataset):
             chm_open = rs.open(self.chm_dict[key])
             chm = chm_open.read().astype(np.float32)
             chm[chm==-9999] = np.nan
+        #HARV
         #Mean =  15.696561055743224
         #Std = 9.548285574843716
-        chm = (torch.from_numpy(chm).squeeze(0)- 15.696561055743224)/9.548285574843716
+
+        #ABBY
+        #Mean = 14.399022964154588
+        #STD = 13.149885125626438
+        chm = (torch.from_numpy(chm).squeeze(0)- 14.399022964154588)/13.149885125626438
         chm[chm != chm] = 0
              
 
