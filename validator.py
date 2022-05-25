@@ -60,10 +60,12 @@ class Validator():
         self.img_dir = kwargs["img_dir"]
         self.struct = struct
         self.curated = kwargs['curated']
+        self.site_prefix = kwargs['prefix']
         
         self.num_classes = kwargs["num_classes"]
         self.site_name = kwargs["site_name"]
         self.plot_file = kwargs['plot_file']
+        self.orig_dir = kwargs['orig']
         self.valid_data, self.data_gdf = self.get_plot_data()
         self.valid_files = self.get_valid_files()
 
@@ -90,7 +92,7 @@ class Validator():
 
 
     def make_valid_dict(self):
-        species = self.data_gdf['taxonID_x'].unique()
+        species = self.valid_data['taxonID'].unique()
         valid_dict = {}
         for specie in species:
             valid_dict[specie] = {'expected':0,
@@ -155,39 +157,40 @@ class Validator():
     def get_plot_data(self):
         data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID', 'ninetyCrownDiameter', 'canopyPosition', 'easting', 'northing', 'height', 'individualID'])
         data = data.loc[data['siteID'] == self.site_name]
-        curated = pd.read_csv(self.curated)
-        curated = curated.rename(columns={'adjEasting': 'easting',
-                                          'adjNorthing': 'northing'})
-        data_with_coords = curated.loc[(curated.easting == curated.easting) & (curated.northing==curated.northing)]
+        # curated = pd.read_csv(self.curated)
+        # curated = curated.rename(columns={'adjEasting': 'easting',
+        #                                   'adjNorthing': 'northing'})
+        # data_with_coords = curated.loc[(curated.easting == curated.easting) & (curated.northing==curated.northing)]
        
         data = data.loc[(data['plantStatus'] != 'Dead, broken bole') & (data['plantStatus'] != 'Downed') & (data['plantStatus'] != 'No longer qualifies') & (data['plantStatus'] != 'Standing dead') & (data['plantStatus'] != 'Lost, fate unknown') & (data['plantStatus'] != 'Removed') & (data['plantStatus'] != 'Lost, presumed dead') & (data['height']==data['height']) & (data['ninetyCrownDiameter'] == data['ninetyCrownDiameter'])]
       
-        data_with_coords = data_with_coords.merge(data, how='inner', on='individualID')
-        data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting_x, data_with_coords.northing_x), crs='EPSG:32618')
-        data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['ninetyCrownDiameter']/2)
-        data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
-        to_remove = set()
-        for ix, row in data_gdf.iterrows():
-            working_copy = data_gdf.loc[data_gdf.index != ix]
-            coverage = working_copy.crowns.contains(row.crowns)
-            cover_gdf = working_copy.loc[coverage]
-            if (cover_gdf['height']>row['height']).sum() > 0:
-                to_remove.add(ix)
-            intersect = working_copy.crowns.intersects(row.crowns)
-            inter_gdf = working_copy.loc[intersect]
-            if (inter_gdf['height']>row['height']).sum() > 0:
-                to_remove.add(ix)
+        # data_with_coords = data_with_coords.merge(data, how='inner', on='individualID')
+        # data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting_x, data_with_coords.northing_x), crs='EPSG:32618')
+        # data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['ninetyCrownDiameter']/2)
+        # data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
+        # to_remove = set()
+        # for ix, row in data_gdf.iterrows():
+        #     working_copy = data_gdf.loc[data_gdf.index != ix]
+        #     coverage = working_copy.crowns.contains(row.crowns)
+        #     cover_gdf = working_copy.loc[coverage]
+        #     if (cover_gdf['height']>row['height']).sum() > 0:
+        #         to_remove.add(ix)
+        #     intersect = working_copy.crowns.intersects(row.crowns)
+        #     inter_gdf = working_copy.loc[intersect]
+        #     if (inter_gdf['height']>row['height']).sum() > 0:
+        #         to_remove.add(ix)
 
-        data_gdf =  data_gdf.drop(list(to_remove))
+        # data_gdf =  data_gdf.drop(list(to_remove))
 
-        data_gdf["file_west_bound"] = data_gdf["easting_x"] - data_gdf["easting_x"] % 1000
-        data_gdf["file_south_bound"] = data_gdf["northing_x"] - data_gdf["northing_x"] % 1000
-        data_gdf = data_gdf.astype({"file_west_bound": int,
-                            "file_south_bound": int})
-        data_gdf = data_gdf.astype({"file_west_bound": str,
-                            "file_south_bound": str})
+        # data_gdf["file_west_bound"] = data_gdf["easting_x"] - data_gdf["easting_x"] % 1000
+        # data_gdf["file_south_bound"] = data_gdf["northing_x"] - data_gdf["northing_x"] % 1000
+        # data_gdf = data_gdf.astype({"file_west_bound": int,
+        #                     "file_south_bound": int})
+        # data_gdf = data_gdf.astype({"file_west_bound": str,
+        #                     "file_south_bound": str})
                             
-        data_gdf['file_coords'] = data_gdf['file_west_bound'] + '_' + data_gdf['file_south_bound']
+        # data_gdf['file_coords'] = data_gdf['file_west_bound'] + '_' + data_gdf['file_south_bound']
+        data_gdf = None
 
         
         data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
@@ -208,6 +211,8 @@ class Validator():
 
         data["file_west_bound"] = data["easting_plot"] - data["easting_plot"] % 1000
         data["file_south_bound"] = data["northing_plot"] - data["northing_plot"] % 1000
+
+        data = data.loc[data['file_west_bound'] == data['file_west_bound']]
 
         data = data.astype({"file_west_bound": int,
                             "file_south_bound": int})
@@ -236,16 +241,6 @@ class Validator():
 
         return data, data_gdf
 
-    #For each file, make a binary band for each species where there is validation data
-    @staticmethod
-    def _make_valid_raster(df):
-        file_coords = df[0]['file_coords']
-
-
-    def create_validation_rasters(self):
-        grouped_files = self.data_gdf.groupby('file_coords')
-        grouped_files.apply(self._extract_plot, self.img_dir, save_dir)
-        return None
 
 
     def get_valid_files(self):
@@ -277,14 +272,14 @@ class Validator():
         return df
 
     @staticmethod
-    def _extract_plot(df, img_dir, save_dir):
+    def _extract_plot(df, img_dir, save_dir, prefix):
         first_row = df.iloc[0]
         coords = first_row['file_coords']
-        open_file = os.path.join(img_dir, f'NEON_D01_HARV_DP3_{coords}_reflectance.h5')
+        open_file = os.path.join(img_dir, f'NEON_{prefix}_HARV_DP3_{coords}_reflectance.h5')
         all_bands = hp.pre_processing(open_file, get_all=True)
         all_bands['bands'] = all_bands['bands'][first_row['y_min']:first_row['y_max'], first_row['x_min']:first_row['x_max'], :]
         all_bands['meta']['plotID'] = first_row['plotID']
-        all_bands['meta']['original_file'] = f'NEON_D01_HARV_DP3_{coords}_reflectance.h5'
+        all_bands['meta']['original_file'] = f'NEON_{prefix}_HARV_DP3_{coords}_reflectance.h5'
         #save plot by name, centroid, and original file
         save_name = f'plot_subset_{first_row["plotID"]}_eastingcentroid_{int(first_row["easting"])}_northingcentroid_{int(first_row["northing"])}_fromfile_{coords}.pk'
         #np.save(os.path.join(save_dir, save_name), all_bands)
@@ -293,14 +288,15 @@ class Validator():
 
     def extract_plots(self, save_dir):
         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
-        grouped_files.apply(self._extract_plot, self.img_dir, save_dir)
+        grouped_files.apply(self._extract_plot, self.img_dir, save_dir, self.site_prefix)
 
+    #TODO: Make generalizable, can use orig_dict
     @staticmethod
-    def _map_plot(df, img_dir, save_dir):
+    def _map_plot(df, img_dir, save_dir, site_name, prefix):
         fig, ax = plt.subplots(figsize=(10, 10))
         row = df.iloc[0]
         coords = row['file_coords']
-        open_file = os.path.join(img_dir, f'NEON_D01_HARV_DP3_{coords}_reflectance.h5')
+        open_file = os.path.join(img_dir, f'NEON_{prefix}_{site_name}_DP3_{coords}_reflectance.h5')
         rgb = hp.pre_processing(open_file, wavelength_ranges=utils.get_viz_bands())
         rgb = hp.make_rgb(rgb["bands"])
         rgb = exposure.adjust_gamma(rgb, 0.5)
@@ -308,18 +304,18 @@ class Validator():
         x = [row['x_min'], row['x_max'], row['x_max'], row['x_min'], row['x_min']]
         y = [row['y_max'], row['y_max'], row['y_min'], row['y_min'], row['y_max']]
         ax.plot(x, y)
-        ax.set_title(f'Original File: NEON_D01_HARV_DP3_{coords}_reflectance.h5 \n PlotID: {row["plotID"]}')
+        ax.set_title(f'Original File: NEON_{prefix}_{site_name}_DP3_{coords}_reflectance.h5 \n PlotID: {row["plotID"]}')
         plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, f'NEON_D01_HARV_DP3_{coords}_Plot_{row["plotID"]}.png'))
+        plt.savefig(os.path.join(save_dir, f'NEON_{prefix}_{site_name}_DP3_{coords}_Plot_{row["plotID"]}.png'))
         plt.close()
 
     
     @staticmethod
-    def _map_trees(df, img_dir, save_dir):
+    def _map_trees(df, img_dir, save_dir, prefix):
         fig, ax = plt.subplots(figsize=(10, 10))
         row = df.iloc[0]
         coords = row['file_coords']
-        open_file = os.path.join(img_dir, f'NEON_D01_HARV_DP3_{coords}_reflectance.h5')
+        open_file = os.path.join(img_dir, f'NEON_{prefix}_HARV_DP3_{coords}_reflectance.h5')
         rgb = hp.pre_processing(open_file, wavelength_ranges=utils.get_viz_bands())
         rgb = hp.make_rgb(rgb["bands"])
         rgb = exposure.adjust_gamma(rgb, 0.5)
@@ -341,7 +337,7 @@ class Validator():
 
     def map_trees(self, save_dir):
         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
-        grouped_files.apply(self._map_trees, self.img_dir, save_dir)
+        grouped_files.apply(self._map_trees, self.img_dir, save_dir, self.site_prefix)
 
     def do_plot_inference(self, save_dir, model):
         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
@@ -350,7 +346,7 @@ class Validator():
 
 
     @staticmethod
-    def _plot_inference(df, validator, save_dir, model):
+    def _plot_inference(df, validator, save_dir, model, get_stats=False):
         row = df.iloc[0]
         file_key = row['file_coords']
         if file_key in validator.valid_files:
@@ -363,7 +359,8 @@ class Validator():
                     c = validator.chm_dict[file_key]
                     a = validator.azm_dict[file_key]
                     clustered = inference.swav_inference_big_struct_4(model, f, c, a, rescale=validator.rescale)
-                    validator.validate_from_gdf(file_key, clustered)
+                    if get_stats:
+                        validator.validate_from_gdf(file_key, clustered)
 
                 validator.last_cluster[file_key] = clustered
             else:
@@ -390,7 +387,7 @@ class Validator():
     
     def map_plots(self, save_dir):
         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
-        grouped_files.apply(self._map_plot, self.img_dir, save_dir)
+        grouped_files.apply(self._map_plot, self.orig_dir, save_dir, self.site_name, self.site_prefix)
 
     def make_taxa_plots(self, save_dir):
          grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
@@ -768,6 +765,19 @@ def make_valid_df(valid_dict, num_classes):
     df.to_csv('test_kappa.csv')
     return df
 
+#TODO: add stat saving
+#Make models agnostic
+def validate_config(validator, config_list):
+    for config in config_list:
+        model = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
+        try:
+            validator.last_cluster = {}
+            validator.do_plot_inference(config['save_dir'], model)
+        except KeyError as e:
+            print(f'Error: {e}')
+            continue
+
+
 
 
 
@@ -780,7 +790,7 @@ def make_valid_df(valid_dict, num_classes):
 if __name__ == "__main__":
     NUM_CLASSES = 12
     NUM_CHANNELS = 10
-    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels'
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/abby_10_channels'
     PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance_pca.npy')
     IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
@@ -794,14 +804,105 @@ if __name__ == "__main__":
     PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
     PLOT_SUBSET = os.path.join(PLOT_DIR, 'plot_subset_HARV_024_eastingcentroid_726037_northingcentroid_4704513_fromfile_726000_4704000.pk')
     PLOT_VIZ = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/area_plots'
-    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022/'
-    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv_2022/'
-    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
+    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/abby/'
+    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/abby/'
+    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D16.ABBY.DP3.30006.001.2021-07.basic.20220522T204614Z.PROVISIONAL'
 
     PLOT_PKLS = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plot_pickles'
     PLOT_PCA = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca'
 
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/plot_locations'
+
+
+
+    valid = Validator(file=VALID_FILE, img_dir=PCA_DIR, site_name='ABBY', num_classes=NUM_CLASSES, plot_file=PLOT_FILE, struct=True, azm=AZM_DIR, chm=CHM_DIR, curated=CURATED_FILE, rescale=False, orig=ORIG_DIR, prefix='D16')
+    configs = [
+    {'num_channels': 10,
+         'num_classes': 12,
+         'azm': True,
+         'chm': True,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'use_queue': False,
+         'same_embed': False,
+         'azm_concat': True,
+         'chm_concat': False,
+         'queue_chunks': 20,
+         'main_brightness': False,
+         'aug_brightness': False,
+         'rescale_pca': False,
+         'extra_labels': 'azm_concat_chm_add',
+          'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/azm_concat_chm_add',
+          'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_azm_concat_chm_add_epoch=49.ckpt'
+         },
+         {'num_channels': 10,
+         'num_classes': 12,
+         'azm': False,
+         'chm': False,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'use_queue': False,
+         'same_embed': False,
+         'azm_concat': True,
+         'chm_concat': False,
+         'queue_chunks': 20,
+         'main_brightness': False,
+         'aug_brightness': False,
+         'rescale_pca': False,
+         'extra_labels': 'no_struct',
+          'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/no_struct',
+          'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_no_struct_epoch=49.ckpt'
+         },
+         {'num_channels': 10,
+         'num_classes': 12,
+         'azm': False,
+         'chm': False,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'use_queue': True,
+         'same_embed': False,
+         'azm_concat': True,
+         'chm_concat': False,
+         'queue_chunks': 10,
+         'main_brightness': False,
+         'aug_brightness': False,
+         'rescale_pca': False,
+         'extra_labels': 'no_struct_queue_10_chunks',
+          'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/no_struct_queue_10_chunks',
+          'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_10_chunks_epoch=49.ckpt'
+         },
+         {'num_channels': 10,
+         'num_classes': 12,
+         'azm': True,
+         'chm': True,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'use_queue': True,
+         'same_embed': False,
+         'azm_concat': True,
+         'chm_concat': False,
+         'queue_chunks': 10,
+         'main_brightness': False,
+         'aug_brightness': False,
+         'rescale_pca': False,
+         'extra_labels': 'azm_concat_chm_add_queue_10_chunks',
+          'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/azm_concat_chm_add_queue_10_chunks',
+          'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_azm_concat_chm_add_queue_10_chunks_epoch=49.ckpt'
+         },
+    ]
+    validate_config(valid, configs)
 
 
     # with open('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_concat_both_brightness/valid_stats.pk', 'rb') as f:
@@ -920,45 +1021,45 @@ if __name__ == "__main__":
     #      },
     # ]
 
-    configs = [
-           {'num_channels': 10,
-         'num_classes': 12,
-         'azm': False,
-         'chm': False,
-         'patch_size': 4,
-         'log_every': 10,
-         'max_epochs': 50,
-         'num_workers': 4,
-         'img_size': 40,
-         'use_queue': True,
-         'same_embed': False,
-         'concat': False,
-         'queue_chunks': 5,
-         'extra_labels': 'no_struct_queue_5_chunks',
-         'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/no_struct_5_chunk_queue',
-         'ckpt': 'ckpts/exp_2/harv_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_5_chunks_epoch=49.ckpt'
-         },
-                 {'num_channels': 10,
-         'num_classes': 12,
-         'azm': True,
-         'chm': True,
-         'patch_size': 4,
-         'log_every': 10,
-         'max_epochs': 50,
-         'num_workers': 4,
-         'img_size': 40,
-         'use_queue': True,
-         'same_embed': False,
-         'azm_concat': True,
-         'chm_concat': False,
-         'queue_chunks': 20,
-         'main_brightness': False,
-         'aug_brightness': False,
-         'rescale_pca': False,
-         'extra_labels': 'azm_concat_chm_add_queue_chunks_30',
-         'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/azm_concat_chm_add_queue_chunks_30',
-         'ckpt': 'ckpts/exp_5/harv_10_channels_12_classes_swav_structure_patch_size_4_azm_concat_chm_add_queue_chunks_30_epoch=49.ckpt'
-         },
+    # configs = [
+    #        {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': False,
+    #      'chm': False,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': True,
+    #      'same_embed': False,
+    #      'concat': False,
+    #      'queue_chunks': 5,
+    #      'extra_labels': 'no_struct_queue_5_chunks',
+    #      'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/no_struct_5_chunk_queue',
+    #      'ckpt': 'ckpts/exp_2/harv_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_5_chunks_epoch=49.ckpt'
+    #      },
+    #              {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': True,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': False,
+    #      'queue_chunks': 20,
+    #      'main_brightness': False,
+    #      'aug_brightness': False,
+    #      'rescale_pca': False,
+    #      'extra_labels': 'azm_concat_chm_add_queue_chunks_30',
+    #      'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/azm_concat_chm_add_queue_chunks_30',
+    #      'ckpt': 'ckpts/exp_5/harv_10_channels_12_classes_swav_structure_patch_size_4_azm_concat_chm_add_queue_chunks_30_epoch=49.ckpt'
+    #      },
 
         #      {'num_channels': 10,
         #  'num_classes': 12,
@@ -1058,21 +1159,20 @@ if __name__ == "__main__":
         #  'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/azm_concat_chm_add_queue_chunks_20_256_classes',
         #   'ckpt': 'ckpts/harv_10_channels_256_classes_swav_structure_patch_size_4_azm_concat_chm_add_queue_chunks_20_epoch=49.ckpt'
         #  }
-    ]
-    valid = Validator(file=VALID_FILE, img_dir=PCA_DIR, site_name='HARV', num_classes=NUM_CLASSES, plot_file=PLOT_FILE, struct=True, azm=AZM_DIR, chm=CHM_DIR, curated=CURATED_FILE, rescale=False, orig=ORIG_DIR)
-
-    for config in configs:
-        MODEL = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
-        try:
-            valid.last_cluster = {}
-            valid.do_plot_inference(config['save_dir'], MODEL)
-            with open(os.path.join(config['save_dir'], 'valid_stats.pk'), 'wb') as f:
-                pickle.dump(valid.valid_dict, f)
-            print(valid.valid_dict)
-            valid.valid_dict = valid.make_valid_dict()
-        except KeyError as e:
-            print(e)
-            continue
+   # ]
+    
+    # for config in configs:
+    #     MODEL = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
+    #     try:
+    #         valid.last_cluster = {}
+    #         valid.do_plot_inference(config['save_dir'], MODEL)
+    #         with open(os.path.join(config['save_dir'], 'valid_stats.pk'), 'wb') as f:
+    #             pickle.dump(valid.valid_dict, f)
+    #         print(valid.valid_dict)
+    #         valid.valid_dict = valid.make_valid_dict()
+    #     except KeyError as e:
+    #         print(e)
+    #         continue
     #valid.validate_from_gdf('731000_4713000', np.random.rand(1000,1000))
     #TODO: Automate saving these from training
     # configs = [
@@ -1294,13 +1394,7 @@ if __name__ == "__main__":
 
    
     
-    # for config in configs:
-    #     MODEL = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
-    #     try:
-    #         valid.last_cluster = {}
-    #         valid.do_plot_inference(config['save_dir'], MODEL)
-    #     except KeyError as e:
-    #         continue
+ 
 
 
 
