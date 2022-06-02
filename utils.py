@@ -1,7 +1,9 @@
+from sre_constants import IN
 import h5_helper as hp
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA, IncrementalPCA
+from sklearn.decomposition import PCA, IncrementalPCA, FastICA
+from skimage.segmentation import slic
 from sklearn.neighbors import kneighbors_graph
 from sklearn import cluster
 import os
@@ -328,6 +330,19 @@ def get_masks(args):
             np.save(os.path.join(out_dir, shadow_file), shadows)
             return True
 
+#Saves mask where TRUE = Vegetation
+def ndvi_mask(args):
+    file, in_dir, out_dir = args
+    if ".h5" in file:
+        mask_file = file.split(".")[0] + 'ndvi_mask.npy'
+        if not os.path.exists(os.path.join(out_dir,mask_file)):
+            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=get_bareness_bands())["bands"]
+            ndvi = get_ndvi(img)
+            veg = ndvi > 0.0
+            np.save(os.path.join(out_dir, mask_file), veg)
+            return True
+
+
 
 def masked_pca(args):
     file, in_dir, out_dir, mask_dir = args
@@ -355,6 +370,63 @@ def masked_pca(args):
 
 
             return pca_file
+
+def masked_ica(args):
+    file, in_dir, out_dir, mask_dir = args
+    if ".h5" in file:
+        ica_file = file.split(".")[0] + '_ica.npy'
+        ndvi_file = file.split(".")[0] + 'ndvi_mask.npy'
+        if not os.path.exists(os.path.join(out_dir, ica_file)):
+            img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"]
+            #bare_mask = np.load(os.path.join(mask_dir, bare_file))
+            shadow_mask = ~np.load(os.path.join(mask_dir, ndvi_file))
+            img[shadow_mask] = np.nan
+            img = rearrange(img, 'h w c -> (h w) c')
+            masked = ma.masked_invalid(img)
+            mask = masked.mask[:, 0:10]
+            to_pca = ma.compress_rows(masked)
+            pc = FastICA(n_components=10,
+                        random_state=0,
+                        whiten=False,
+                        tol=1e-3,
+                        max_iter=300)
+            pc.fit(to_pca)
+            data = pc.transform(to_pca)
+            out = np.empty(mask.shape, dtype=np.float64)
+            np.place(out, mask, np.nan)
+            np.place(out, ~mask, data)
+            out = rearrange(out, '(h w) c -> h w c', h=1000, w=1000)
+            np.save(os.path.join(out_dir, ica_file), out)
+
+            pc = FastICA(n_components=10,
+                        random_state=0,
+                        tol=1e-3,
+                        max_iter=300)
+            pc.fit(to_pca)
+            data = pc.transform(to_pca)
+            out = np.empty(mask.shape, dtype=np.float64)
+            np.place(out, mask, np.nan)
+            np.place(out, ~mask, data)
+            out = rearrange(out, '(h w) c -> h w c', h=1000, w=1000)
+            whiten = file.split(".")[0] + 'ica_whitened.npy'
+            np.save(os.path.join(out_dir, whiten), out)
+
+
+            return ica_file
+
+def make_superpixels(args):
+    file, in_dir, out_dir = args
+    if ".npy" in file:
+        #ica_file = file.split(".")[0] + '_ica.npy'
+        super_file = file.split(".")[0] + '_superpixel.npy'
+        if not os.path.exists(os.path.join(out_dir, super_file)):
+            img = np.load(os.path.join(in_dir, file))
+            mask = img == img
+            #Ideally we have num_segments = num_pixels/(4*4)
+            segments = slic(img, mask=mask, n_segments=mask.sum()//16, compactness=10)
+            np.save(os.path.join(out_dir, super_file), segments)
+
+    
 
 def build_inc_pca(args):
     file, in_dir, pca_solver = args
@@ -439,22 +511,34 @@ if __name__ == '__main__':
     #     OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/masks/HARV'
     #     bulk_process(pool, IN_DIR, OUT_DIR, get_masks)
 
-    IN_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
-    MASK_DIR = 'C:/Users/tonyt/Documents/Research/datasets/masks/harv_2022'
+    IN_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D16.ABBY.DP3.30006.001.2021-07.basic.20220522T204614Z.PROVISIONAL'
+    MASK_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ndvi/abby'
     BANDS = get_shadow_bands()
 
     
 
-
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo'
+    FILE = 'NEON_D16_ABBY_DP3_547000_5068000_reflectance.h5'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ndvi/abby_0_5'
+    ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/abby_10_channels'
 
     chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
-    img_stats_chm(chm_fold)
+
+    # ndvi_mask((FILE, IN_DIR, IN_DIR))
+
+    # masked_ica((FILE, IN_DIR, IN_DIR, MASK_DIR))
+
+    # make_superpixels((FILE, OUT_DIR, 'test'))
+
+
+    #img_stats_chm(chm_fold)
     #img_stats_min_max('C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels', '')
 
 
-    # with ProcessPool(6) as pool:
-    #     bulk_process(pool, [IN_DIR, OUT_DIR], save_solar_stats)
+    with ProcessPool(6) as pool:
+        bulk_process(pool, [IN_DIR, OUT_DIR], ndvi_mask)
+
+    with ProcessPool(4) as pool:
+        bulk_process(pool, [IN_DIR, ICA_DIR, OUT_DIR], masked_ica)
 
     #get_masks((IMG, IMG_DIR, MASK_DIR))
 

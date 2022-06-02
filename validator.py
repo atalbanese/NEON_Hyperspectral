@@ -66,6 +66,8 @@ class Validator():
         self.site_name = kwargs["site_name"]
         self.plot_file = kwargs['plot_file']
         self.orig_dir = kwargs['orig']
+        self.chm_mean = kwargs['chm_mean']
+        self.chm_std = kwargs['chm_std']
         self.valid_data, self.data_gdf = self.get_plot_data()
         self.valid_files = self.get_valid_files()
 
@@ -365,38 +367,39 @@ class Validator():
 
     @staticmethod
     def _plot_inference(df, validator, save_dir, model, get_stats=False):
-        row = df.iloc[0]
-        file_key = row['file_coords']
-        if file_key in validator.valid_files:
-            plot_id = row['plotID']
-            if file_key not in validator.last_cluster:
-                f = validator.valid_files[file_key]
-                if not validator.struct:
-                    clustered = inference.swav_inference_big(model, f)
+        if len(df>0):
+            row = df.iloc[0]
+            file_key = row['file_coords']
+            if file_key in validator.valid_files:
+                plot_id = row['plotID']
+                if file_key not in validator.last_cluster:
+                    f = validator.valid_files[file_key]
+                    if not validator.struct:
+                        clustered = inference.swav_inference_big(model, f)
+                    else:
+                        c = validator.chm_dict[file_key]
+                        a = validator.azm_dict[file_key]
+                        clustered = inference.swav_inference_big_struct_4(model, f, c, a, validator.chm_mean, validator.chm_std, rescale=validator.rescale)
+                        if get_stats:
+                            validator.validate_from_gdf(file_key, clustered)
+
+                    validator.last_cluster[file_key] = clustered
                 else:
-                    c = validator.chm_dict[file_key]
-                    a = validator.azm_dict[file_key]
-                    clustered = inference.swav_inference_big_struct_4(model, f, c, a, rescale=validator.rescale)
-                    if get_stats:
-                        validator.validate_from_gdf(file_key, clustered)
-
-                validator.last_cluster[file_key] = clustered
-            else:
-                clustered = validator.last_cluster[file_key]
-            plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
-            np.save(os.path.join(save_dir, f'{plot_id}_clustered.npy'), clustered)
-        
-            clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
-            plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
-            plt.bar(*np.unique(clustered, return_counts=True))
+                    clustered = validator.last_cluster[file_key]
+                plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
+                np.save(os.path.join(save_dir, f'{plot_id}_clustered.npy'), clustered)
             
-            plt.title(plot_id)
-            plt.xlabel('Classification')
-            plt.ylabel('Pixel Count')
-            #plt.xlim(0, 10)
+                clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
+                plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
+                plt.bar(*np.unique(clustered, return_counts=True))
+                
+                plt.title(plot_id)
+                plt.xlabel('Classification')
+                plt.ylabel('Pixel Count')
+                #plt.xlim(0, 10)
 
-            plt.savefig(os.path.join(save_dir, plot_id + "_hist.png"))
-            plt.close()
+                plt.savefig(os.path.join(save_dir, plot_id + "_hist.png"))
+                plt.close()
         return df
 
 
@@ -808,9 +811,9 @@ def validate_config(validator, config_list):
 if __name__ == "__main__":
     NUM_CLASSES = 12
     NUM_CHANNELS = 10
-    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/abby_10_channels'
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/ica/abby_10_channels'
     PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance_pca.npy')
-    IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
+    IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
     IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
    
@@ -818,23 +821,84 @@ if __name__ == "__main__":
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
     CURATED_FILE = "W:/Classes/Research/neon_mapped_harv.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
-    CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
-    PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
-    PLOT_SUBSET = os.path.join(PLOT_DIR, 'plot_subset_HARV_024_eastingcentroid_726037_northingcentroid_4704513_fromfile_726000_4704000.pk')
-    PLOT_VIZ = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/area_plots'
+    # CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
+    # PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
+    # PLOT_SUBSET = os.path.join(PLOT_DIR, 'plot_subset_HARV_024_eastingcentroid_726037_northingcentroid_4704513_fromfile_726000_4704000.pk')
+    # PLOT_VIZ = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/area_plots'
     CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/abby/'
     AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/abby/'
-    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D16.ABBY.DP3.30006.001.2021-07.basic.20220522T204614Z.PROVISIONAL'
+    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
 
-    PLOT_PKLS = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plot_pickles'
-    PLOT_PCA = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca'
+    # PLOT_PKLS = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plot_pickles'
+    # PLOT_PCA = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca'
 
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/rgb_plot_viz/'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/ica_plot_viz/'
 
 
 
-    valid = Validator(file=VALID_FILE, img_dir=PCA_DIR, site_name='ABBY', num_classes=NUM_CLASSES, plot_file=PLOT_FILE, struct=True, azm=AZM_DIR, chm=CHM_DIR, curated=CURATED_FILE, rescale=False, orig=ORIG_DIR, prefix='D16')
-    valid.extract_plots(SAVE_DIR)
+    valid = Validator(file=VALID_FILE, 
+                    img_dir=PCA_DIR, 
+                    site_name='ABBY', 
+                    num_classes=NUM_CLASSES, 
+                    plot_file=PLOT_FILE, 
+                    struct=True, 
+                    azm=AZM_DIR, 
+                    chm=CHM_DIR, 
+                    curated=CURATED_FILE, 
+                    rescale=False, 
+                    orig=ORIG_DIR, 
+                    prefix='D16',
+                    chm_mean = 14.399022964154588,
+                    chm_std = 13.149885125626438)
+    valid.extract_pca_plots(SAVE_DIR)
+    configs = [
+    {'num_channels': 10,
+         'num_classes': 12,
+         'azm': False,
+         'chm': False,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'use_queue': True,
+         'same_embed': False,
+         'azm_concat': True,
+         'chm_concat': False,
+         'queue_chunks': 10,
+         'main_brightness': False,
+         'aug_brightness': False,
+         'rescale_pca': False,
+         'extra_labels': 'no_struct_queue_10_chunks',
+         'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/niwo/experiments/no_struct_queue_10_chunks',
+         'ckpt': 'ckpts/niwo_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_10_chunks_epoch=49.ckpt'
+         },
+         {'num_channels': 10,
+         'num_classes': 12,
+         'azm': True,
+         'chm': True,
+         'patch_size': 4,
+         'log_every': 10,
+         'max_epochs': 50,
+         'num_workers': 4,
+         'img_size': 40,
+         'use_queue': True,
+         'same_embed': False,
+         'azm_concat': True,
+         'chm_concat': False,
+         'queue_chunks': 10,
+         'main_brightness': False,
+         'aug_brightness': False,
+         'rescale_pca': False,
+         'extra_labels': 'azm_concat_chm_add_queue_10_chunks',
+         'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/niwo/experiments/azm_concat_chm_add_queue_10_chunks',
+         'ckpt': 'ckpts/niwo_10_channels_12_classes_swav_structure_patch_size_4_azm_concat_chm_add_queue_10_chunks_epoch=49.ckpt'
+         },
+    ]
+
+    #validate_config(valid, configs)
+
+    #valid.extract_plots(SAVE_DIR)
     # configs = [
     # {'num_channels': 10,
     #      'num_classes': 12,
