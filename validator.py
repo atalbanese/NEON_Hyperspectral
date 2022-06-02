@@ -72,11 +72,13 @@ class Validator():
         self.valid_dict = self.make_valid_dict()
 
         self.orig_files = [os.path.join(kwargs['orig'], file) for file in os.listdir(kwargs['orig']) if ".h5" in file]
+        self.pca_files = [os.path.join(kwargs['img_dir'], file) for file in os.listdir(kwargs['img_dir']) if ".npy" in file]
         
         def make_dict(file_list, param_1, param_2):
             return {f"{file.split('_')[param_1]}_{file.split('_')[param_2]}": file for file in file_list}
 
         self.orig_dict = make_dict(self.orig_files, -3, -2)
+        self.pca_dict = make_dict(self.pca_files, -4, -3)
 
 
         if struct:
@@ -272,23 +274,39 @@ class Validator():
         return df
 
     @staticmethod
-    def _extract_plot(df, img_dir, save_dir, prefix):
+    def _extract_plot(df, orig_dict, save_dir):
         first_row = df.iloc[0]
         coords = first_row['file_coords']
-        open_file = os.path.join(img_dir, f'NEON_{prefix}_HARV_DP3_{coords}_reflectance.h5')
-        all_bands = hp.pre_processing(open_file, get_all=True)
-        all_bands['bands'] = all_bands['bands'][first_row['y_min']:first_row['y_max'], first_row['x_min']:first_row['x_max'], :]
-        all_bands['meta']['plotID'] = first_row['plotID']
-        all_bands['meta']['original_file'] = f'NEON_{prefix}_HARV_DP3_{coords}_reflectance.h5'
-        #save plot by name, centroid, and original file
-        save_name = f'plot_subset_{first_row["plotID"]}_eastingcentroid_{int(first_row["easting"])}_northingcentroid_{int(first_row["northing"])}_fromfile_{coords}.pk'
-        #np.save(os.path.join(save_dir, save_name), all_bands)
-        with open(os.path.join(save_dir, save_name), 'wb') as f:
-            pickle.dump(all_bands, f)
+        plot = first_row['plotID']
+        rgb = hp.pre_processing(orig_dict[coords], wavelength_ranges=utils.get_viz_bands())
+        rgb = hp.make_rgb(rgb["bands"])
+        rgb = exposure.adjust_gamma(rgb, 0.5)
+        rgb = rgb[first_row['y_min']:first_row['y_max'], first_row['x_min']:first_row['x_max'], :]
+        plt.imsave(os.path.join(save_dir, f'{plot}.png'), rgb)
 
     def extract_plots(self, save_dir):
-        grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
-        grouped_files.apply(self._extract_plot, self.img_dir, save_dir, self.site_prefix)
+        grouped_files = self.valid_data.groupby(['plotID'])
+        grouped_files.apply(self._extract_plot, self.orig_dict, save_dir)
+        
+
+    
+    def extract_pca_plots(self, save_dir):
+        grouped_files = self.valid_data.groupby(['plotID'])
+        grouped_files.apply(self._extract_pca_plot, self.pca_dict, save_dir)
+
+    @staticmethod
+    def _extract_pca_plot(df, pca_dict, save_dir):
+        first_row = df.iloc[0]
+        coords = first_row['file_coords']
+        plot = first_row['plotID']
+        to_open = pca_dict[coords]
+        pca_file = np.load(to_open)
+        extract = pca_file[first_row['y_min']:first_row['y_max'], first_row['x_min']:first_row['x_max'], 0:3]
+        extract = (extract - np.min(extract))/np.ptp(extract)
+
+        plt.imsave(os.path.join(save_dir, f'{plot}.png'), extract)
+        return df
+
 
     #TODO: Make generalizable, can use orig_dict
     @staticmethod
@@ -811,98 +829,99 @@ if __name__ == "__main__":
     PLOT_PKLS = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plot_pickles'
     PLOT_PCA = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca'
 
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/plot_locations'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/rgb_plot_viz/'
 
 
 
     valid = Validator(file=VALID_FILE, img_dir=PCA_DIR, site_name='ABBY', num_classes=NUM_CLASSES, plot_file=PLOT_FILE, struct=True, azm=AZM_DIR, chm=CHM_DIR, curated=CURATED_FILE, rescale=False, orig=ORIG_DIR, prefix='D16')
-    configs = [
-    {'num_channels': 10,
-         'num_classes': 12,
-         'azm': True,
-         'chm': True,
-         'patch_size': 4,
-         'log_every': 10,
-         'max_epochs': 50,
-         'num_workers': 4,
-         'img_size': 40,
-         'use_queue': False,
-         'same_embed': False,
-         'azm_concat': True,
-         'chm_concat': False,
-         'queue_chunks': 20,
-         'main_brightness': False,
-         'aug_brightness': False,
-         'rescale_pca': False,
-         'extra_labels': 'azm_concat_chm_add',
-          'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/azm_concat_chm_add',
-          'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_azm_concat_chm_add_epoch=49.ckpt'
-         },
-         {'num_channels': 10,
-         'num_classes': 12,
-         'azm': False,
-         'chm': False,
-         'patch_size': 4,
-         'log_every': 10,
-         'max_epochs': 50,
-         'num_workers': 4,
-         'img_size': 40,
-         'use_queue': False,
-         'same_embed': False,
-         'azm_concat': True,
-         'chm_concat': False,
-         'queue_chunks': 20,
-         'main_brightness': False,
-         'aug_brightness': False,
-         'rescale_pca': False,
-         'extra_labels': 'no_struct',
-          'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/no_struct',
-          'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_no_struct_epoch=49.ckpt'
-         },
-         {'num_channels': 10,
-         'num_classes': 12,
-         'azm': False,
-         'chm': False,
-         'patch_size': 4,
-         'log_every': 10,
-         'max_epochs': 50,
-         'num_workers': 4,
-         'img_size': 40,
-         'use_queue': True,
-         'same_embed': False,
-         'azm_concat': True,
-         'chm_concat': False,
-         'queue_chunks': 10,
-         'main_brightness': False,
-         'aug_brightness': False,
-         'rescale_pca': False,
-         'extra_labels': 'no_struct_queue_10_chunks',
-          'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/no_struct_queue_10_chunks',
-          'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_10_chunks_epoch=49.ckpt'
-         },
-         {'num_channels': 10,
-         'num_classes': 12,
-         'azm': True,
-         'chm': True,
-         'patch_size': 4,
-         'log_every': 10,
-         'max_epochs': 50,
-         'num_workers': 4,
-         'img_size': 40,
-         'use_queue': True,
-         'same_embed': False,
-         'azm_concat': True,
-         'chm_concat': False,
-         'queue_chunks': 10,
-         'main_brightness': False,
-         'aug_brightness': False,
-         'rescale_pca': False,
-         'extra_labels': 'azm_concat_chm_add_queue_10_chunks',
-          'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/azm_concat_chm_add_queue_10_chunks',
-          'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_azm_concat_chm_add_queue_10_chunks_epoch=49.ckpt'
-         },
-    ]
-    validate_config(valid, configs)
+    valid.extract_plots(SAVE_DIR)
+    # configs = [
+    # {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': False,
+    #      'queue_chunks': 20,
+    #      'main_brightness': False,
+    #      'aug_brightness': False,
+    #      'rescale_pca': False,
+    #      'extra_labels': 'azm_concat_chm_add',
+    #       'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/azm_concat_chm_add',
+    #       'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_azm_concat_chm_add_epoch=49.ckpt'
+    #      },
+    #      {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': False,
+    #      'chm': False,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': False,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': False,
+    #      'queue_chunks': 20,
+    #      'main_brightness': False,
+    #      'aug_brightness': False,
+    #      'rescale_pca': False,
+    #      'extra_labels': 'no_struct',
+    #       'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/no_struct',
+    #       'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_no_struct_epoch=49.ckpt'
+    #      },
+    #      {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': False,
+    #      'chm': False,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': True,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': False,
+    #      'queue_chunks': 10,
+    #      'main_brightness': False,
+    #      'aug_brightness': False,
+    #      'rescale_pca': False,
+    #      'extra_labels': 'no_struct_queue_10_chunks',
+    #       'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/no_struct_queue_10_chunks',
+    #       'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_no_struct_queue_10_chunks_epoch=49.ckpt'
+    #      },
+    #      {'num_channels': 10,
+    #      'num_classes': 12,
+    #      'azm': True,
+    #      'chm': True,
+    #      'patch_size': 4,
+    #      'log_every': 10,
+    #      'max_epochs': 50,
+    #      'num_workers': 4,
+    #      'img_size': 40,
+    #      'use_queue': True,
+    #      'same_embed': False,
+    #      'azm_concat': True,
+    #      'chm_concat': False,
+    #      'queue_chunks': 10,
+    #      'main_brightness': False,
+    #      'aug_brightness': False,
+    #      'rescale_pca': False,
+    #      'extra_labels': 'azm_concat_chm_add_queue_10_chunks',
+    #       'save_dir': 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/experiments/azm_concat_chm_add_queue_10_chunks',
+    #       'ckpt': 'ckpts/abby_10_channels_12_classes_swav_structure_patch_size_4_azm_concat_chm_add_queue_10_chunks_epoch=49.ckpt'
+    #      },
+    # ]
+    # validate_config(valid, configs)
 
 
     # with open('C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/experiments/all_struct_concat_both_brightness/valid_stats.pk', 'rb') as f:

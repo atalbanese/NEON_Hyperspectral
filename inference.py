@@ -197,7 +197,7 @@ def swav_inference_big_struct_3(model, file, chm, azm):
 
     return img
 
-def swav_inference_big_struct_4(model, file, chm, azm, rescale=False):
+def swav_inference_big_struct_4(model, file, chm, azm, chm_mean, chm_std, rescale=False):
     model.eval()
      #PCA
     print(file)
@@ -222,7 +222,7 @@ def swav_inference_big_struct_4(model, file, chm, azm, rescale=False):
     chm_open = rs.open(chm)
     chm = chm_open.read().astype(np.float32)
     #Standardize (-mean/std)
-    chm = (torch.from_numpy(chm).squeeze(0)- 15.696561055743224)/9.548285574843716
+    chm = (torch.from_numpy(chm).squeeze(0)- chm_mean)/chm_std
     
     chm[chm != chm] = 0
     

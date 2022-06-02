@@ -110,7 +110,11 @@ class StructureDataset(Dataset):
         #ABBY
         #Mean = 14.399022964154588
         #STD = 13.149885125626438
-        chm = (torch.from_numpy(chm).squeeze(0)- 14.399022964154588)/13.149885125626438
+
+        #NIWO
+        #MEAN = 4.015508459469479
+        #std = 4.809300736115787
+        chm = (torch.from_numpy(chm).squeeze(0)- 4.015508459469479)/4.809300736115787
         chm[chm != chm] = 0
              
 

@@ -439,16 +439,16 @@ if __name__ == '__main__':
     #     OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/masks/HARV'
     #     bulk_process(pool, IN_DIR, OUT_DIR, get_masks)
 
-    IN_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D16.ABBY.DP3.30006.001.2021-07.basic.20220522T204614Z.PROVISIONAL'
+    IN_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
     MASK_DIR = 'C:/Users/tonyt/Documents/Research/datasets/masks/harv_2022'
     BANDS = get_shadow_bands()
 
     
 
 
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/abby'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo'
 
-    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/abby'
+    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
     img_stats_chm(chm_fold)
     #img_stats_min_max('C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels', '')
 
@@ -475,58 +475,3 @@ if __name__ == '__main__':
 
     # img_stats(OUT_DIR, os.path.join(OUT_DIR, 'stats'), num_channels=10)
 
-
-    #get_bareness_mask((IMG, '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220407T001553Z.RELEASE-2022', '/data/shared/src/aalbanese/datasets/hs/shadow_masks/harv'))
-    # import utils
-    # IMG = '/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022/NEON_D13_MOAB_DP3_645000_4230000_reflectance.h5'
-    # rgb = hp.pre_processing(IMG, wavelength_ranges=utils.get_landsat_viz(), merging=True)
-    # rgb = hp.make_rgb(rgb["bands"])
-    # #rgb = exposure.adjust_gamma(rgb, gamma=0.5)
-    # plt.imshow(rgb)
-    # plt.show()
-
-
-    # with ProcessPool(3) as pool:
-    #     IN_DIR = ["/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D13.MOAB.DP3.30006.001.2021-04.basic.20220413T132254Z.RELEASE-2022"]
-    #     OUT_DIR =  ["/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022"]
-    #     WAVES = [{'cyano_1': 440,
-    #                      'cyano_2': 489,
-    #                      'cyano_3': 504,
-    #                      'cyano_4': 627,
-    #                      'cyano_5': 680,
-    #                      'all_crusts': 1450,
-    #                      'moss_lichen_1': 1720,
-    #                      'generic_crust_1': 1920,
-    #                      'moss_lichen_2': 2100,
-    #                      'moss_lichen_3': 2180,
-    #                      'generic_crust_2': 2300}]
-    #     FILES = os.listdir(IN_DIR[0])
-    #     IN_DIR *= len(FILES)
-    #     OUT_DIR *= len(FILES)
-    #     WAVES *= len(FILES)
-    #     args = list(zip(FILES,WAVES, IN_DIR, OUT_DIR))
-    #     future = pool.map(save_bands, args, timeout=60)
-    #     iterator = future.result()
-    #     while True:
-    #         try:
-    #             n = next(iterator)
-    #             if isinstance(n, tuple):
-    #                 print(n[0])
-    #                 np.save(*n)
-    #                 #print(n[0])
-    #             else:
-    #                 print(n)
-    #         except TimeoutError as e:
-    #             print(e.args)
-    #             continue
-    #         except StopIteration:
-    #             break
-
-    #img_stats('/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022', '/data/shared/src/aalbanese/datasets/hs/crust/moab_crust_2022/stats', num_channels=11 )
-    # mean = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/mean.npy").astype(np.float64)
-    # std = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/std.npy").astype(np.float64)
-    # test = np.load("/data/shared/src/aalbanese/datasets/hs/pca/harv_2022/NEON_D01_HARV_DP3_735000_4713000_reflectance.npy")
-    # test = torch.from_numpy(test)
-    # norm = tv.transforms.Normalize(mean, std)
-    # y = norm(test)
-    # print(y)
