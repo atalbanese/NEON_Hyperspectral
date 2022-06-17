@@ -26,6 +26,75 @@ def get_classifications(x):
     # masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
+
+class SWaVModelSuperPixel(pl.LightningModule):
+    def __init__(self, azm=True, chm=True, pop_queue_start=14, queue_start=15, use_queue=False,  same_embed=False, concat=False, queue_chunks=1, num_classes=12, azm_concat=False, chm_concat=False, aug_brightness=False, main_brightness=False, **kwargs):
+        super().__init__()
+        self.model = networks.SWaVSuperPixel(azm=azm, chm=chm, same_embed=same_embed, concat=concat, queue_chunks=queue_chunks, num_classes=num_classes, azm_concat=azm_concat, chm_concat=chm_concat, aug_brightness=aug_brightness)
+        self.use_queue = use_queue
+        self.pop_queue_start = pop_queue_start
+        self.queue_start = queue_start
+        if main_brightness:
+            self.brightness = tr.BrightnessAugment()
+        else:
+            self.brightness = None
+        #self.chm_embed = nn.Conv2d(1, 1, kernel_size=patch_size, stride=1)
+        #self.azm_embed = nn.Conv2d(1, 1, kernel_size=patch_size, stride=1)
+
+    def training_step(self, x):
+        inp = x['base'].squeeze(0)
+        chm = x['chm'].squeeze(0).unsqueeze(1)
+        az = x['azimuth'].squeeze(0).unsqueeze(1)
+        
+
+        # inp = TF.center_crop(inp, self.img_size)
+        # chm = TF.center_crop(chm, self.img_size)
+        # az = TF.center_crop(az, self.img_size)
+
+        if self.brightness is not None:
+            inp = self.brightness(inp)
+        
+        #TODO: Some kind of basic augmentation??
+
+        # if torch.rand(1) > 0.5:
+        #     inp = TF.vflip(inp)
+        #     chm = TF.vflip(chm)
+        #     az = TF.vflip(az)
+
+        # if torch.rand(1) > 0.5:
+        #     inp = TF.hflip(inp)
+        #     chm = TF.hflip(chm)
+        #     az = TF.hflip(az)
+
+
+        loss = self.model.forward_train(inp, chm, az)
+        self.log('train_loss', loss)
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=5e-4)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10, eta_min=5e-7)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+
+    def on_before_optimizer_step(self, optimizer, optimizer_idx):
+        if self.current_epoch < 1:
+            for name, p in self.model.named_parameters():
+                    if "prototypes" in name:
+                        p.grad = None
+    
+    def on_train_batch_start(self, batch, batch_idx):
+        self.model.norm_prototypes()
+        if self.use_queue:
+            if self.current_epoch == self.pop_queue_start:
+                self.model.populate_queue = True
+            if self.current_epoch == self.queue_start:
+                self.model.use_queue = True
+
+    def forward(self, x, chm, azm):
+        return self.model(x, chm, azm)
+
+
+
 #TODO: On train end, log results and run validation
 class SWaVModelStruct(pl.LightningModule):
     def __init__(self, patch_size, img_size, azm=True, chm=True, pop_queue_start=14, queue_start=15, use_queue=False,  same_embed=False, concat=False, queue_chunks=1, num_classes=12, azm_concat=False, chm_concat=False, aug_brightness=False, main_brightness=False, **kwargs):

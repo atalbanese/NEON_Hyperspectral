@@ -22,6 +22,130 @@ import pickle
 from einops.layers.torch import Rearrange, Reduce
 #from torch_geometric.data import Data
 
+class MergedStructureDataset(Dataset):
+    def __init__(self, pca_folder, tif_folder, azimuth_folder, superpix_folder, chm_mean, chm_std, eval=False, rescale_pca=False, **kwargs):
+        self.pca_folder = pca_folder
+        self.chm_mean = chm_mean
+        self.chm_std = chm_std
+        self.superpix = superpix_folder
+        self.rescale_pca = rescale_pca
+        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 256
+        if os.path.exists(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl')):
+            with open(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl'), 'rb') as f:
+                self.files = pickle.load(f)
+        else:
+            self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+            if not eval:
+                self.check_files()
+        self.rng = np.random.default_rng()
+
+        def make_dict(file_list, param_1, param_2):
+            return {(file.split('_')[param_1], file.split('_')[param_2]): file for file in file_list}
+
+        self.chm_files = [os.path.join(tif_folder, file) for file in os.listdir(tif_folder) if ".tif" in file]
+        self.azimuth_files = [os.path.join(azimuth_folder, file) for file in os.listdir(azimuth_folder) if ".npy" in file]
+        self.superpix_files = [os.path.join(superpix_folder, file) for file in os.listdir(superpix_folder) if ".npy" in file]
+
+        self.files_dict = make_dict(self.files, -5, -4)
+        self.chm_dict = make_dict(self.chm_files, -3, -2)
+        self.azimuth_dict = make_dict(self.azimuth_files, -4, -3)
+        self.superpix_dict = make_dict(self.superpix_files, -4, -3)
+
+        self.all_files = list(set(self.files_dict.keys()) & set(self.chm_dict.keys()) & set(self.azimuth_dict.keys()))
+
+
+    def check_files(self):
+        to_remove = []
+        for file in self.files:
+            try:
+                img = np.load(file)
+                img = rearrange(img, 'h w c -> (h w) c')
+            except ValueError as e:
+                to_remove.append(file)
+            img = ma.masked_invalid(img)
+            img = ma.compress_rows(img)
+            if img.shape[0] <(1000*1000)/2:
+                to_remove.append(file)
+        self.files = list(set(self.files) - set(to_remove))
+        with open(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl'), 'wb') as f:
+            pickle.dump(self.files, f)
+
+
+    def __len__(self):
+        return len(self.all_files)
+
+    def __getitem__(self, index):
+        key = self.all_files[index]
+
+        #PCA
+        img = np.load(self.files_dict[key]).astype(np.float32)
+        img = rearrange(img, 'h w c -> (h w) c')
+        img_mask = img == img
+        #img = torch.from_numpy(img)
+
+        
+
+
+        #Azimuth
+        azimuth = np.load(self.azimuth_dict[key]).astype(np.float32)
+        #Make -1 to 1
+        azimuth = (torch.from_numpy(azimuth)-180)/180
+        azimuth[azimuth != azimuth] = 0
+        azimuth = np.ravel(azimuth)
+
+        #CHM
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            chm_open = rs.open(self.chm_dict[key])
+            chm = chm_open.read().astype(np.float32)
+            chm[chm==-9999] = np.nan
+
+        chm = (torch.from_numpy(chm).squeeze(0)- self.chm_mean)/self.chm_std
+        chm[chm != chm] = 0
+        chm = np.ravel(chm)
+
+        #Superpix
+        #Masked segments are segment 0
+        superpixels = np.ravel(np.load(self.superpix_dict[key])) * img_mask[:,0]
+
+        sp_values, sp_inverse = np.unique(superpixels, return_inverse=True)
+
+        sp_select = self.rng.choice(range(1, sp_values.max()), size=self.batch_size + 10, replace=False)
+
+        azms, chms, imgs = [], [], []
+
+        i = 0
+
+        #TODO: maybe just random sample of pixels instead of mean
+        while len(imgs) < self.batch_size:
+            select_mask = sp_inverse == sp_select[i]
+            if len(select_mask) > 0:
+                select_img = img[select_mask, :]
+                select_mean= np.mean(select_img, axis=0)
+                select_var = np.var(select_img, axis=0)
+                select_stats = np.stack((select_mean, select_var))
+
+                select_azm = azimuth[select_mask]
+                select_azm = np.mean(select_azm)
+
+                select_chm = chm[select_mask]
+                select_chm = np.mean(select_chm)
+                imgs.append(select_stats)
+                azms.append(select_azm)
+                chms.append(select_chm)
+            i += 1
+             
+        imgs = torch.from_numpy(np.stack(imgs))
+        chms = torch.from_numpy(np.stack(chms))
+        azms = torch.from_numpy(np.stack(azms))
+
+        to_return = {}
+        to_return["base"] = imgs
+        to_return['chm'] = chms
+        to_return['azimuth'] = azms
+
+        return to_return
+
 class MaskedStructureDataset(Dataset):
     def __init__(self, pca_folder, tif_folder, azimuth_folder, superpix_folder, crop_size, chm_mean, chm_std, eval=False, rescale_pca=False, **kwargs):
         self.pca_folder = pca_folder
@@ -723,7 +847,7 @@ if __name__ == "__main__":
     az_fold = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo'
     sp_fold = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
-    test = MaskedStructureDataset(pca_fold, chm_fold, az_fold, sp_fold, 40, 4.015508459469479, 4.809300736115787, eval=False)
+    test = MergedStructureDataset(pca_fold, chm_fold, az_fold, sp_fold, 4.015508459469479, 4.809300736115787, eval=False)
     # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 
     print(test.__getitem__(69).shape)

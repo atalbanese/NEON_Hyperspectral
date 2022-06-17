@@ -10,44 +10,56 @@ import numpy as np
 import torchvision.transforms as tt
 import transforms as tr
 
-class SWaVStructMLP(nn.Module):
-    def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12):
-        super(SWaVStructMLP, self).__init__()
+class SWaVSuperPixel(nn.Module):
+    def __init__(self, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False, aug_brightness=False):
+        super(SWaVSuperPixel, self).__init__()
+        self.populate_queue = False
+        self.use_queue = False
+        # self.num_patches = (img_size*img_size)//(patch_size*patch_size)
+        self.queue_base = torch.zeros((queue_chunks+1)*256, 2, emb_size).cuda()
+        self.queue_mod = torch.zeros((queue_chunks+1)*256, 2, emb_size).cuda()
+        self.chm = chm
+        self.azm = azm
+        self.azm_concat = azm_concat
+        self.chm_concat = chm_concat
 
-        self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
-                                        tr.Blit(),
-                                        tr.Block(),
-                                        Rearrange('b (h w) c -> b c h w', h=img_size, w=img_size)])
+        self.same_embed = same_embed
+        # self.concat = concat
+        # self.add_channel = 2 if self.concat else 0
 
-        self.transforms_embed = tt.Compose([Rearrange('b c h w -> b (h w) c'),
-                                        tr.Blit(),
-                                        Rearrange('b (h w) c -> b c h w', h=img_size, w=img_size)])
+        self.add_channel = 0
+        if self.azm_concat:
+            self.add_channel += 1
+        if self.chm_concat:
+            self.add_channel +=1
 
-        self.patch_embed = nn.Sequential(
-            # break-down the image in s1 x s2 patches and flat them
-            Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
-            nn.Linear(patch_size * patch_size * in_channels, emb_size)
-        )
+        self.queue_chunks = queue_chunks
 
-        self.azm_embed = nn.Sequential(
-            # break-down the image in s1 x s2 patches and flat them
-            Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
-            nn.Linear(patch_size * patch_size, emb_size)
-        )
+        if aug_brightness:
+            self.aug_brightness = tr.BrightnessAugment()
+        else:
+            self.aug_brightness = None
 
-        self.chm_embed = nn.Sequential(
-            # break-down the image in s1 x s2 patches and flat them
-            Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
-            nn.Linear(patch_size * patch_size, emb_size)
-        )
 
-        self.azm_mlp = nn.Sequential(nn.Linear(emb_size, emb_size),
-                                        nn.ReLU(),
-                                    nn.Linear(emb_size, emb_size))
+        self.transforms_main = tt.Compose([tr.Blit(),
+                                        tr.Block()])
 
-        self.chm_mlp = nn.Sequential(nn.Linear(emb_size, emb_size),
-                                        nn.ReLU(),
-                                    nn.Linear(emb_size, emb_size))
+        self.embed = nn.Linear(in_channels, emb_size)
+        
+
+        # if self.azm:
+        #     self.azm_embed = nn.Sequential(
+        #         # break-down the image in s1 x s2 patches and flat them
+        #         Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
+        #         nn.Linear(patch_size * patch_size, emb_size)
+        #     )
+        
+        # if self.chm and not self.same_embed:
+        #     self.chm_embed = nn.Sequential(
+        #         # break-down the image in s1 x s2 patches and flat them
+        #         Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
+        #         nn.Linear(patch_size * patch_size, emb_size)
+        #     )
 
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=4, dim_feedforward=emb_size*2, batch_first=True)
@@ -60,8 +72,6 @@ class SWaVStructMLP(nn.Module):
                                         nn.Linear(emb_size, emb_size))
 
         self.prototypes = nn.Linear(emb_size, num_classes, bias=False)
-
-        
 
         self.softmax = nn.LogSoftmax(dim=1)
         self.temp = temp
@@ -101,33 +111,40 @@ class SWaVStructMLP(nn.Module):
 
     def forward_train(self, x, chm, azm):
 
-        b,_,_,_ = x.shape
+        b,_,_ = x.shape
+
+        if self.aug_brightness is not None:
+            x = self.aug_brightness(x)
+
+        if self.chm_concat:
+            x = torch.cat((x, chm), dim=1)
+        if self.azm_concat:
+            x= torch.cat((x, azm), dim=1)
 
         x_s = self.transforms_main(x)
+        x = self.embed(x)
+        x_s = self.embed(x_s)
+        # x = self.patch_embed(x)
+        # x_s = self.patch_embed(x_s)
 
-        chm_s = self.transforms_embed(chm)
-        azm_s = self.transforms_embed(azm)
+        # if self.chm and not self.chm_concat:
+        #     chm_s = self.transforms_embed(chm)
+        #     if not self.same_embed:
+        #         chm = self.chm_embed(chm)
+        #         chm_s = self.chm_embed(chm_s)
+        #     else:
+        #         chm = self.azm_embed(chm)
+        #         chm_s = self.azm_embed(chm_s)
+        #     x += chm
+        #     x_s += chm_s
 
+        # if self.azm and not self.azm_concat:
+        #     azm_s = self.transforms_embed(azm)
+        #     azm = self.azm_embed(azm)
+        #     azm_s = self.azm_embed(azm_s)
+        #     x += azm
+        #     x_s += azm_s
 
-        chm = self.chm_embed(chm)
-        chm_s = self.chm_embed(chm_s)
-
-        azm = self.azm_embed(azm)
-        azm_s = self.azm_embed(azm_s)
-
-        #TODO: probably have to do some feedforward shit here
-        x = self.patch_embed(x)
-        x_s = self.patch_embed(x_s)
-
-        x += chm
-        x = self.chm_mlp(x)
-        x += azm
-        x = self.azm_mlp(x)
-
-        x_s += chm_s
-        x_s = self.chm_mlp(x_s)
-        x_s += azm_s
-        x_s = self.azm_mlp(x_s)
 
         inp = torch.cat((x, x_s))
         inp = self.encoder(inp)
@@ -135,16 +152,53 @@ class SWaVStructMLP(nn.Module):
         inp = nn.functional.normalize(inp, dim=1, p=2)
 
         scores = self.prototypes(inp)
+        #scores = scores.detach()
+
+        if self.populate_queue:
+            with torch.no_grad():
+                self.queue_base[b:] = self.queue_base[:-b].clone()
+                self.queue_base[:b] = inp[:b].detach()
+                self.queue_mod[b:] = self.queue_mod[:-b].clone()
+                self.queue_mod[:b] = inp[b:].detach()
 
         scores_t = scores[:b]
         scores_s = scores[b:]
 
+        t = scores_t.detach()
+        s = scores_s.detach()
+
         loss = 0
 
         for i in range(b):
-            t, s = scores_t[i].detach(), scores_s[i].detach()
-            q_t = self.sinkhorn(t)
-            q_s = self.sinkhorn(s)
+            t_i, s_i = t[i], s[i]
+
+            
+
+            if self.use_queue:
+                qb_items = torch.cat(([self.queue_base[i+j] for j in range(self.queue_chunks)]))
+                qm_items = torch.cat(([self.queue_mod[i+j] for j in range(self.queue_chunks)]))
+
+                t_i = torch.cat((
+                    torch.mm(
+                        qb_items,
+                        self.prototypes.weight.t()
+                    ),
+                    t_i
+                ))
+
+                s_i = torch.cat((
+                    torch.mm(
+                        qm_items,
+                        self.prototypes.weight.t()
+                    ),
+                    s_i
+                ))
+
+                q_t = self.sinkhorn(t_i)[-self.num_patches:]
+                q_s = self.sinkhorn(s_i)[-self.num_patches:]
+            else:
+                q_t = self.sinkhorn(t_i)
+                q_s = self.sinkhorn(s_i)
 
             p_t = self.softmax(scores_t[i]/self.temp)
             p_s = self.softmax(scores_s[i]/self.temp)
@@ -154,11 +208,21 @@ class SWaVStructMLP(nn.Module):
         return loss/b
 
     def forward(self, inp, chm, azm):
+        if self.chm_concat:
+            inp = torch.cat((inp, chm), dim=1)
+        if self.azm_concat:
+            inp = torch.cat((inp, azm), dim=1)
+
         inp = self.patch_embed(inp)
-        chm = self.chm_embed(chm)
-        azm= self.azm_embed(azm)
-        inp += chm
-        inp += azm
+        if self.chm and not self.chm_concat:
+            if not self.same_embed:
+                chm = self.chm_embed(chm)
+            else:
+                chm = self.azm_embed(chm)
+            inp += chm
+        if self.azm and not self.azm_concat:
+            azm= self.azm_embed(azm)
+            inp += azm
         inp = self.encoder(inp)
         inp = self.projector(inp)
         inp = nn.functional.normalize(inp, dim=1, p=2)
@@ -166,7 +230,6 @@ class SWaVStructMLP(nn.Module):
         scores = self.prototypes(inp)
         return scores
 
-#TODO: Make experimental interface (w/azm, w/o azm, etc...)
 class SWaVStruct(nn.Module):
     def __init__(self, img_size=40, patch_size=2, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False, aug_brightness=False):
         super(SWaVStruct, self).__init__()
