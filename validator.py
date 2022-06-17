@@ -68,7 +68,7 @@ class Validator():
         self.orig_dir = kwargs['orig']
         self.chm_mean = kwargs['chm_mean']
         self.chm_std = kwargs['chm_std']
-        self.valid_data, self.data_gdf = self.get_plot_data()
+        self.valid_data, self.data_gdf = self.get_plot_data_2()
         self.valid_files = self.get_valid_files()
 
         self.valid_dict = self.make_valid_dict()
@@ -80,7 +80,7 @@ class Validator():
             return {f"{file.split('_')[param_1]}_{file.split('_')[param_2]}": file for file in file_list}
 
         self.orig_dict = make_dict(self.orig_files, -3, -2)
-        self.pca_dict = make_dict(self.pca_files, -4, -3)
+        self.pca_dict = make_dict(self.pca_files, -5, -4)
 
 
         if struct:
@@ -104,30 +104,10 @@ class Validator():
         return valid_dict
 
     @staticmethod    
-    def _gdf_validate_taxon(df, transform, img, vd, orig, chm):
+    def _gdf_validate_taxon(df, transform, img, vd):
         if len(df) >0:
-            taxa = df.iloc[0]['taxonID_x']
-            #pixels that overlap shapes are true
+            taxa = df.iloc[0]['taxonID']
             tree_outlines = rf.geometry_mask(df.crowns, (1000,1000), transform=transform, invert=True)
-            ndvi = utils.get_ndvi(orig)
-            #pixels with good ndvi will be true
-            ndvi_mask = ndvi > 0.5
-            #pixels with good nir will be true
-            nir_mask = orig['nir'] > 0.2
-
-            tree_outlines *= ndvi_mask
-            tree_outlines *= nir_mask
-            all_height_mask = tree_outlines * 0
-            for ix, tree in df.iterrows():
-                single_tree = rf.geometry_mask([tree.crowns], (1000,1000), transform=transform, invert=True)
-                min_height = tree.height - 5
-                #all pix tall enough will be true
-                height_mask = chm > min_height
-                single_tree *= height_mask
-                all_height_mask += single_tree
-            tree_outlines *= height_mask
-
-
             trees = np.ma.masked_where(tree_outlines == False, tree_outlines)
             selected = img[trees]
             vd.valid_dict[taxa]['expected'] += trees.sum()
@@ -140,61 +120,179 @@ class Validator():
 
         return df
 
+    # def _gdf_validate_taxon(df, transform, img, vd, orig, chm):
+    #     if len(df) >0:
+    #         taxa = df.iloc[0]['taxonID_x']
+    #         #pixels that overlap shapes are true
+    #         tree_outlines = rf.geometry_mask(df.crowns, (1000,1000), transform=transform, invert=True)
+    #         ndvi = utils.get_ndvi(orig)
+    #         #pixels with good ndvi will be true
+    #         ndvi_mask = ndvi > 0.5
+    #         #pixels with good nir will be true
+    #         nir_mask = orig['nir'] > 0.2
+
+    #         tree_outlines *= ndvi_mask
+    #         tree_outlines *= nir_mask
+    #         all_height_mask = tree_outlines * 0
+    #         for ix, tree in df.iterrows():
+    #             single_tree = rf.geometry_mask([tree.crowns], (1000,1000), transform=transform, invert=True)
+    #             min_height = tree.height - 5
+    #             #all pix tall enough will be true
+    #             height_mask = chm > min_height
+    #             single_tree *= height_mask
+    #             all_height_mask += single_tree
+    #         tree_outlines *= height_mask
+
+
+    #         trees = np.ma.masked_where(tree_outlines == False, tree_outlines)
+    #         selected = img[trees]
+    #         vd.valid_dict[taxa]['expected'] += trees.sum()
+    #         id, counts = np.unique(selected, return_counts=True)
+    #         for i, count in zip(id, counts):
+    #             vd.valid_dict[taxa]['found'][i] += count
+    #     else:
+    #         print('here')
+    #         print(df)
+
+    #     return df
+
     
     def validate_from_gdf(self, file_key, img):
         west, south = file_key.split('_')
         west, south = int(west), int(south)
-        cur_gdf = self.data_gdf.loc[(self.data_gdf.easting_x > west) & (self.data_gdf.easting_y < west+1000) & (self.data_gdf.northing_x > south) & (self.data_gdf.northing_y < south+1000)]
+        cur_gdf = self.data_gdf.loc[(self.data_gdf.easting > west) & (self.data_gdf.easting < west+1000) & (self.data_gdf.northing > south) & (self.data_gdf.northing < south+1000)]
         img_loc = self.valid_files[file_key]
         transform = from_origin(west, south+1000, 1, 1)
 
-        original = hp.pre_processing(self.orig_dict[file_key], wavelength_ranges=utils.get_shadow_bands())['bands']
-        chm_open = rs.open(self.chm_dict[file_key])
-        chm = chm_open.read().astype(np.float32)
-        chm = np.squeeze(chm, axis=0)
+        #original = hp.pre_processing(self.orig_dict[file_key], wavelength_ranges=utils.get_shadow_bands())['bands']
+        # chm_open = rs.open(self.chm_dict[file_key])
+        # chm = chm_open.read().astype(np.float32)
+        # chm = np.squeeze(chm, axis=0)
 
-        cur_gdf.groupby('taxonID_x').apply(self._gdf_validate_taxon, transform, img, self, original, chm)
+        cur_gdf.groupby('taxonID').apply(self._gdf_validate_taxon, transform, img, self) # original, chm)
 
         
+
+    def get_plot_data_2(self):
+       
+        curated = pd.read_csv(self.curated)
+        curated = curated.rename(columns={'adjEasting': 'easting',
+                                          'adjNorthing': 'northing'})
+        data_with_coords = curated.loc[(curated.easting == curated.easting) & (curated.northing==curated.northing) & (curated.maxCrownDiameter == curated.maxCrownDiameter)]
+            
+        #data_with_coords = data_with_coords.merge(data, how='inner', on='individualID')
+        data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting, data_with_coords.northing), crs='EPSG:32618')
+        data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['maxCrownDiameter']/2)
+        data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
+        to_remove = set()
+        for ix, row in data_gdf.iterrows():
+            working_copy = data_gdf.loc[data_gdf.index != ix]
+            coverage = working_copy.crowns.contains(row.crowns)
+            cover_gdf = working_copy.loc[coverage]
+            if (cover_gdf['height']>row['height']).sum() > 0:
+                to_remove.add(ix)
+            intersect = working_copy.crowns.intersects(row.crowns)
+            inter_gdf = working_copy.loc[intersect]
+            if (inter_gdf['height']>row['height']).sum() > 0:
+                to_remove.add(ix)
+
+        data_gdf =  data_gdf.drop(list(to_remove))
+
+        data_gdf["file_west_bound"] = data_gdf["easting"] - data_gdf["easting"] % 1000
+        data_gdf["file_south_bound"] = data_gdf["northing"] - data_gdf["northing"] % 1000
+        data_gdf = data_gdf.astype({"file_west_bound": int,
+                            "file_south_bound": int})
+        data_gdf = data_gdf.astype({"file_west_bound": str,
+                            "file_south_bound": str})
+                            
+        data_gdf['file_coords'] = data_gdf['file_west_bound'] + '_' + data_gdf['file_south_bound']
+
+        
+        #data['approx_sq_m'] = ((data['maxCrownDiameter']/2)**2) * np.pi
+
+        
+        plots = pd.read_csv(self.plot_file, usecols=['plotID', 'siteID', 'subtype', 'easting', 'northing', 'plotSize'])
+        plots = plots.loc[plots['siteID'] == self.site_name]
+        plots = plots.loc[plots['subtype'] == 'basePlot']
+
+        data = data_gdf.merge(plots, how='left', on='plotID')
+
+        data = data.rename(columns={
+                                    'easting_x': 'easting_tree',
+                                    'northing_x': 'northing_tree',
+                                    'easting_y': 'easting_plot',
+                                    'northing_y': 'northing_plot'
+        })
+
+        data["file_west_bound"] = data["easting_plot"] - data["easting_plot"] % 1000
+        data["file_south_bound"] = data["northing_plot"] - data["northing_plot"] % 1000
+
+        data = data.loc[data['file_west_bound'] == data['file_west_bound']]
+
+        data = data.astype({"file_west_bound": int,
+                            "file_south_bound": int})
+
+        data['x_min'] = (data['easting_plot']//1 - data['file_west_bound']) - (data['plotSize']**(1/2)/2)
+        data['x_max'] = data['x_min'] + data['plotSize']**(1/2)
+
+        data['y_min'] = 1000- (data['northing_plot']//1 - data['file_south_bound']) - (data['plotSize']**(1/2)/2)
+        data['y_max'] = data['y_min'] + data['plotSize']**(1/2)
+
+        data['tree_x'] = data['easting_tree']//1 - data['file_west_bound']
+        data['tree_y'] = 1000 - (data['northing_tree']//1 - data['file_south_bound'])
+
+        data = data.astype({"file_west_bound": str,
+                            "file_south_bound": str,
+                            'x_min':int,
+                            'y_min':int,
+                            'x_max':int,
+                            'y_max': int})
+        
+        index_names = data[(data['x_min'] <0) | (data['y_min']<0) | (data['x_max'] >999) | (data['y_max']>999)].index
+        data = data.drop(index_names)
+
+        data['file_coords'] = data['file_west_bound'] + '_' + data['file_south_bound']
+        data = pd.DataFrame(data)
+
+        return data, data_gdf
 
 
     def get_plot_data(self):
         data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID', 'ninetyCrownDiameter', 'canopyPosition', 'easting', 'northing', 'height', 'individualID'])
         data = data.loc[data['siteID'] == self.site_name]
-        # curated = pd.read_csv(self.curated)
-        # curated = curated.rename(columns={'adjEasting': 'easting',
-        #                                   'adjNorthing': 'northing'})
-        # data_with_coords = curated.loc[(curated.easting == curated.easting) & (curated.northing==curated.northing)]
+        curated = pd.read_csv(self.curated)
+        curated = curated.rename(columns={'adjEasting': 'easting',
+                                          'adjNorthing': 'northing'})
+        data_with_coords = curated.loc[(curated.easting == curated.easting) & (curated.northing==curated.northing)]
        
         data = data.loc[(data['plantStatus'] != 'Dead, broken bole') & (data['plantStatus'] != 'Downed') & (data['plantStatus'] != 'No longer qualifies') & (data['plantStatus'] != 'Standing dead') & (data['plantStatus'] != 'Lost, fate unknown') & (data['plantStatus'] != 'Removed') & (data['plantStatus'] != 'Lost, presumed dead') & (data['height']==data['height']) & (data['ninetyCrownDiameter'] == data['ninetyCrownDiameter'])]
       
-        # data_with_coords = data_with_coords.merge(data, how='inner', on='individualID')
-        # data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting_x, data_with_coords.northing_x), crs='EPSG:32618')
-        # data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['ninetyCrownDiameter']/2)
-        # data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
-        # to_remove = set()
-        # for ix, row in data_gdf.iterrows():
-        #     working_copy = data_gdf.loc[data_gdf.index != ix]
-        #     coverage = working_copy.crowns.contains(row.crowns)
-        #     cover_gdf = working_copy.loc[coverage]
-        #     if (cover_gdf['height']>row['height']).sum() > 0:
-        #         to_remove.add(ix)
-        #     intersect = working_copy.crowns.intersects(row.crowns)
-        #     inter_gdf = working_copy.loc[intersect]
-        #     if (inter_gdf['height']>row['height']).sum() > 0:
-        #         to_remove.add(ix)
+        data_with_coords = data_with_coords.merge(data, how='inner', on='individualID')
+        data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting_x, data_with_coords.northing_x), crs='EPSG:32618')
+        data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['ninetyCrownDiameter']/2)
+        data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
+        to_remove = set()
+        for ix, row in data_gdf.iterrows():
+            working_copy = data_gdf.loc[data_gdf.index != ix]
+            coverage = working_copy.crowns.contains(row.crowns)
+            cover_gdf = working_copy.loc[coverage]
+            if (cover_gdf['height']>row['height']).sum() > 0:
+                to_remove.add(ix)
+            intersect = working_copy.crowns.intersects(row.crowns)
+            inter_gdf = working_copy.loc[intersect]
+            if (inter_gdf['height']>row['height']).sum() > 0:
+                to_remove.add(ix)
 
-        # data_gdf =  data_gdf.drop(list(to_remove))
+        data_gdf =  data_gdf.drop(list(to_remove))
 
-        # data_gdf["file_west_bound"] = data_gdf["easting_x"] - data_gdf["easting_x"] % 1000
-        # data_gdf["file_south_bound"] = data_gdf["northing_x"] - data_gdf["northing_x"] % 1000
-        # data_gdf = data_gdf.astype({"file_west_bound": int,
-        #                     "file_south_bound": int})
-        # data_gdf = data_gdf.astype({"file_west_bound": str,
-        #                     "file_south_bound": str})
+        data_gdf["file_west_bound"] = data_gdf["easting_x"] - data_gdf["easting_x"] % 1000
+        data_gdf["file_south_bound"] = data_gdf["northing_x"] - data_gdf["northing_x"] % 1000
+        data_gdf = data_gdf.astype({"file_west_bound": int,
+                            "file_south_bound": int})
+        data_gdf = data_gdf.astype({"file_west_bound": str,
+                            "file_south_bound": str})
                             
-        # data_gdf['file_coords'] = data_gdf['file_west_bound'] + '_' + data_gdf['file_south_bound']
-        data_gdf = None
+        data_gdf['file_coords'] = data_gdf['file_west_bound'] + '_' + data_gdf['file_south_bound']
 
         
         data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
@@ -304,7 +402,11 @@ class Validator():
         to_open = pca_dict[coords]
         pca_file = np.load(to_open)
         extract = pca_file[first_row['y_min']:first_row['y_max'], first_row['x_min']:first_row['x_max'], 0:3]
+        mask = extract != extract
+        extract[mask] = 0
         extract = (extract - np.min(extract))/np.ptp(extract)
+        extract[mask] = 0
+
 
         plt.imsave(os.path.join(save_dir, f'{plot}.png'), extract)
         return df
@@ -366,8 +468,8 @@ class Validator():
 
 
     @staticmethod
-    def _plot_inference(df, validator, save_dir, model, get_stats=False):
-        if len(df>0):
+    def _plot_inference(df, validator, save_dir, model, get_stats=True):
+        if len(df)>0:
             row = df.iloc[0]
             file_key = row['file_coords']
             if file_key in validator.valid_files:
@@ -811,34 +913,27 @@ def validate_config(validator, config_list):
 if __name__ == "__main__":
     NUM_CLASSES = 12
     NUM_CHANNELS = 10
-    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/ica/abby_10_channels'
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
     PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance_pca.npy')
     IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
     IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
    
-    PLOT_DIR = "C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022"
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
-    CURATED_FILE = "W:/Classes/Research/neon_mapped_harv.csv"
+    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
-    # CKPTS_DIR = "ckpts/harv_transformer_fixed_augment"
-    # PRED_DIR = 'validation/harv_simsiam_transformer_0_1/harv_transformer_60_classes_epoch=25'
-    # PLOT_SUBSET = os.path.join(PLOT_DIR, 'plot_subset_HARV_024_eastingcentroid_726037_northingcentroid_4704513_fromfile_726000_4704000.pk')
-    # PLOT_VIZ = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/area_plots'
-    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/abby/'
-    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/abby/'
+    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo/'
+    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
     ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/niwo/ica_plot_viz/'
+    PLOT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/niwo/plot_locations/'
 
-    # PLOT_PKLS = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plot_pickles'
-    # PLOT_PCA = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/harv_2022/plots_pca'
-
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/abby/ica_plot_viz/'
-
-
+     #MEAN = 4.015508459469479
+        #std = 4.809300736115787
 
     valid = Validator(file=VALID_FILE, 
                     img_dir=PCA_DIR, 
-                    site_name='ABBY', 
+                    site_name='NIWO', 
                     num_classes=NUM_CLASSES, 
                     plot_file=PLOT_FILE, 
                     struct=True, 
@@ -847,10 +942,9 @@ if __name__ == "__main__":
                     curated=CURATED_FILE, 
                     rescale=False, 
                     orig=ORIG_DIR, 
-                    prefix='D16',
-                    chm_mean = 14.399022964154588,
-                    chm_std = 13.149885125626438)
-    valid.extract_pca_plots(SAVE_DIR)
+                    prefix='D13',
+                    chm_mean = 4.015508459469479,
+                    chm_std = 4.809300736115787)
     configs = [
     {'num_channels': 10,
          'num_classes': 12,
@@ -898,7 +992,7 @@ if __name__ == "__main__":
 
     #validate_config(valid, configs)
 
-    #valid.extract_plots(SAVE_DIR)
+    valid.extract_pca_plots(SAVE_DIR)
     # configs = [
     # {'num_channels': 10,
     #      'num_classes': 12,

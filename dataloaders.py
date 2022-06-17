@@ -22,6 +22,131 @@ import pickle
 from einops.layers.torch import Rearrange, Reduce
 #from torch_geometric.data import Data
 
+class MaskedStructureDataset(Dataset):
+    def __init__(self, pca_folder, tif_folder, azimuth_folder, superpix_folder, crop_size, chm_mean, chm_std, eval=False, rescale_pca=False, **kwargs):
+        self.pca_folder = pca_folder
+        self.chm_mean = chm_mean
+        self.chm_std = chm_std
+        self.superpix = superpix_folder
+        self.rescale_pca = rescale_pca
+        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 256
+        if os.path.exists(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl')):
+            with open(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl'), 'rb') as f:
+                self.files = pickle.load(f)
+        else:
+            self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+            if not eval:
+                self.check_files()
+        self.rng = np.random.default_rng()
+        self.crop_size = crop_size
+
+        def make_dict(file_list, param_1, param_2):
+            return {(file.split('_')[param_1], file.split('_')[param_2]): file for file in file_list}
+
+        self.chm_files = [os.path.join(tif_folder, file) for file in os.listdir(tif_folder) if ".tif" in file]
+        self.azimuth_files = [os.path.join(azimuth_folder, file) for file in os.listdir(azimuth_folder) if ".npy" in file]
+        self.superpix_files = [os.path.join(superpix_folder, file) for file in os.listdir(superpix_folder) if ".npy" in file]
+
+        self.files_dict = make_dict(self.files, -5, -4)
+        self.chm_dict = make_dict(self.chm_files, -3, -2)
+        self.azimuth_dict = make_dict(self.azimuth_files, -4, -3)
+        self.superpix_dict = make_dict(self.superpix_files, -4, -3)
+
+        self.all_files = list(set(self.files_dict.keys()) & set(self.chm_dict.keys()) & set(self.azimuth_dict.keys()))
+
+
+    def check_files(self):
+        to_remove = []
+        for file in self.files:
+            try:
+                img = np.load(file)
+                img = rearrange(img, 'h w c -> (h w) c')
+            except ValueError as e:
+                to_remove.append(file)
+            img = ma.masked_invalid(img)
+            img = ma.compress_rows(img)
+            if img.shape[0] <(1000*1000)/2:
+                to_remove.append(file)
+        self.files = list(set(self.files) - set(to_remove))
+        with open(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl'), 'wb') as f:
+            pickle.dump(self.files, f)
+
+
+    def __len__(self):
+        return len(self.all_files)
+
+    def __getitem__(self, index):
+        key = self.all_files[index]
+
+        #PCA
+        img = np.load(self.files_dict[key]).astype(np.float32)
+        img = rearrange(img, 'h w c -> (h w) c')
+        img_mask = img == img
+        #img = torch.from_numpy(img)
+
+        
+
+
+        #Azimuth
+        azimuth = np.load(self.azimuth_dict[key]).astype(np.float32)
+        #Make -1 to 1
+        azimuth = (torch.from_numpy(azimuth)-180)/180
+        azimuth[azimuth != azimuth] = 0
+        azimuth = np.ravel(azimuth)
+
+        #CHM
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            chm_open = rs.open(self.chm_dict[key])
+            chm = chm_open.read().astype(np.float32)
+            chm[chm==-9999] = np.nan
+
+        chm = (torch.from_numpy(chm).squeeze(0)- self.chm_mean)/self.chm_std
+        chm[chm != chm] = 0
+        chm = np.ravel(chm)
+
+        #Superpix
+        #Masked segments are segment 0
+        superpixels = np.ravel(np.load(self.superpix_dict[key])) * img_mask[:,0]
+
+        sp_values, sp_index, sp_inverse = np.unique(superpixels, return_index=True, return_inverse=True)
+
+        sp_select = self.rng.choice(range(1, sp_values.max()), size=self.batch_size, replace=False)
+
+        azms, chms, imgs = [], [], []
+        azms_mask, chms_mask, imgs_mask = [], [], []
+
+        def select_and_mask(sm, arr, sl, slm):
+            select = arr[sm]
+            select_mask = np.ones_like(select)
+            pad_mask = np.pad(select_mask, (0, 256- select_mask.shape[0]))
+            pad = np.pad(select, (0, 256- select.shape[0]))
+            sl.append(pad)
+            slm.append(pad_mask)
+
+        for ix, i in enumerate(sp_select):
+            select_mask = sp_inverse == i
+            
+            select_and_mask(select_mask, azimuth, azms, azms_mask)
+            select_and_mask(select_mask, chm, chms, chms_mask)
+            img_select = img[select_mask, :]
+            print(img_select.shape)
+            img_mask = np.ones_like(img_select)
+            img_pad = np.zeros((256 - img_select.shape[0], 10), dtype=img_select.dtype)
+            img_select = np.concatenate((img_select, img_pad))
+            img_mask = np.concatenate((img_mask, img_pad))
+            imgs.append(img_select)
+            imgs_mask.append(img_mask)
+
+             
+
+        to_return = {}
+        to_return["base"] = img
+        to_return['chm'] = chm
+        to_return['azimuth'] = azimuth
+
+        return to_return
+
 class StructureDataset(Dataset):
     def __init__(self, pca_folder, tif_folder, azimuth_folder, crop_size, eval=False, rescale_pca=False, **kwargs):
         self.pca_folder = pca_folder
@@ -593,140 +718,12 @@ class HyperDataset(Dataset):
 
 if __name__ == "__main__":
 
-    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels/'
-    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022'
-    az_fold = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv_2022'
+    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
+    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
+    az_fold = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo'
+    sp_fold = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
-    test = StructureDataset(pca_fold, chm_fold, az_fold, 40)
-
+    test = MaskedStructureDataset(pca_fold, chm_fold, az_fold, sp_fold, 40, 4.015508459469479, 4.809300736115787, eval=False)
     # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 
     print(test.__getitem__(69).shape)
-    #test = pylas.read('/data/shared/src/aalbanese/datasets/lidar/NEON_lidar-point-cloud-line/NEON.D16.WREF.DP1.30003.001.2021-07.basic.20220330T163527Z.PROVISIONAL/NEON_D16_WREF_DP1_L001-1_2021071815_unclassified_point_cloud.las')    
-    #print(test)
-
-    #las_fold = "/data/shared/src/aalbanese/datasets/lidar/NEON_lidar-point-cloud-line/NEON.D16.WREF.DP1.30003.001.2021-07.basic.20220330T192134Z.PROVISIONAL"
-    # h5_fold = "/data/shared/src/aalbanese/datasets/hs/NEON_refl-surf-dir-ortho-mosaic/NEON.D16.WREF.DP3.30006.001.2021-07.basic.20220330T192306Z.PROVISIONAL"
-
-    # wavelengths = {"red": 654,
-    #                 "green": 561, 
-    #                 "blue": 482,
-    #                 "nir": 865}
-
-
-    # #test = MixedDataset(h5_fold, las_fold, waves=wavelengths)
-    # test = HyperDataset(h5_fold, waves=wavelengths, augment="wavelength")
-    # test_item = test.__getitem__(69)
-    # print(test_item)
-
-
-#WIP - COME BACK TO WHEN WORKING ON LIDAR
-# class MixedDataset(Dataset):
-#     def __init__(self, hyper_folder, las_folder, **kwargs):
-#         self.kwargs = kwargs
-#         self.h5_location = hyper_folder
-#         self.las_location = las_folder
-#         self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 32
-#         self.crop_size = kwargs["crop_size"] if "crop_size" in kwargs else 64
-#         h5_files = [file for file in os.listdir(self.h5_location) if ".h5" in file]
-#         las_files = [file for file in os.listdir(self.las_location) if ".las" in file]
-
-#         def make_dict(file_list, param_1, param_2):
-#             return {(file.split('_')[param_1], file.split('_')[param_2]): file for file in file_list}
-
-#         self.h5_dict = make_dict(h5_files, -3, -2)
-#         self.las_dict = make_dict(las_files, -6, -5)
-
-#         self.common_files = list(set(self.h5_dict.keys()) & set(self.las_dict.keys()))
-    
-
-
-#     def process_h5(self, h5_file):
-#         waves = self.kwargs['waves']
-#         bands, meta, _ = hp.pre_processing(h5_file, waves)
-#         return bands, meta
-
-#     def process_lidar(self, lidar_file):
-#         lidar = pylas.read(lidar_file)
-#         return lidar
-
-#     def make_crops(self):
-#         #There is definitely a faster way to do this but it works
-#         crops = []
-#         while len(crops) < self.batch_size:
-#             x_min, y_min = random.randint(0,1000-self.crop_size), random.randint(0,1000-self.crop_size)
-#             x_max, y_max = x_min + self.crop_size, y_min + self.crop_size
-#             crop_dims = (x_min, y_min, x_max, y_max)
-#             x_range = range(x_min, x_max)
-#             y_range = range(y_min, y_max)
-#             for crop in crops:
-#                 crop_x_range = range(crop[0], crop[2])
-#                 crop_y_range = range(crop[1], crop[3])
-#                 x_int = list(set(x_range) & set(crop_x_range))
-#                 y_int = list(set(y_range) & set(crop_y_range))
-#                 if len(x_int) * len(y_int):
-#                     break
-#             else:
-#                 crops.append(crop_dims)
-#         return crops
-
-#     # Just for debugging
-#     def plot_crops(self):
-#         crops = self.make_crops()
-#         for crop in crops:
-#             x_list = [crop[0], crop[2], crop[2], crop[0], crop[0]]
-#             y_list = [crop[1], crop[1], crop[3], crop[3], crop[1]]
-#             plt.plot(x_list, y_list)
-#         plt.show()
-
-#     def make_h5_stack(self, h5, crops):
-#         h5 = hp.stack_all(h5, axis=0)
-
-#         h5_samples = [h5[:, crop[0]:crop[2], crop[1]:crop[3]] for crop in crops]
-#         # Convert any NAN values to -1
-#         h5_tensor_list = []
-#         for sample in h5_samples:
-#             sample[sample != sample] = -1
-#             h5_tensor_list.append(torch.from_numpy(sample))
-
-#         return torch.stack(h5_tensor_list)
-
-#     def make_las_stack(self, las, coords, crops):
-#         adj_crops = []
-#         coords = [int(coord) for coord in coords]
-#         las_points = []
-#         x_copy, y_copy = las.x.copy(), las.y.copy()
-#         for crop in crops:
-#             x_min, x_max = crop[0] + coords[0], crop[2] + coords[0]
-#             y_min, y_max = coords[1] - crop[1] + 1000, coords[1] - crop[3] + 1000
-            
-#             x_mask = np.bitwise_and(x_copy >= x_min, x_copy <=x_max)
-#             y_mask = np.bitwise_and(y_copy <= y_min, y_copy >= y_max)
-#             mask = np.bitwise_and(x_mask, y_mask)
-#             stacked = np.stack((las.x[mask], las.y[mask], las.z[mask]), axis=1)
-#             las_points.append(torch.from_numpy(stacked))
-        
-#         return las_points
-
-    
-#     def __len__(self):
-#         return len(self.common_files)
-
-#     def __getitem__(self, idx):
-#         coords = self.common_files[idx]
-#         h5 = self.h5_dict[coords]
-#         las = self.las_dict[coords]
-
-#         h5, h5_meta = self.process_h5(os.path.join(self.h5_location, h5))
-#         las = self.process_lidar(os.path.join(self.las_location, las))
-
-#         crops = self.make_crops()
-        
-#         h5_stack = self.make_h5_stack(h5, crops)
-#         las_stack = self.make_las_stack(las, coords, crops)
-        
-#         return {"hs":h5_stack, "las":las_stack}
-
-
-
-
