@@ -41,27 +41,18 @@ class SWaVSuperPixel(nn.Module):
             self.aug_brightness = None
 
 
-        self.transforms_main = tt.Compose([tr.Blit(),
-                                        tr.Block()])
-
-        self.embed = nn.Linear(in_channels, emb_size)
-        
-
-        # if self.azm:
-        #     self.azm_embed = nn.Sequential(
-        #         # break-down the image in s1 x s2 patches and flat them
-        #         Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
-        #         nn.Linear(patch_size * patch_size, emb_size)
-        #     )
-        
-        # if self.chm and not self.same_embed:
-        #     self.chm_embed = nn.Sequential(
-        #         # break-down the image in s1 x s2 patches and flat them
-        #         Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size),
-        #         nn.Linear(patch_size * patch_size, emb_size)
-        #     )
+        self.transforms_main = tt.Compose([Rearrange('b s c h w -> b (h s w) c'),
+                                        tr.Blit(p=0.5),
+                                        tr.Block(p=0.5),
+                                        Rearrange('b (h s w) c -> b s c h w', h=4, w=4, s=50)])
 
 
+        self.embed = nn.Sequential(
+                        Rearrange('b s c h w -> b s (c h w)'),
+                        nn.Linear(4*4*10, emb_size)
+        )
+
+     
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=4, dim_feedforward=emb_size*2, batch_first=True)
         self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
 
@@ -109,9 +100,10 @@ class SWaVSuperPixel(nn.Module):
         return Q.t()
 
 
-    def forward_train(self, x, chm, azm):
+    def forward_train(self, x, chm, azm, mask):
 
-        b,_,_ = x.shape
+        b,_,_,_,_ = x.shape
+
 
         if self.aug_brightness is not None:
             x = self.aug_brightness(x)
@@ -122,31 +114,12 @@ class SWaVSuperPixel(nn.Module):
             x= torch.cat((x, azm), dim=1)
 
         x_s = self.transforms_main(x)
-        x = self.embed(x)
-        x_s = self.embed(x_s)
-        # x = self.patch_embed(x)
-        # x_s = self.patch_embed(x_s)
 
-        # if self.chm and not self.chm_concat:
-        #     chm_s = self.transforms_embed(chm)
-        #     if not self.same_embed:
-        #         chm = self.chm_embed(chm)
-        #         chm_s = self.chm_embed(chm_s)
-        #     else:
-        #         chm = self.azm_embed(chm)
-        #         chm_s = self.azm_embed(chm_s)
-        #     x += chm
-        #     x_s += chm_s
-
-        # if self.azm and not self.azm_concat:
-        #     azm_s = self.transforms_embed(azm)
-        #     azm = self.azm_embed(azm)
-        #     azm_s = self.azm_embed(azm_s)
-        #     x += azm
-        #     x_s += azm_s
 
 
         inp = torch.cat((x, x_s))
+        inp = self.embed(inp)
+        #mask = torch.cat((mask, mask))
         inp = self.encoder(inp)
         inp = self.projector(inp)
         inp = nn.functional.normalize(inp, dim=1, p=2)

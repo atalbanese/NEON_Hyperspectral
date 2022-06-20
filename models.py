@@ -43,8 +43,11 @@ class SWaVModelSuperPixel(pl.LightningModule):
 
     def training_step(self, x):
         inp = x['base'].squeeze(0)
-        chm = x['chm'].squeeze(0).unsqueeze(1)
-        az = x['azimuth'].squeeze(0).unsqueeze(1)
+        mask = None
+        #chm = x['chm'].squeeze(0).unsqueeze(1)
+        #az = x['azimuth'].squeeze(0).unsqueeze(1)
+        chm = None
+        az = None
         
 
         # inp = TF.center_crop(inp, self.img_size)
@@ -56,18 +59,18 @@ class SWaVModelSuperPixel(pl.LightningModule):
         
         #TODO: Some kind of basic augmentation??
 
-        # if torch.rand(1) > 0.5:
-        #     inp = TF.vflip(inp)
-        #     chm = TF.vflip(chm)
-        #     az = TF.vflip(az)
+        if torch.rand(1) > 0.5:
+            inp = TF.vflip(inp)
+            #chm = TF.vflip(chm)
+            #az = TF.vflip(az)
 
-        # if torch.rand(1) > 0.5:
-        #     inp = TF.hflip(inp)
-        #     chm = TF.hflip(chm)
-        #     az = TF.hflip(az)
+        if torch.rand(1) > 0.5:
+            inp = TF.hflip(inp)
+            #chm = TF.hflip(chm)
+            #az = TF.hflip(az)
 
 
-        loss = self.model.forward_train(inp, chm, az)
+        loss = self.model.forward_train(inp, chm, az, mask)
         self.log('train_loss', loss)
         return loss
 

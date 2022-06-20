@@ -353,6 +353,12 @@ def masked_pca(args):
             #bare_mask = np.load(os.path.join(mask_dir, bare_file))
             shadow_mask = ~np.load(os.path.join(mask_dir, shadow_file))
             img[shadow_mask] = np.nan
+            bad_mask = np.zeros_like(shadow_mask)
+            for i in range(0, img.shape[-1]):
+                z = img[:,:,i]
+                y = z>1
+                bad_mask += y
+            img[bad_mask] = np.nan
             img = rearrange(img, 'h w c -> (h w) c')
             masked = ma.masked_invalid(img)
             mask = masked.mask[:, 0:10]
@@ -558,8 +564,8 @@ if __name__ == '__main__':
     #img_stats_min_max('C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels', '')
 
 
-    with ProcessPool(8) as pool:
-        bulk_process(pool, [IN_DIR, OUT_DIR, ICA_DIR], make_superpixels_masked)
+    # with ProcessPool(8) as pool:
+    #     bulk_process(pool, [IN_DIR, OUT_DIR, ICA_DIR], make_superpixels_masked)
 
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, OUT_DIR], ndvi_mask)
@@ -567,8 +573,8 @@ if __name__ == '__main__':
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
 
-    # with ProcessPool(4) as pool:
-    #     bulk_process(pool, [IN_DIR, PCA_DIR, OUT_DIR], masked_pca)
+    with ProcessPool(4) as pool:
+        bulk_process(pool, [IN_DIR, PCA_DIR, MASK_DIR], masked_pca)
 
     #get_masks((IMG, IMG_DIR, MASK_DIR))
 

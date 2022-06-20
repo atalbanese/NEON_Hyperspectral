@@ -29,7 +29,7 @@ def do_training(num_channels=10, num_classes=12, azm=True, chm=True, patch_size=
     trainer.fit(model, train_loader)
 
 def do_sp_training(num_channels=10, num_classes=12, azm=False, chm=False, log_every=5, max_epochs=50, num_workers=4, extra_labels='', use_queue=False,  same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False, main_brightness=False, aug_brightness=False):
-    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
+    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
     chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo/'
     az_fold = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo'
     sp_fold = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo/'
@@ -53,7 +53,7 @@ def do_sp_training(num_channels=10, num_classes=12, azm=False, chm=False, log_ev
 
 if __name__ == "__main__":
 
-    do_sp_training(num_workers=1)
+    do_sp_training(num_workers=6, num_classes=12, extra_labels='sp_center_patches')
 
     # configs = [
     #     {'num_channels': 10,

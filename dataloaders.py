@@ -1,3 +1,4 @@
+from select import select
 import h5_helper as hp
 import warnings
 #import pylas
@@ -5,6 +6,7 @@ from torch.utils.data import Dataset
 import os
 import random
 import matplotlib.pyplot as plt
+from skimage.segmentation import slic
 import torch
 import numpy as np
 import utils
@@ -23,13 +25,16 @@ from einops.layers.torch import Rearrange, Reduce
 #from torch_geometric.data import Data
 
 class MergedStructureDataset(Dataset):
-    def __init__(self, pca_folder, tif_folder, azimuth_folder, superpix_folder, chm_mean, chm_std, eval=False, rescale_pca=False, **kwargs):
+    def __init__(self, pca_folder, tif_folder, azimuth_folder, superpix_folder, chm_mean, chm_std, crop_size=40, patch_size=4, sequence_length = 50, eval=False, rescale_pca=False, **kwargs):
         self.pca_folder = pca_folder
         self.chm_mean = chm_mean
         self.chm_std = chm_std
+        self.crop_size = crop_size
+        self.patch_size = patch_size
         self.superpix = superpix_folder
+        self.sequence_length = sequence_length
         self.rescale_pca = rescale_pca
-        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 256
+        self.batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 32
         if os.path.exists(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl')):
             with open(os.path.join(self.pca_folder, 'stats/good_files_dc.pkl'), 'rb') as f:
                 self.files = pickle.load(f)
@@ -46,7 +51,7 @@ class MergedStructureDataset(Dataset):
         self.azimuth_files = [os.path.join(azimuth_folder, file) for file in os.listdir(azimuth_folder) if ".npy" in file]
         self.superpix_files = [os.path.join(superpix_folder, file) for file in os.listdir(superpix_folder) if ".npy" in file]
 
-        self.files_dict = make_dict(self.files, -5, -4)
+        self.files_dict = make_dict(self.files, -4, -3)
         self.chm_dict = make_dict(self.chm_files, -3, -2)
         self.azimuth_dict = make_dict(self.azimuth_files, -4, -3)
         self.superpix_dict = make_dict(self.superpix_files, -4, -3)
@@ -79,7 +84,7 @@ class MergedStructureDataset(Dataset):
 
         #PCA
         img = np.load(self.files_dict[key]).astype(np.float32)
-        img = rearrange(img, 'h w c -> (h w) c')
+        #img = rearrange(img, 'h w c -> (h w) c')
         img_mask = img == img
         #img = torch.from_numpy(img)
 
@@ -91,7 +96,7 @@ class MergedStructureDataset(Dataset):
         #Make -1 to 1
         azimuth = (torch.from_numpy(azimuth)-180)/180
         azimuth[azimuth != azimuth] = 0
-        azimuth = np.ravel(azimuth)
+        #azimuth = np.ravel(azimuth)
 
         #CHM
         with warnings.catch_warnings():
@@ -102,47 +107,105 @@ class MergedStructureDataset(Dataset):
 
         chm = (torch.from_numpy(chm).squeeze(0)- self.chm_mean)/self.chm_std
         chm[chm != chm] = 0
-        chm = np.ravel(chm)
+        #chm = np.ravel(chm)
 
         #Superpix
         #Masked segments are segment 0
-        superpixels = np.ravel(np.load(self.superpix_dict[key])) * img_mask[:,0]
+        #superpixels = np.ravel(np.load(self.superpix_dict[key]))
+        superpixels = np.load(self.superpix_dict[key])
+
 
         sp_values, sp_inverse = np.unique(superpixels, return_inverse=True)
 
-        sp_select = self.rng.choice(range(1, sp_values.max()), size=self.batch_size + 10, replace=False)
+        sp_select = self.rng.choice(range(1, sp_values.max()-1), size=sp_values.max()-2, replace=False)
 
-        azms, chms, imgs = [], [], []
+        azms, chms, imgs, masks = [], [], [], []
 
         i = 0
 
-        #TODO: maybe just random sample of pixels instead of mean
+        def get_crop(arr, ix):
+            locs = arr != ix
+            falsecols = np.all(locs, axis=0)
+            falserows = np.all(locs, axis=1)
+
+            firstcol = falsecols.argmin()
+            firstrow = falserows.argmin()
+
+            lastcol = len(falsecols) - falsecols[::-1].argmin()
+            lastrow = len(falserows) - falserows[::-1].argmin()
+
+            return firstrow,lastrow,firstcol,lastcol
+
+        def get_pad(arr, pad_size):
+            row_len = arr.shape[0]
+            col_len = arr.shape[1]
+
+            row_pad = (pad_size - row_len) // 2
+            col_pad = (pad_size - col_len) // 2
+            
+            add_row = (row_pad*2 + row_len) != pad_size
+            add_col = (col_pad*2 + col_len) != pad_size
+
+            return [(row_pad, row_pad+add_row), (col_pad, col_pad+add_col)]
+
+        def grab_center(arr, diam):
+            row_len = arr.shape[0]
+            col_len = arr.shape[1]
+
+            row_pad = (row_len - diam) // 2
+            col_pad = (col_len - diam) // 2
+
+            add_row = (row_pad * 2) + diam != row_len
+            add_col = (col_pad * 2) + diam != col_len
+
+            return arr[row_pad:row_len-row_pad-add_row, col_pad:col_len-col_pad-add_col, :]
+
+
+
+        ra = Rearrange('h w c -> c h w')
+
+
+        #TODO: augmentation is other random pix select
+        #TODO: multi-crop strategy?
+
         while len(imgs) < self.batch_size:
-            select_mask = sp_inverse == sp_select[i]
-            if len(select_mask) > 0:
-                select_img = img[select_mask, :]
-                select_mean= np.mean(select_img, axis=0)
-                select_var = np.var(select_img, axis=0)
-                select_stats = np.stack((select_mean, select_var))
+            sequences = []
+            while len(sequences) < self.sequence_length:
+                pix_num = sp_select[i]
+                select_length = sp_inverse == pix_num
+                select_length = select_length.sum()
+                if (select_length > 16):
+                    crops = get_crop(superpixels, pix_num)
+                    if (crops[1] - crops[0] >20) or (crops[3] - crops[2] >20):
+                        i += 1
+                        continue  
+                    sp_crop = superpixels[crops[0]:crops[1], crops[2]:crops[3]] == pix_num
+                    img_crop = img[crops[0]:crops[1], crops[2]:crops[3], :] * sp_crop[...,np.newaxis]
+                    img_crop[img_crop != img_crop] =0
+                    img_center = grab_center(img_crop, self.patch_size)
+                    if img_center.shape == (4, 4, 10):
+                        img_center = torch.from_numpy(img_center)
+                        img_center = ra(img_center)
+                        sequences.append(img_center)
+                    i += 1
+                else:
+                    i += 1
+            sqs = torch.stack(sequences)
+            imgs.append(sqs)
 
-                select_azm = azimuth[select_mask]
-                select_azm = np.mean(select_azm)
 
-                select_chm = chm[select_mask]
-                select_chm = np.mean(select_chm)
-                imgs.append(select_stats)
-                azms.append(select_azm)
-                chms.append(select_chm)
-            i += 1
              
-        imgs = torch.from_numpy(np.stack(imgs))
-        chms = torch.from_numpy(np.stack(chms))
-        azms = torch.from_numpy(np.stack(azms))
+
+        imgs = torch.stack(imgs)
+        #masks = torch.stack(masks)
+        #chms = torch.from_numpy(np.stack(chms))
+        #azms = torch.from_numpy(np.stack(azms))
 
         to_return = {}
         to_return["base"] = imgs
         to_return['chm'] = chms
         to_return['azimuth'] = azms
+        to_return['mask'] = masks
 
         return to_return
 
@@ -842,12 +905,12 @@ class HyperDataset(Dataset):
 
 if __name__ == "__main__":
 
-    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
+    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
     chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
     az_fold = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo'
     sp_fold = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
-    test = MergedStructureDataset(pca_fold, chm_fold, az_fold, sp_fold, 4.015508459469479, 4.809300736115787, eval=False)
+    test = MergedStructureDataset(pca_fold, chm_fold, az_fold, sp_fold, 4.015508459469479, 4.809300736115787, eval=True)
     # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 
     print(test.__getitem__(69).shape)
