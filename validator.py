@@ -24,37 +24,13 @@ from scipy.stats import linregress
 from einops import rearrange
 from sklearn.decomposition import PCA, IncrementalPCA
 import torchvision.transforms as tt
+import sklearn.model_selection as ms
 
-
-#TODO: reimplement as species plot:
-# test = hp.pre_processing(img_loc, wavelength_ranges=utils.get_viz_bands())
-#         test_rgb = hp.make_rgb(test['bands'])
-#         test_rgb = rearrange(test_rgb, 'h w c -> c h w')
-#         transform = from_origin(731000, 4714000, 1, 1)
-#         test_rgb = exposure.adjust_gamma(test_rgb, 0.5)
-#         #crs_code = CRS.from_string(test['meta']['proj'])
-#         #need to replace UTM with utm in proj string
-#         rs_test = rs.open('test1.tif', 'w+', driver='GTiff',
-#                             height = test_rgb.shape[1], width = test_rgb.shape[2], 
-#                             count=3, dtype=np.float32,
-#                             crs='+proj=utm +zone=18 +ellps=WGS84 +datum=WGS84 +units=m +no_defs',
-#                             transform=transform)
-#         rs_test.write(test_rgb)
-
-#         tree_outlines = rf.geometry_mask(test_gdf.crowns, (1000,1000), transform=rs_test.transform, invert=True)
-#         trees = np.ma.masked_where(tree_outlines == False, tree_outlines)
-#         cmap = colors.ListedColormap(['red'])
-#         fig, ax = plt.subplots(figsize=(20,20))
-#         ax.imshow(rearrange(rs_test.read(), 'c h w -> h w c'))
-#         # ax.imshow(chm_open.read()[0])
-#         im = ax.imshow(trees, cmap=cmap, alpha=0.2)
-#         slider = self._make_slider(fig, im)
-#         plt.show()
 
 #TODO: Clean this mess up
 #Switch plots to plotly? Good for overlays
 class Validator():
-    def __init__(self, struct=False, rescale=False, **kwargs):
+    def __init__(self, struct=False, rescale=False, train_split=0.2, valid_split=0.2, test_split=0.6,  **kwargs):
         self.rescale=rescale
         self.file = kwargs["file"]
         self.img_dir = kwargs["img_dir"]
@@ -68,10 +44,11 @@ class Validator():
         self.orig_dir = kwargs['orig']
         self.chm_mean = kwargs['chm_mean']
         self.chm_std = kwargs['chm_std']
-        self.valid_data, self.data_gdf = self.get_plot_data_2()
+        self.valid_data, self.data_gdf = self.get_plot_data()
         self.valid_files = self.get_valid_files()
 
         self.valid_dict = self.make_valid_dict()
+    
 
         self.orig_files = [os.path.join(kwargs['orig'], file) for file in os.listdir(kwargs['orig']) if ".h5" in file]
         self.pca_files = [os.path.join(kwargs['img_dir'], file) for file in os.listdir(kwargs['img_dir']) if ".npy" in file]
@@ -93,6 +70,76 @@ class Validator():
         self.cluster_groups = set()
 
         self.last_cluster = {}
+
+        self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
+
+        self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
+        print('here')
+
+    def render_valid_data(self, save_dir, split, render_fixed_size=True):
+        if split == 'train':
+            data = self.train
+        if split == 'valid':
+            data = self.valid
+        if split == 'test':
+            data = self.test
+
+        img = None
+        chm = None
+        azm = None
+        loaded_key = None
+        for ix, row in data.iterrows():
+            key = row['file_coords']
+            if key != loaded_key:
+                img = np.load(self.pca_dict[key]).astype(np.float32)
+                img[img!=img] = 0
+     
+                #Azimuth
+                azm = np.load(self.azm_dict[key]).astype(np.float32)
+                azm = (azm-180)/180
+                azm[azm != azm] = 0
+
+                #CHM
+                chm_open = rs.open(self.chm_dict[key])
+                chm = chm_open.read().astype(np.float32)
+                chm[chm==-9999] = np.nan
+
+                chm = (chm.squeeze(axis=0)- self.chm_mean)/self.chm_std
+                chm[chm != chm] = 0
+            
+            x = int(round(float(row['easting']) - float(row['file_west_bound']), 0))
+            y = 1000 - int(round(float(row['northing']- float(row['file_south_bound'])), 0))
+            taxa = row['taxonID']
+            if render_fixed_size:
+                bounds= (y-2, y+2, x-2, x+2)
+            else:
+                diam = int(round(float(row['maxCrownDiameter'])*0.9))
+                bounds = (y-diam, y+diam, x-diam, x+diam)
+            img_crop = img[bounds[0]:bounds[1], bounds[2]:bounds[3],...]
+            chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3],...]
+            azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3],...]
+
+            img_crop = torch.from_numpy(img_crop)
+            chm_crop = torch.from_numpy(chm_crop)
+            azm_crop = torch.from_numpy(azm_crop)
+
+            label = torch.zeros((len(self.taxa.keys()),chm_crop.shape[0],chm_crop.shape[1]), dtype=torch.float32)
+            label[self.taxa[taxa]] = 1.0
+
+            to_save = {
+                'img': img_crop,
+                'chm': chm_crop,
+                'azm': azm_crop,
+                'target': label
+            }
+            print('here')
+
+
+        
+
+
+        
+        return None
 
 
     def make_valid_dict(self):
@@ -120,42 +167,6 @@ class Validator():
 
         return df
 
-    # def _gdf_validate_taxon(df, transform, img, vd, orig, chm):
-    #     if len(df) >0:
-    #         taxa = df.iloc[0]['taxonID_x']
-    #         #pixels that overlap shapes are true
-    #         tree_outlines = rf.geometry_mask(df.crowns, (1000,1000), transform=transform, invert=True)
-    #         ndvi = utils.get_ndvi(orig)
-    #         #pixels with good ndvi will be true
-    #         ndvi_mask = ndvi > 0.5
-    #         #pixels with good nir will be true
-    #         nir_mask = orig['nir'] > 0.2
-
-    #         tree_outlines *= ndvi_mask
-    #         tree_outlines *= nir_mask
-    #         all_height_mask = tree_outlines * 0
-    #         for ix, tree in df.iterrows():
-    #             single_tree = rf.geometry_mask([tree.crowns], (1000,1000), transform=transform, invert=True)
-    #             min_height = tree.height - 5
-    #             #all pix tall enough will be true
-    #             height_mask = chm > min_height
-    #             single_tree *= height_mask
-    #             all_height_mask += single_tree
-    #         tree_outlines *= height_mask
-
-
-    #         trees = np.ma.masked_where(tree_outlines == False, tree_outlines)
-    #         selected = img[trees]
-    #         vd.valid_dict[taxa]['expected'] += trees.sum()
-    #         id, counts = np.unique(selected, return_counts=True)
-    #         for i, count in zip(id, counts):
-    #             vd.valid_dict[taxa]['found'][i] += count
-    #     else:
-    #         print('here')
-    #         print(df)
-
-    #     return df
-
     
     def validate_from_gdf(self, file_key, img):
         west, south = file_key.split('_')
@@ -164,16 +175,12 @@ class Validator():
         img_loc = self.valid_files[file_key]
         transform = from_origin(west, south+1000, 1, 1)
 
-        #original = hp.pre_processing(self.orig_dict[file_key], wavelength_ranges=utils.get_shadow_bands())['bands']
-        # chm_open = rs.open(self.chm_dict[file_key])
-        # chm = chm_open.read().astype(np.float32)
-        # chm = np.squeeze(chm, axis=0)
 
         cur_gdf.groupby('taxonID').apply(self._gdf_validate_taxon, transform, img, self) # original, chm)
 
         
 
-    def get_plot_data_2(self):
+    def get_plot_data(self):
        
         curated = pd.read_csv(self.curated)
         curated = curated.rename(columns={'adjEasting': 'easting',
@@ -257,93 +264,6 @@ class Validator():
         return data, data_gdf
 
 
-    def get_plot_data(self):
-        data = pd.read_csv(self.file, usecols=['siteID', 'plotID', 'plantStatus', 'taxonID', 'ninetyCrownDiameter', 'canopyPosition', 'easting', 'northing', 'height', 'individualID'])
-        data = data.loc[data['siteID'] == self.site_name]
-        curated = pd.read_csv(self.curated)
-        curated = curated.rename(columns={'adjEasting': 'easting',
-                                          'adjNorthing': 'northing'})
-        data_with_coords = curated.loc[(curated.easting == curated.easting) & (curated.northing==curated.northing)]
-       
-        data = data.loc[(data['plantStatus'] != 'Dead, broken bole') & (data['plantStatus'] != 'Downed') & (data['plantStatus'] != 'No longer qualifies') & (data['plantStatus'] != 'Standing dead') & (data['plantStatus'] != 'Lost, fate unknown') & (data['plantStatus'] != 'Removed') & (data['plantStatus'] != 'Lost, presumed dead') & (data['height']==data['height']) & (data['ninetyCrownDiameter'] == data['ninetyCrownDiameter'])]
-      
-        data_with_coords = data_with_coords.merge(data, how='inner', on='individualID')
-        data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting_x, data_with_coords.northing_x), crs='EPSG:32618')
-        data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['ninetyCrownDiameter']/2)
-        data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
-        to_remove = set()
-        for ix, row in data_gdf.iterrows():
-            working_copy = data_gdf.loc[data_gdf.index != ix]
-            coverage = working_copy.crowns.contains(row.crowns)
-            cover_gdf = working_copy.loc[coverage]
-            if (cover_gdf['height']>row['height']).sum() > 0:
-                to_remove.add(ix)
-            intersect = working_copy.crowns.intersects(row.crowns)
-            inter_gdf = working_copy.loc[intersect]
-            if (inter_gdf['height']>row['height']).sum() > 0:
-                to_remove.add(ix)
-
-        data_gdf =  data_gdf.drop(list(to_remove))
-
-        data_gdf["file_west_bound"] = data_gdf["easting_x"] - data_gdf["easting_x"] % 1000
-        data_gdf["file_south_bound"] = data_gdf["northing_x"] - data_gdf["northing_x"] % 1000
-        data_gdf = data_gdf.astype({"file_west_bound": int,
-                            "file_south_bound": int})
-        data_gdf = data_gdf.astype({"file_west_bound": str,
-                            "file_south_bound": str})
-                            
-        data_gdf['file_coords'] = data_gdf['file_west_bound'] + '_' + data_gdf['file_south_bound']
-
-        
-        data['approx_sq_m'] = ((data['ninetyCrownDiameter']/2)**2) * np.pi
-
-        
-        plots = pd.read_csv(self.plot_file, usecols=['plotID', 'siteID', 'subtype', 'easting', 'northing', 'plotSize'])
-        plots = plots.loc[plots['siteID'] == self.site_name]
-        plots = plots.loc[plots['subtype'] == 'basePlot']
-
-        data = data.merge(plots, how='left', on='plotID')
-
-        data = data.rename(columns={
-                                    'easting_x': 'easting_tree',
-                                    'northing_x': 'northing_tree',
-                                    'easting_y': 'easting_plot',
-                                    'northing_y': 'northing_plot'
-        })
-
-        data["file_west_bound"] = data["easting_plot"] - data["easting_plot"] % 1000
-        data["file_south_bound"] = data["northing_plot"] - data["northing_plot"] % 1000
-
-        data = data.loc[data['file_west_bound'] == data['file_west_bound']]
-
-        data = data.astype({"file_west_bound": int,
-                            "file_south_bound": int})
-
-        data['x_min'] = (data['easting_plot']//1 - data['file_west_bound']) - (data['plotSize']**(1/2)/2)
-        data['x_max'] = data['x_min'] + data['plotSize']**(1/2)
-
-        data['y_min'] = 1000- (data['northing_plot']//1 - data['file_south_bound']) - (data['plotSize']**(1/2)/2)
-        data['y_max'] = data['y_min'] + data['plotSize']**(1/2)
-
-        data['tree_x'] = data['easting_tree']//1 - data['file_west_bound']
-        data['tree_y'] = 1000 - (data['northing_tree']//1 - data['file_south_bound'])
-
-        data = data.astype({"file_west_bound": str,
-                            "file_south_bound": str,
-                            'x_min':int,
-                            'y_min':int,
-                            'x_max':int,
-                            'y_max': int})
-        
-        index_names = data[(data['x_min'] <0) | (data['y_min']<0) | (data['x_max'] >999) | (data['y_max']>999)].index
-        data = data.drop(index_names)
-
-        data['file_coords'] = data['file_west_bound'] + '_' + data['file_south_bound']
-        data['sun'] = data['canopyPosition'].str.contains('sun')
-
-        return data, data_gdf
-
-
 
     def get_valid_files(self):
         if self.img_dir is not None:
@@ -354,6 +274,12 @@ class Validator():
             return valid_files
         else:
             return None
+
+    def get_splits(self, train_prop, valid_prop, test_prop):
+        train, t_v = ms.train_test_split(self.data_gdf, test_size=(valid_prop+test_prop), train_size=train_prop, random_state=42, stratify=self.data_gdf['taxonID'])
+        test, valid = ms.train_test_split(t_v, test_size=valid_prop/(valid_prop+test_prop), train_size=test_prop/(valid_prop+test_prop), random_state=42, stratify=t_v['taxonID'])
+        return train, valid, test
+
 
     def save_valid_df(self, save_dir):
         class_columns = list(range(self.num_classes))
@@ -991,8 +917,8 @@ if __name__ == "__main__":
     ]
 
     #validate_config(valid, configs)
-
-    valid.extract_pca_plots(SAVE_DIR)
+    valid.render_valid_data('test', 'train')
+    #valid.extract_pca_plots(SAVE_DIR)
     # configs = [
     # {'num_channels': 10,
     #      'num_classes': 12,

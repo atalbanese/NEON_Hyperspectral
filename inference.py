@@ -256,6 +256,8 @@ def swav_inference_big_struct_4(model, file, chm, azm, chm_mean, chm_std, rescal
 
 
 
+
+
 def transformer_inshape(inp):
     #inp = inp[:, 0:999, 0:999]
     batched = rearrange(inp, "c (b1 h) (b2 w) -> (b1 b2) c h w", h=25, w=25, b1=40, b2=40)

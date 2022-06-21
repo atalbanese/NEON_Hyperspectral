@@ -349,7 +349,7 @@ def masked_pca(args):
         #bare_file = file.split(".")[0] + '_bare_mask.npy'
         shadow_file = file.split(".")[0] + 'ndvi_mask.npy'
         if not os.path.exists(os.path.join(out_dir, pca_file)):
-            img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"]
+            img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"][:,:,1:]
             #bare_mask = np.load(os.path.join(mask_dir, bare_file))
             shadow_mask = ~np.load(os.path.join(mask_dir, shadow_file))
             img[shadow_mask] = np.nan
@@ -538,7 +538,7 @@ if __name__ == '__main__':
 
     
 
-    FILE = 'NEON_D13_NIWO_DP3_453000_4433000_reflectance.h5'
+    FILE = 'NEON_D13_NIWO_DP3_450000_4428000_reflectance.h5'
     OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
     PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
@@ -550,7 +550,7 @@ if __name__ == '__main__':
     #     plt.imshow(test[:,:,i])
     #     plt.show()
 
-    #masked_ica((FILE, IN_DIR, 'test', MASK_DIR ))
+    #masked_pca((FILE, IN_DIR, 'test', MASK_DIR))
 
 
     # ndvi_mask((FILE, IN_DIR, IN_DIR))

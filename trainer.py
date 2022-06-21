@@ -53,7 +53,8 @@ def do_sp_training(num_channels=10, num_classes=12, azm=False, chm=False, log_ev
 
 if __name__ == "__main__":
 
-    do_sp_training(num_workers=6, num_classes=12, extra_labels='sp_center_patches')
+    do_sp_training(num_workers=6, num_classes=20, extra_labels='sp_center_patches_big_batch')
+    do_sp_training(num_workers=6, num_classes=60, extra_labels='sp_center_patches')
 
     # configs = [
     #     {'num_channels': 10,

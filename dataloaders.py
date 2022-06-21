@@ -17,6 +17,7 @@ import torchvision.transforms as tt
 from einops import rearrange
 import rasterio as rs
 from rasterio import logging
+from validator import Validator
 
 
 import numpy.ma as ma
@@ -24,8 +25,337 @@ import pickle
 from einops.layers.torch import Rearrange, Reduce
 #from torch_geometric.data import Data
 
+
+class RenderedDataLoader(Dataset):
+    def __init__(self,
+                file_folder):
+        self.base_dir = file_folder
+        self.files = os.listdir(file_folder)
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, ix):
+        to_open = self.files[ix]
+        return torch.load(os.path.join(self.base_dir, to_open))
+
+
+
+#TODO: Make this work
+class RenderValidDataLoader(Dataset):
+    def __init__(self, 
+                    pca_folder, 
+                    tif_folder, 
+                    azimuth_folder, 
+                    superpix_folder, 
+                    chm_mean, 
+                    chm_std, 
+                    mode,
+                    save_dir,
+                    patch_size=4, 
+                    validator=None, 
+                    **kwargs):
+        self.pca_folder = pca_folder
+        self.chm_mean = chm_mean
+        self.chm_std = chm_std
+        self.patch_size = patch_size
+        self.superpix = superpix_folder
+        self.validator = validator
+        self.mode = mode
+        self.save_dir = save_dir
+        self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+        self.rng = np.random.default_rng()
+
+        def make_dict(file_list, param_1, param_2):
+            return {f"{file.split('_')[param_1]}_{file.split('_')[param_2]}": file for file in file_list}
+
+        self.chm_files = [os.path.join(tif_folder, file) for file in os.listdir(tif_folder) if ".tif" in file]
+        self.azimuth_files = [os.path.join(azimuth_folder, file) for file in os.listdir(azimuth_folder) if ".npy" in file]
+        self.superpix_files = [os.path.join(superpix_folder, file) for file in os.listdir(superpix_folder) if ".npy" in file]
+
+        self.files_dict = make_dict(self.files, -4, -3)
+        self.chm_dict = make_dict(self.chm_files, -3, -2)
+        self.azimuth_dict = make_dict(self.azimuth_files, -4, -3)
+        self.superpix_dict = make_dict(self.superpix_files, -4, -3)
+
+        self.all_files = set(self.files_dict.keys()) & set(self.chm_dict.keys()) & set(self.azimuth_dict.keys()) & set(self.superpix_dict.keys())
+
+        self.filter_files()
+
+    def filter_files(self):
+        valid_keys = set(self.validator.valid_files.keys())
+        if self.mode == 'raw_training':
+            self.all_files = list(self.all_files - valid_keys)
+        else: 
+            self.all_files = self.valid_keys
+
+        return None
+
+    def __len__(self):
+        return len(self.all_files)
+
+    def __getitem__(self, index):
+        key = self.all_files[index]
+
+        #PCA
+        img = np.load(self.files_dict[key]).astype(np.float32)
+     
+        #Azimuth
+        azm = np.load(self.azimuth_dict[key]).astype(np.float32)
+        azm = (azm-180)/180
+        azm[azm != azm] = 0
+
+        #CHM
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            chm_open = rs.open(self.chm_dict[key])
+            chm = chm_open.read().astype(np.float32)
+            chm[chm==-9999] = np.nan
+
+        chm = (chm.squeeze(axis=0)- self.chm_mean)/self.chm_std
+        chm[chm != chm] = 0
+
+        #Superpix
+        #Masked segments are segment 0
+        #superpixels = np.ravel(np.load(self.superpix_dict[key]))
+        superpixels = np.load(self.superpix_dict[key])
+
+        sp_values, sp_inverse = np.unique(superpixels, return_inverse=True)
+
+        def get_crop(arr, ix):
+            locs = arr != ix
+            falsecols = np.all(locs, axis=0)
+            falserows = np.all(locs, axis=1)
+
+            firstcol = falsecols.argmin()
+            firstrow = falserows.argmin()
+
+            lastcol = len(falsecols) - falsecols[::-1].argmin()
+            lastrow = len(falserows) - falserows[::-1].argmin()
+
+            return firstrow,lastrow,firstcol,lastcol
+
+        def grab_center(arr, diam):
+            row_len = arr.shape[0]
+            col_len = arr.shape[1]
+
+            row_pad = (row_len - diam) // 2
+            col_pad = (col_len - diam) // 2
+
+            add_row = (row_pad * 2) + diam != row_len
+            add_col = (col_pad * 2) + diam != col_len
+
+            return arr[row_pad:row_len-row_pad-add_row, col_pad:col_len-col_pad-add_col,...]
+
+        ra = Rearrange('h w c -> c h w')
+
+        for pix_num in sp_values[1:]:
+            select_length = sp_inverse == pix_num
+            select_length = select_length.sum()
+            if (select_length > 16):
+                crops = get_crop(superpixels, pix_num)
+                if (crops[1] - crops[0] >20) or (crops[3] - crops[2] >20):
+                    continue
+                sp_crop = superpixels[crops[0]:crops[1], crops[2]:crops[3]] == pix_num
+                img_crop = img[crops[0]:crops[1], crops[2]:crops[3], :] * sp_crop[...,np.newaxis]
+                img_crop[img_crop != img_crop] = 0
+
+                chm_crop = chm[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop
+                chm_crop[chm_crop != chm_crop] = 0
+
+                azm_crop = azm[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop
+                azm_crop[azm_crop != azm_crop] = 0
+
+                img_center = grab_center(img_crop, self.patch_size)
+                if img_center.shape == (4, 4, 10):
+                    img_center = torch.from_numpy(img_center)
+                    img_center = ra(img_center)
+
+                    chm_center = grab_center(chm_crop, self.patch_size)
+                    chm_center = torch.from_numpy(chm_center)
+
+                    azm_center = grab_center(azm_crop, self.patch_size)
+                    azm_center = torch.from_numpy(azm_center)
+
+                    to_save = {'img': img_center,
+                                'azm': azm_center,
+                                'chm': chm_center}
+
+                    f_name = f"coords_{key}_sp_index_{pix_num}.pt"
+
+                    save_loc = os.path.join(self.save_dir, f_name)
+                    if not os.path.exists(save_loc):
+                        with open(save_loc, 'wb') as f:
+                            torch.save(to_save, save_loc)
+
+        return None
+
+class RenderDataLoader(Dataset):
+    def __init__(self, 
+                    pca_folder, 
+                    tif_folder, 
+                    azimuth_folder, 
+                    superpix_folder, 
+                    chm_mean, 
+                    chm_std, 
+                    mode,
+                    save_dir,
+                    patch_size=4, 
+                    validator=None, 
+                    **kwargs):
+        self.pca_folder = pca_folder
+        self.chm_mean = chm_mean
+        self.chm_std = chm_std
+        self.patch_size = patch_size
+        self.superpix = superpix_folder
+        self.validator = validator
+        self.mode = mode
+        self.save_dir = save_dir
+        self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
+        self.rng = np.random.default_rng()
+
+        def make_dict(file_list, param_1, param_2):
+            return {f"{file.split('_')[param_1]}_{file.split('_')[param_2]}": file for file in file_list}
+
+        self.chm_files = [os.path.join(tif_folder, file) for file in os.listdir(tif_folder) if ".tif" in file]
+        self.azimuth_files = [os.path.join(azimuth_folder, file) for file in os.listdir(azimuth_folder) if ".npy" in file]
+        self.superpix_files = [os.path.join(superpix_folder, file) for file in os.listdir(superpix_folder) if ".npy" in file]
+
+        self.files_dict = make_dict(self.files, -4, -3)
+        self.chm_dict = make_dict(self.chm_files, -3, -2)
+        self.azimuth_dict = make_dict(self.azimuth_files, -4, -3)
+        self.superpix_dict = make_dict(self.superpix_files, -4, -3)
+
+        self.all_files = set(self.files_dict.keys()) & set(self.chm_dict.keys()) & set(self.azimuth_dict.keys()) & set(self.superpix_dict.keys())
+
+        self.filter_files()
+
+    def filter_files(self):
+        valid_keys = set(self.validator.valid_files.keys())
+        if self.mode == 'raw_training':
+            self.all_files = list(self.all_files - valid_keys)
+        else: 
+            self.all_files = self.valid_keys
+
+        return None
+
+    def __len__(self):
+        return len(self.all_files)
+
+    def __getitem__(self, index):
+        key = self.all_files[index]
+
+        #PCA
+        img = np.load(self.files_dict[key]).astype(np.float32)
+     
+        #Azimuth
+        azm = np.load(self.azimuth_dict[key]).astype(np.float32)
+        azm = (azm-180)/180
+        azm[azm != azm] = 0
+
+        #CHM
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            chm_open = rs.open(self.chm_dict[key])
+            chm = chm_open.read().astype(np.float32)
+            chm[chm==-9999] = np.nan
+
+        chm = (chm.squeeze(axis=0)- self.chm_mean)/self.chm_std
+        chm[chm != chm] = 0
+
+        #Superpix
+        #Masked segments are segment 0
+        #superpixels = np.ravel(np.load(self.superpix_dict[key]))
+        superpixels = np.load(self.superpix_dict[key])
+
+        sp_values, sp_inverse = np.unique(superpixels, return_inverse=True)
+
+        def get_crop(arr, ix):
+            locs = arr != ix
+            falsecols = np.all(locs, axis=0)
+            falserows = np.all(locs, axis=1)
+
+            firstcol = falsecols.argmin()
+            firstrow = falserows.argmin()
+
+            lastcol = len(falsecols) - falsecols[::-1].argmin()
+            lastrow = len(falserows) - falserows[::-1].argmin()
+
+            return firstrow,lastrow,firstcol,lastcol
+
+        def grab_center(arr, diam):
+            row_len = arr.shape[0]
+            col_len = arr.shape[1]
+
+            row_pad = (row_len - diam) // 2
+            col_pad = (col_len - diam) // 2
+
+            add_row = (row_pad * 2) + diam != row_len
+            add_col = (col_pad * 2) + diam != col_len
+
+            return arr[row_pad:row_len-row_pad-add_row, col_pad:col_len-col_pad-add_col,...]
+
+        ra = Rearrange('h w c -> c h w')
+
+        for pix_num in sp_values[1:]:
+            select_length = sp_inverse == pix_num
+            select_length = select_length.sum()
+            if (select_length > 16):
+                crops = get_crop(superpixels, pix_num)
+                if (crops[1] - crops[0] >20) or (crops[3] - crops[2] >20):
+                    continue
+                sp_crop = superpixels[crops[0]:crops[1], crops[2]:crops[3]] == pix_num
+                img_crop = img[crops[0]:crops[1], crops[2]:crops[3], :] * sp_crop[...,np.newaxis]
+                img_crop[img_crop != img_crop] = 0
+
+                chm_crop = chm[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop
+                chm_crop[chm_crop != chm_crop] = 0
+
+                azm_crop = azm[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop
+                azm_crop[azm_crop != azm_crop] = 0
+
+                img_center = grab_center(img_crop, self.patch_size)
+                if img_center.shape == (4, 4, 10):
+                    img_center = torch.from_numpy(img_center)
+                    img_center = ra(img_center)
+
+                    chm_center = grab_center(chm_crop, self.patch_size)
+                    chm_center = torch.from_numpy(chm_center)
+
+                    azm_center = grab_center(azm_crop, self.patch_size)
+                    azm_center = torch.from_numpy(azm_center)
+
+                    to_save = {'img': img_center,
+                                'azm': azm_center,
+                                'chm': chm_center}
+
+                    f_name = f"coords_{key}_sp_index_{pix_num}.pt"
+
+                    save_loc = os.path.join(self.save_dir, f_name)
+                    if not os.path.exists(save_loc):
+                        with open(save_loc, 'wb') as f:
+                            torch.save(to_save, save_loc)
+
+        return None
+
 class MergedStructureDataset(Dataset):
-    def __init__(self, pca_folder, tif_folder, azimuth_folder, superpix_folder, chm_mean, chm_std, crop_size=40, patch_size=4, sequence_length = 50, eval=False, rescale_pca=False, **kwargs):
+    def __init__(self, 
+                    pca_folder, 
+                    tif_folder, 
+                    azimuth_folder, 
+                    superpix_folder, 
+                    chm_mean, 
+                    chm_std, 
+                    crop_size=40, 
+                    patch_size=4, 
+                    sequence_length = 50, 
+                    eval=False, 
+                    rescale_pca=False, 
+                    validator=None, 
+                    valid_mode=False, 
+                    fine_tuning=False, 
+                    render=False, 
+                    **kwargs):
         self.pca_folder = pca_folder
         self.chm_mean = chm_mean
         self.chm_std = chm_std
@@ -135,18 +465,6 @@ class MergedStructureDataset(Dataset):
             lastrow = len(falserows) - falserows[::-1].argmin()
 
             return firstrow,lastrow,firstcol,lastcol
-
-        def get_pad(arr, pad_size):
-            row_len = arr.shape[0]
-            col_len = arr.shape[1]
-
-            row_pad = (pad_size - row_len) // 2
-            col_pad = (pad_size - col_len) // 2
-            
-            add_row = (row_pad*2 + row_len) != pad_size
-            add_col = (col_pad*2 + col_len) != pad_size
-
-            return [(row_pad, row_pad+add_row), (col_pad, col_pad+add_col)]
 
         def grab_center(arr, diam):
             row_len = arr.shape[0]
@@ -905,12 +1223,45 @@ class HyperDataset(Dataset):
 
 if __name__ == "__main__":
 
-    pca_fold = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
-    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
-    az_fold = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo'
-    sp_fold = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
-    test = MergedStructureDataset(pca_fold, chm_fold, az_fold, sp_fold, 4.015508459469479, 4.809300736115787, eval=True)
+    
+
+    NUM_CLASSES = 12
+    NUM_CHANNELS = 10
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
+   
+    VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
+    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct.csv"
+    PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
+
+    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo/'
+    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
+    SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
+
+    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/raw_training'
+
+
+    CHM_MEAN = 4.015508459469479
+    CHM_STD =  4.809300736115787
+
+    valid = Validator(file=VALID_FILE, 
+                    img_dir=PCA_DIR, 
+                    site_name='NIWO', 
+                    num_classes=NUM_CLASSES, 
+                    plot_file=PLOT_FILE, 
+                    struct=True, 
+                    azm=AZM_DIR, 
+                    chm=CHM_DIR, 
+                    curated=CURATED_FILE, 
+                    rescale=False, 
+                    orig=ORIG_DIR, 
+                    prefix='D13',
+                    chm_mean = 4.015508459469479,
+                    chm_std = 4.809300736115787)
+
+    render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, CHM_MEAN, CHM_STD, 'raw_training', SAVE_DIR, validator=valid)
     # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 
-    print(test.__getitem__(69).shape)
+    for ix in render:
+        print(ix)
