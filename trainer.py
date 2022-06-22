@@ -1,4 +1,4 @@
-from dataloaders import HyperDataset, PreProcDataset, MaskedDataset, MaskedVitDataset, MaskedDenseVitDataset, DeepClusterDataset, StructureDataset, MergedStructureDataset
+from dataloaders import StructureDataset, MergedStructureDataset, RenderedDataLoader
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 import models
@@ -51,10 +51,105 @@ def do_sp_training(num_channels=10, num_classes=12, azm=False, chm=False, log_ev
     trainer.fit(model, train_loader)
 
 
+def do_rendered_training(num_channels=10,
+                        batch_size=2048,
+                        num_classes=12, 
+                        azm=False, 
+                        chm=False, 
+                        log_every=5, 
+                        max_epochs=10, 
+                        num_workers=4, 
+                        extra_labels='', 
+                        use_queue=False,  
+                        queue_chunks=1, 
+                        azm_concat=False, 
+                        chm_concat=False, 
+                        positions=False
+                        ):
+    data_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/raw_training'
+
+    checkpoint_callback = ModelCheckpoint(
+        dirpath='ckpts', 
+        filename=f'niwo_{num_channels}_channels_{num_classes}_classes_{extra_labels}'+'_{epoch}',
+        every_n_epochs=log_every,
+        save_on_train_epoch_end=True,
+        save_top_k = -1
+        )
+
+    pl.seed_everything(42)
+
+    dataset = RenderedDataLoader(data_folder)
+    train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=True)
+    model = models.SWaVModelSuperPixel(azm=azm, 
+                                        chm=chm, 
+                                        use_queue=use_queue, 
+                                        queue_chunks=queue_chunks, 
+                                        num_classes=num_classes, 
+                                        azm_concat=azm_concat, 
+                                        chm_concat=chm_concat,
+                                        positions=positions
+                                        )
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback])
+    trainer.fit(model, train_loader)
+
+def refine(num_channels=10,
+                        num_classes=12, 
+                        azm=False, 
+                        chm=False, 
+                        log_every=5, 
+                        max_epochs=100, 
+                        num_workers=1, 
+                        extra_labels='', 
+                        use_queue=False,  
+                        queue_chunks=1, 
+                        azm_concat=False, 
+                        chm_concat=False, 
+                        positions=False,
+                        data_folder=None,
+                        num_refine_classes = 5,
+                        ckpt = None
+                        ):
+    data_folder = data_folder
+
+    checkpoint_callback = ModelCheckpoint(
+        dirpath='ckpts', 
+        filename=f'niwo_{num_channels}_channels_{num_classes}_classes_refine_{extra_labels}'+'_{epoch}',
+        every_n_epochs=log_every,
+        save_on_train_epoch_end=True,
+        save_top_k = -1
+        )
+
+    pl.seed_everything(42)
+    swav_config = {
+        'num_classes': num_classes,
+        'azm': azm,
+        'chm': chm,
+        'use_queue': use_queue,
+        'queue_chunks': queue_chunks,
+        'azm_concat': azm_concat,
+        'chm_concat': chm_concat,
+        'positions': positions,
+        'ckpt': ckpt
+    }
+
+    dataset = RenderedDataLoader(data_folder)
+    train_loader = DataLoader(dataset, batch_size=32, num_workers=num_workers, pin_memory=True)
+    model = models.SWaVModelRefine(swav_config, num_refine_classes)
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback])
+    trainer.fit(model, train_loader)
+
+
 if __name__ == "__main__":
 
-    do_sp_training(num_workers=6, num_classes=20, extra_labels='sp_center_patches_big_batch')
-    do_sp_training(num_workers=6, num_classes=60, extra_labels='sp_center_patches')
+    refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training',
+            azm=True,
+            chm_concat=True,
+            ckpt='ckpts/niwo_10_channels_12_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
+
+    # do_rendered_training(num_workers=8, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel')
+    # do_rendered_training(num_workers=8, num_classes=24, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel')
+    # do_rendered_training(num_workers=8, num_classes=256, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel')
+    # do_rendered_training(num_workers=8, azm=True, chm_concat=True, positions=True, extra_labels='learnable_positions_azm_add_chm_concat_pre_rendered_per_pixel')
 
     # configs = [
     #     {'num_channels': 10,

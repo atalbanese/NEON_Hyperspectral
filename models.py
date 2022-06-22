@@ -26,10 +26,11 @@ def get_classifications(x):
     # masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
+#TODO: add validation and testing, actual accuracy assessment
 class SWaVModelRefine(pl.LightningModule):
     def __init__(self, swav_config, num_output_classes, **kwargs):
         super().__init__()
-        self.model = SWaVModelSuperPixel(**swav_config).load_from_checkpoint(swav_config['ckpt'],**swav_config).freeze()
+        self.model = SWaVModelSuperPixel(**swav_config).load_from_checkpoint(swav_config['ckpt'],**swav_config).eval()
         self.predict_mlp = nn.Sequential(nn.Linear(swav_config['num_classes'], swav_config['num_classes']*2),
                                          nn.BatchNorm1d(swav_config['num_classes']*2),
                                          nn.ReLU(),
@@ -41,41 +42,60 @@ class SWaVModelRefine(pl.LightningModule):
         self.loss = nn.CrossEntropyLoss()
 
     def training_step(self, x):
-        inp = x['base'].squeeze(0)
-        targets = x['targets']
-        mask = None
-        chm = None
-        az = None
+        inp = x['base']
+        targets = x['target']
+        chm = x['chm'].unsqueeze(1)
+        az = x['azimuth'].unsqueeze(1)
         
-
-        # inp = TF.center_crop(inp, self.img_size)
-        # chm = TF.center_crop(chm, self.img_size)
-        # az = TF.center_crop(az, self.img_size)
-
-        
-        #TODO: Some kind of basic augmentation??
 
         if torch.rand(1) > 0.5:
             inp = TF.vflip(inp)
-            #chm = TF.vflip(chm)
-            #az = TF.vflip(az)
+            chm = TF.vflip(chm)
+            az = TF.vflip(az)
 
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
-            #chm = TF.hflip(chm)
-            #az = TF.hflip(az)
+            chm = TF.hflip(chm)
+            az = TF.hflip(az)
 
         inp = self.model.forward(inp, chm, az)
         inp = self.predict_mlp(inp)
         inp = torch.softmax(inp, dim=1)
 
+        targets=torch.softmax(inp, dim=1)
+
 
         loss = self.loss(inp, targets)
         self.log('train_loss', loss)
         return loss
+    
+    def validation_step(self, x):
+        inp = x['base']
+        targets = x['target']
+        chm = x['chm'].unsqueeze(1)
+        azm = x['azimuth'].unsqueeze(1)
+        
+
+
+        inp = self.forward(inp, chm, azm)
+        inp = torch.softmax(inp, dim=1)
+
+        targets=torch.softmax(inp, dim=1)
+
+
+        loss = self.loss(inp, targets)
+        self.log('valid_loss', loss)
+        return loss
+
+    def test_step(self, x):
+        return None
+
+    def calc_ova(self):
+        return None
+
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.predict_mlp(), lr=5e-4)
+        optimizer = torch.optim.AdamW(self.predict_mlp.parameters(), lr=5e-4)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10, eta_min=5e-7)
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
 
@@ -92,61 +112,39 @@ class SWaVModelSuperPixel(pl.LightningModule):
                     pop_queue_start=14, 
                     queue_start=15, 
                     use_queue=False,  
-                    same_embed=False, 
-                    concat=False, 
                     queue_chunks=1, 
                     num_classes=12, 
                     azm_concat=False, 
-                    chm_concat=False, 
-                    aug_brightness=False, 
-                    main_brightness=False, 
+                    chm_concat=False,
+                    positions=False, 
                     **kwargs):
         super().__init__()
         self.model = networks.SWaVSuperPixel(azm=azm, 
                                                 chm=chm, 
-                                                same_embed=same_embed, 
-                                                concat=concat, 
                                                 queue_chunks=queue_chunks, 
                                                 num_classes=num_classes, 
                                                 azm_concat=azm_concat, 
-                                                chm_concat=chm_concat, 
-                                                aug_brightness=aug_brightness)
+                                                chm_concat=chm_concat,
+                                                positions=positions)
         self.use_queue = use_queue
         self.pop_queue_start = pop_queue_start
         self.queue_start = queue_start
-        if main_brightness:
-            self.brightness = tr.BrightnessAugment()
-        else:
-            self.brightness = None
 
 
     def training_step(self, x):
-        inp = x['base'].squeeze(0)
-        mask = None
-        #chm = x['chm'].squeeze(0).unsqueeze(1)
-        #az = x['azimuth'].squeeze(0).unsqueeze(1)
-        chm = None
-        az = None
-        
-
-        # inp = TF.center_crop(inp, self.img_size)
-        # chm = TF.center_crop(chm, self.img_size)
-        # az = TF.center_crop(az, self.img_size)
-
-        if self.brightness is not None:
-            inp = self.brightness(inp)
-        
-        #TODO: Some kind of basic augmentation??
+        inp = x['img']
+        chm = x['chm'].unsqueeze(1)
+        az = x['azm'].unsqueeze(1)
 
         if torch.rand(1) > 0.5:
             inp = TF.vflip(inp)
-            #chm = TF.vflip(chm)
-            #az = TF.vflip(az)
+            chm = TF.vflip(chm)
+            az = TF.vflip(az)
 
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
-            #chm = TF.hflip(chm)
-            #az = TF.hflip(az)
+            chm = TF.hflip(chm)
+            az = TF.hflip(az)
 
 
         loss = self.model.forward_train(inp, chm, az)

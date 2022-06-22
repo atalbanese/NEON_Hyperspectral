@@ -35,13 +35,20 @@ class RenderedDataLoader(Dataset):
     def __len__(self):
         return len(self.files)
 
+    #Filter items with 0
     def __getitem__(self, ix):
         to_open = self.files[ix]
-        return torch.load(os.path.join(self.base_dir, to_open))
+        
+        try:
+            to_return = torch.load(os.path.join(self.base_dir, to_open))
+        except:
+            print(to_open)
+            
+        return to_return
 
 
 
-#TODO: Make this work
+#TODO: Don't render patch with sum 0
 class RenderValidDataLoader(Dataset):
     def __init__(self, 
                     pca_folder, 
@@ -184,9 +191,9 @@ class RenderValidDataLoader(Dataset):
                     f_name = f"coords_{key}_sp_index_{pix_num}.pt"
 
                     save_loc = os.path.join(self.save_dir, f_name)
-                    if not os.path.exists(save_loc):
-                        with open(save_loc, 'wb') as f:
-                            torch.save(to_save, save_loc)
+
+                    with open(save_loc, 'wb') as f:
+                        torch.save(to_save, save_loc)
 
         return None
 

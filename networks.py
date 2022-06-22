@@ -11,11 +11,24 @@ import torchvision.transforms as tt
 import transforms as tr
 
 class SWaVSuperPixel(nn.Module):
-    def __init__(self, in_channels=10, emb_size=256, temp=0.1, epsilon=0.05, patch_size = 4, sequence_length=50, sinkhorn_iters=3, num_classes=12, azm=True, chm=True, same_embed=False, concat=False, queue_chunks=1, azm_concat=False, chm_concat=False, aug_brightness=False):
+    def __init__(self, 
+                in_channels=10, 
+                emb_size=64, 
+                temp=0.1, 
+                epsilon=0.05, 
+                patch_size = 4, 
+                sinkhorn_iters=3, 
+                num_classes=12, 
+                azm=False, 
+                chm=False, 
+                queue_chunks=1, 
+                azm_concat=False, 
+                chm_concat=False,
+                positions=False):
         super(SWaVSuperPixel, self).__init__()
         self.populate_queue = False
         self.use_queue = False
-        # self.num_patches = (img_size*img_size)//(patch_size*patch_size)
+        #TODO: Fix the queue
         self.queue_base = torch.zeros((queue_chunks+1)*256, 2, emb_size).cuda()
         self.queue_mod = torch.zeros((queue_chunks+1)*256, 2, emb_size).cuda()
         self.chm = chm
@@ -23,10 +36,6 @@ class SWaVSuperPixel(nn.Module):
         self.azm_concat = azm_concat
         self.chm_concat = chm_concat
         self.patch_size = patch_size
-        self.sequence_length = 50
-        self.same_embed = same_embed
-        # self.concat = concat
-        # self.add_channel = 2 if self.concat else 0
 
         self.add_channel = 0
         if self.azm_concat:
@@ -36,22 +45,35 @@ class SWaVSuperPixel(nn.Module):
 
         self.queue_chunks = queue_chunks
 
-        if aug_brightness:
-            self.aug_brightness = tr.BrightnessAugment()
-        else:
-            self.aug_brightness = None
+        self.use_positions = positions
+        if positions:
+            self.positions = nn.Parameter(torch.randn((self.patch_size**2, emb_size)))
 
 
-        self.transforms_main = tt.Compose([Rearrange('b s c h w -> b (h s w) c'),
+        self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
                                         tr.Blit(p=0.5),
                                         tr.Block(p=0.5),
-                                        Rearrange('b (h s w) c -> b s c h w', h=self.patch_size, w=self.patch_size, s=sequence_length)])
+                                        Rearrange('b (h w) c -> b c h w', h=self.patch_size, w=self.patch_size)])
 
-
+        #Todo: add positional embedding
         self.embed = nn.Sequential(
-                        Rearrange('b s c h w -> b s (c h w)'),
-                        nn.Linear(self.patch_size*self.patch_size*in_channels, emb_size)
+                        Rearrange('b c h w -> b (h w) c'),
+                        nn.Linear(in_channels + self.add_channel, emb_size)
         )
+
+        self.azm_embed = nn.Sequential(
+                        Rearrange('b c h w -> b (h w) c'),
+                        nn.Linear(1, emb_size)
+        )
+
+        self.chm_embed = nn.Sequential(
+                        Rearrange('b c h w -> b (h w) c'),
+                        nn.Linear(1, emb_size)
+        )
+
+        self.transforms_embed = tt.Compose([Rearrange('b c h w -> b (h w) c'),
+                                        tr.Blit(),
+                                        Rearrange('b (h w) c -> b c h w', h=self.patch_size, w=self.patch_size)])
 
      
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=4, dim_feedforward=emb_size*2, batch_first=True)
@@ -71,13 +93,11 @@ class SWaVSuperPixel(nn.Module):
         self.niters = sinkhorn_iters
         self.ra = Rearrange('b s f -> (b s) f')
 
-    #TODO: freeze protos for first epoch
     @torch.no_grad()
     def norm_prototypes(self):
         w = self.prototypes.weight.data.clone()
         w = f.normalize(w, dim=1, p=2)
         self.prototypes.weight.copy_(w)
-
 
     @torch.no_grad()
     def sinkhorn(self, scores):
@@ -104,33 +124,47 @@ class SWaVSuperPixel(nn.Module):
 
     def forward_train(self, x, chm, azm):
 
-        b,_,_,_,_ = x.shape
-        
-        
-
-
-        if self.aug_brightness is not None:
-            x = self.aug_brightness(x)
+        b,_,_,_, = x.shape
 
         if self.chm_concat:
             x = torch.cat((x, chm), dim=1)
         if self.azm_concat:
             x= torch.cat((x, azm), dim=1)
+        if self.use_positions:
+            x += self.positions
 
         x_s = self.transforms_main(x)
 
+        x = self.embed(x)
+        x_s = self.embed(x_s)
 
+        if self.chm and not self.chm_concat:
+            chm_s = self.transforms_embed(chm)
+            chm = self.chm_embed(chm)
+            chm_s = self.chm_embed(chm_s)
+            x += chm
+            x_s += chm_s
+
+        if self.azm and not self.azm_concat:
+            azm_s = self.transforms_embed(azm)
+            azm = self.azm_embed(azm)
+            azm_s = self.azm_embed(azm_s)
+            x += azm
+            x_s += azm_s
 
         inp = torch.cat((x, x_s))
-        inp = self.embed(inp)
-        #mask = torch.cat((mask, mask))
         inp = self.encoder(inp)
         inp = self.projector(inp)
         inp = nn.functional.normalize(inp, dim=1, p=2)
 
         scores = self.prototypes(inp)
-        #scores = scores.detach()
 
+        if self.populate_queue:
+            with torch.no_grad():
+                self.queue_base[b:] = self.queue_base[:-b].clone()
+                self.queue_base[:b] = inp[:b].detach()
+                self.queue_mod[b:] = self.queue_mod[:-b].clone()
+                self.queue_mod[:b] = inp[b:].detach()
 
         scores_t = scores[:b]
         scores_s = scores[b:]
@@ -138,15 +172,33 @@ class SWaVSuperPixel(nn.Module):
         t = scores_t.detach()
         s = scores_s.detach()
 
-        loss = 0
-
         t = self.ra(t)
         s = self.ra(s)
 
         scores_t = self.ra(scores_t)
         scores_s = self.ra(scores_s)
 
-        b *= self.sequence_length
+        if self.use_queue:
+            #TODO: Fix this
+            qb_items = torch.cat(([self.queue_base[j] for j in range(self.queue_chunks)]))
+            qm_items = torch.cat(([self.queue_mod[j] for j in range(self.queue_chunks)]))
+
+            t = torch.cat((
+                torch.mm(
+                    qb_items,
+                    self.prototypes.weight.t()
+                ),
+                t
+            ))
+
+            s = torch.cat((
+                torch.mm(
+                    qm_items,
+                    self.prototypes.weight.t()
+                ),
+                s
+            ))
+
 
         q_t = self.sinkhorn(t)
         q_s = self.sinkhorn(s)
@@ -156,58 +208,25 @@ class SWaVSuperPixel(nn.Module):
 
         loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
 
-        #SINKHORN PER BATCH
+        b *= self.patch_size**2
 
-        # for i in range(b):
-        #     t_i, s_i = t[i], s[i]
 
-            
-
-        #     if self.use_queue:
-        #         qb_items = torch.cat(([self.queue_base[i+j] for j in range(self.queue_chunks)]))
-        #         qm_items = torch.cat(([self.queue_mod[i+j] for j in range(self.queue_chunks)]))
-
-        #         t_i = torch.cat((
-        #             torch.mm(
-        #                 qb_items,
-        #                 self.prototypes.weight.t()
-        #             ),
-        #             t_i
-        #         ))
-
-        #         s_i = torch.cat((
-        #             torch.mm(
-        #                 qm_items,
-        #                 self.prototypes.weight.t()
-        #             ),
-        #             s_i
-        #         ))
-
-        #         q_t = self.sinkhorn(t_i)[-self.num_patches:]
-        #         q_s = self.sinkhorn(s_i)[-self.num_patches:]
-        #     else:
-        #         q_t = self.sinkhorn(t_i)
-        #         q_s = self.sinkhorn(s_i)
-
-        #     p_t = self.softmax(scores_t[i]/self.temp)
-        #     p_s = self.softmax(scores_s[i]/self.temp)
-
-        #     loss += -0.5 * torch.mean(q_t * p_s + q_s * p_t)
-
+        #Try with and without /b
         return loss/b
 
+
+    #TODO: Test this
     def forward(self, inp, chm, azm):
         if self.chm_concat:
             inp = torch.cat((inp, chm), dim=1)
         if self.azm_concat:
             inp = torch.cat((inp, azm), dim=1)
+        if self.use_positions:
+            inp += self.positions
 
         inp = self.embed(inp)
         if self.chm and not self.chm_concat:
-            if not self.same_embed:
-                chm = self.chm_embed(chm)
-            else:
-                chm = self.azm_embed(chm)
+            chm = self.chm_embed(chm)
             inp += chm
         if self.azm and not self.azm_concat:
             azm= self.azm_embed(azm)
