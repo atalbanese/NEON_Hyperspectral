@@ -8,7 +8,7 @@ import torchvision.transforms.functional as TF
 import pytorch_lightning as pl
 import torchvision as tv
 import transforms as tr
-from einops import rearrange, repeat
+from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 #import cv2 as cv
 import numpy.ma as ma
@@ -26,82 +26,195 @@ def get_classifications(x):
     # masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
+
+
 #TODO: add validation and testing, actual accuracy assessment
 class SWaVModelRefine(pl.LightningModule):
-    def __init__(self, swav_config, num_output_classes, **kwargs):
+    def __init__(self, swav_config, num_output_classes, class_key, class_weights=None, freeze_backbone=True, **kwargs):
         super().__init__()
-        self.model = SWaVModelSuperPixel(**swav_config).load_from_checkpoint(swav_config['ckpt'],**swav_config).eval()
+        self.freeze_backbone = freeze_backbone
+        if freeze_backbone:
+            self.model = SWaVModelSuperPixel(**swav_config).load_from_checkpoint(swav_config['ckpt'],**swav_config).eval()
+        else:
+            self.model = SWaVModelSuperPixel(**swav_config).load_from_checkpoint(swav_config['ckpt'],**swav_config)
         self.predict_mlp = nn.Sequential(nn.Linear(swav_config['num_classes'], swav_config['num_classes']*2),
                                          nn.BatchNorm1d(swav_config['num_classes']*2),
                                          nn.ReLU(),
                                          nn.Linear(swav_config['num_classes']*2, swav_config['num_classes']*2),
                                          nn.BatchNorm1d(swav_config['num_classes']*2),
                                          nn.ReLU(),
-                                         nn.Linear(swav_config['num_classes'], num_output_classes))
+                                         nn.Linear(swav_config['num_classes']*2, swav_config['num_classes']*2),
+                                         nn.BatchNorm1d(swav_config['num_classes']*2),
+                                         nn.ReLU(),
+                                         nn.Linear(swav_config['num_classes']*2, num_output_classes))
+        
+        if class_weights is not None: 
+            self.loss = nn.CrossEntropyLoss(weight=torch.tensor(class_weights))
+        else:
+            self.loss = nn.CrossEntropyLoss()
 
-        self.loss = nn.CrossEntropyLoss()
+        self.results = self.make_results_dict(class_key)
+        self.class_key = class_key
+
+
+    def make_results_dict(self, classes):
+        out = {value:{v:0 for v in classes.values()} for value in classes.values()}
+        return out
+
+    def update_results(self, inp, target):
+        inp = torch.argmax(inp, dim=1)
+        pred = list(inp)
+        targets = list(target)
+
+        for p, t in list(zip(pred, targets)):
+            p_label = self.class_key[int(p)]
+            t_label = self.class_key[int(t)]
+
+            self.results[t_label][p_label] += 1
+
+        return None
+
+    def calc_prod_acc(self):
+        out_dict = {value:0 for value in self.class_key.values()}
+
+
+        return None
+    
+    def calc_user_acc(self):
+        return None
+    
+    def calc_ova(self):
+
+        total_pixels = 0
+        accurate_pixels = 0
+        for key, value in self.results.items():
+            for i, j in value.items():
+                total_pixels += j
+                if key == i:
+                    accurate_pixels += j
+
+        return accurate_pixels/total_pixels
 
     def training_step(self, x):
-        inp = x['base']
+        inp = x['img']
         targets = x['target']
         chm = x['chm'].unsqueeze(1)
-        az = x['azimuth'].unsqueeze(1)
-        
+        az = x['azm'].unsqueeze(1)
+        height = x['height']
+        mask = x['mask']
+        mask = reduce(mask, 'b c h w -> b () h w', 'max')
 
         if torch.rand(1) > 0.5:
             inp = TF.vflip(inp)
             chm = TF.vflip(chm)
             az = TF.vflip(az)
+            mask = TF.vflip(mask)
 
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
             chm = TF.hflip(chm)
             az = TF.hflip(az)
+            mask = TF.hflip(mask)
 
-        inp = self.model.forward(inp, chm, az)
+        height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
+
+        for i, h in enumerate(height):
+            height_test = chm[i]
+            add_mask = height_test < (h - 3)
+            height_mask[i] = add_mask
+
+        mask += height_mask
+        mask = ~mask
+        mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
+        
+
+        
+        if self.freeze_backbone:
+            with torch.no_grad():
+                inp = self.model.forward(inp, chm, az)
+            inp = rearrange(inp, 'b s f -> (b s) f')
+            inp.requires_grad = True
+        else:
+            inp = self.model.forward(inp, chm, az)
+            inp = rearrange(inp, 'b s f -> (b s) f')
         inp = self.predict_mlp(inp)
-        inp = torch.softmax(inp, dim=1)
 
-        targets=torch.softmax(inp, dim=1)
+        #Try without softmax
+        inp = torch.softmax(inp, dim=1)
+        inp = inp[mask, :]
+
+        targets= rearrange(targets, 'b c h w -> (b h w) c')
+        targets=torch.argmax(targets, dim=1)
+        targets = targets[mask]
 
 
         loss = self.loss(inp, targets)
         self.log('train_loss', loss)
         return loss
     
-    def validation_step(self, x):
-        inp = x['base']
+    #FIX THIS TO MATCH TRAIN
+    def validation_step(self, x, _):
+        inp = x['img']
         targets = x['target']
         chm = x['chm'].unsqueeze(1)
-        azm = x['azimuth'].unsqueeze(1)
+        azm = x['azm'].unsqueeze(1)
+        height = x['height']
+        mask = x['mask']
+        mask = reduce(mask, 'b c h w -> b () h w', 'max')
+
+        height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
+
+        for i, h in enumerate(height):
+            height_test = chm[i]
+            add_mask = height_test < (h - 3)
+            height_mask[i] = add_mask
+
+        mask += height_mask
+        mask = ~mask
+        mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
+
         
-
-
         inp = self.forward(inp, chm, azm)
         inp = torch.softmax(inp, dim=1)
+        inp = inp[mask, :]
 
-        targets=torch.softmax(inp, dim=1)
+        targets= rearrange(targets, 'b c h w -> (b h w) c')
+        targets=torch.argmax(targets, dim=1)
+        targets = targets[mask]
 
+        self.update_results(inp, targets)
 
-        loss = self.loss(inp, targets)
-        self.log('valid_loss', loss)
-        return loss
+        #loss = self.loss(inp, targets)
+        #self.log('valid_loss', loss)
+        return None
+
+    def validation_epoch_end(self, _):
+        ova = self.calc_ova()
+        user = self.calc_user_acc()
+        producer = self.calc_prod_acc()
+
+        self.results = self.make_results_dict(self.class_key)
+        self.log('ova', ova)
+
+        print(f'\nOVA: {ova}\nUser: {user}\nProducer: {producer}')
 
     def test_step(self, x):
         return None
 
-    def calc_ova(self):
-        return None
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.predict_mlp.parameters(), lr=5e-4)
+        if self.freeze_backbone:
+            optimizer = torch.optim.AdamW(self.predict_mlp.parameters(), lr=5e-4)
+        else:
+             optimizer = torch.optim.AdamW(self.parameters(), lr=5e-4)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10, eta_min=5e-7)
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
 
     
     def forward(self, x, chm, azm):
         out = self.model(x, chm, azm)
+        out = rearrange(out, 'b s f -> (b s) f')
         out = self.predict_mlp(out)
         return out
 

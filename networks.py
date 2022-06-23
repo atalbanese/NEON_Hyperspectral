@@ -10,6 +10,239 @@ import numpy as np
 import torchvision.transforms as tt
 import transforms as tr
 
+class SWaVSuperPixelResnet(nn.Module):
+    def __init__(self, 
+                in_channels=10, 
+                emb_size=64, 
+                temp=0.1, 
+                epsilon=0.05, 
+                patch_size = 4, 
+                sinkhorn_iters=3, 
+                num_classes=12, 
+                azm=False, 
+                chm=False, 
+                img_size=15,
+                queue_chunks=1, 
+                azm_concat=False, 
+                chm_concat=False,
+                positions=False):
+        super(SWaVSuperPixelResnet, self).__init__()
+        self.populate_queue = False
+        self.use_queue = False
+        #TODO: Fix the queue
+        self.queue_base = torch.zeros((queue_chunks+1)*256, 2, emb_size).cuda()
+        self.queue_mod = torch.zeros((queue_chunks+1)*256, 2, emb_size).cuda()
+        self.chm = chm
+        self.azm = azm
+        self.azm_concat = azm_concat
+        self.chm_concat = chm_concat
+        self.patch_size = patch_size
+
+        self.add_channel = 0
+        if self.azm_concat:
+            self.add_channel += 1
+        if self.chm_concat:
+            self.add_channel +=1
+
+        self.queue_chunks = queue_chunks
+
+        self.use_positions = positions
+        if positions:
+            self.positions = nn.Parameter(torch.randn((self.patch_size**2, emb_size)))
+
+
+        self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
+                                        tr.Blit(p=0.5),
+                                        tr.Block(p=0.5),
+                                        Rearrange('b (h w) c -> b c h w', h=self.img_size, w=self.img_size)])
+
+        #Todo: add positional embedding
+
+
+        self.azm_embed = nn.Sequential(
+                        Rearrange('b c h w -> b (h w) c'),
+                        nn.Linear(1, in_channels),
+                        Rearrange('b (h w) c -> b c h w ', h=img_size, w=img_size)
+        )
+
+        self.chm_embed = nn.Sequential(
+                        Rearrange('b c h w -> b (h w) c'),
+                        nn.Linear(1, in_channels),
+                        Rearrange('b (h w) c -> b c h w ', h=img_size, w=img_size)
+
+        )
+
+        self.transforms_embed = tt.Compose([Rearrange('b c h w -> b (h w) c'),
+                                        tr.Blit(),
+                                        Rearrange('b (h w) c -> b c h w', h=self.img_size, w=self.img_size)])
+
+     
+        # encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=4, dim_feedforward=emb_size*2, batch_first=True)
+        # self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
+
+        self.encoder = net_gen.ResnetGenerator(in_channels + self.add_channel, num_classes, use_dropout=True)
+
+        self.projector = nn.Sequential(nn.Linear(emb_size, emb_size),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_size, emb_size),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_size, emb_size))
+
+        self.prototypes = nn.Linear(emb_size, num_classes, bias=False)
+
+        self.softmax = nn.LogSoftmax(dim=1)
+        self.temp = temp
+        self.epsilon = epsilon
+        self.niters = sinkhorn_iters
+        self.ra = Rearrange('b s f -> (b s) f')
+
+    @torch.no_grad()
+    def norm_prototypes(self):
+        w = self.prototypes.weight.data.clone()
+        w = f.normalize(w, dim=1, p=2)
+        self.prototypes.weight.copy_(w)
+
+    @torch.no_grad()
+    def sinkhorn(self, scores):
+        Q = torch.exp(scores/self.epsilon).t()
+        B = Q.shape[1] 
+        K = Q.shape[0]
+
+        sum_Q = torch.sum(Q)
+        Q /= sum_Q
+
+        for it in range(self.niters):
+            # normalize each row: total weight per prototype must be 1/K
+            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+            Q /= sum_of_rows
+            Q /= K
+
+            # normalize each column: total weight per sample must be 1/B
+            Q /= torch.sum(Q, dim=0, keepdim=True)
+            Q /= B
+
+        Q *= B # the colomns must sum to 1 so that Q is an assignment
+        return Q.t()
+
+
+    def forward_train(self, x, chm, azm):
+
+        b,_,_,_, = x.shape
+
+        if self.chm_concat:
+            x = torch.cat((x, chm), dim=1)
+        if self.azm_concat:
+            x= torch.cat((x, azm), dim=1)
+        
+
+        x_s = self.transforms_main(x)
+
+        if self.use_positions:
+            x += self.positions
+            x_s += self.positions
+
+        if self.chm and not self.chm_concat:
+            chm_s = self.transforms_embed(chm)
+            chm = self.chm_embed(chm)
+            chm_s = self.chm_embed(chm_s)
+            x += chm
+            x_s += chm_s
+
+        if self.azm and not self.azm_concat:
+            azm_s = self.transforms_embed(azm)
+            azm = self.azm_embed(azm)
+            azm_s = self.azm_embed(azm_s)
+            x += azm
+            x_s += azm_s
+
+        inp = torch.cat((x, x_s))
+        inp = self.encoder(inp)
+        inp = rearrange(inp, 'b c h w -> b (h w) c')
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+
+        if self.populate_queue:
+            with torch.no_grad():
+                self.queue_base[b:] = self.queue_base[:-b].clone()
+                self.queue_base[:b] = inp[:b].detach()
+                self.queue_mod[b:] = self.queue_mod[:-b].clone()
+                self.queue_mod[:b] = inp[b:].detach()
+
+        scores_t = scores[:b]
+        scores_s = scores[b:]
+
+        t = scores_t.detach()
+        s = scores_s.detach()
+
+        t = self.ra(t)
+        s = self.ra(s)
+
+        scores_t = self.ra(scores_t)
+        scores_s = self.ra(scores_s)
+
+        if self.use_queue:
+            #TODO: Fix this
+            qb_items = torch.cat(([self.queue_base[j] for j in range(self.queue_chunks)]))
+            qm_items = torch.cat(([self.queue_mod[j] for j in range(self.queue_chunks)]))
+
+            t = torch.cat((
+                torch.mm(
+                    qb_items,
+                    self.prototypes.weight.t()
+                ),
+                t
+            ))
+
+            s = torch.cat((
+                torch.mm(
+                    qm_items,
+                    self.prototypes.weight.t()
+                ),
+                s
+            ))
+
+
+        q_t = self.sinkhorn(t)
+        q_s = self.sinkhorn(s)
+
+        p_t = self.softmax(scores_t/self.temp)
+        p_s = self.softmax(scores_s/self.temp)
+
+        loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
+
+        b = q_t.shape[0]
+
+
+        #Try with and without /b
+        return loss/b
+
+
+    #TODO: Test this
+    def forward(self, inp, chm, azm):
+        if self.chm_concat:
+            inp = torch.cat((inp, chm), dim=1)
+        if self.azm_concat:
+            inp = torch.cat((inp, azm), dim=1)
+        
+
+        inp = self.embed(inp)
+        if self.use_positions:
+            inp += self.positions
+        if self.chm and not self.chm_concat:
+            chm = self.chm_embed(chm)
+            inp += chm
+        if self.azm and not self.azm_concat:
+            azm= self.azm_embed(azm)
+            inp += azm
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+        return scores
+
 class SWaVSuperPixel(nn.Module):
     def __init__(self, 
                 in_channels=10, 
@@ -130,13 +363,16 @@ class SWaVSuperPixel(nn.Module):
             x = torch.cat((x, chm), dim=1)
         if self.azm_concat:
             x= torch.cat((x, azm), dim=1)
-        if self.use_positions:
-            x += self.positions
+        
 
         x_s = self.transforms_main(x)
 
         x = self.embed(x)
+        
         x_s = self.embed(x_s)
+        if self.use_positions:
+            x += self.positions
+            x_s += self.positions
 
         if self.chm and not self.chm_concat:
             chm_s = self.transforms_embed(chm)
@@ -221,10 +457,11 @@ class SWaVSuperPixel(nn.Module):
             inp = torch.cat((inp, chm), dim=1)
         if self.azm_concat:
             inp = torch.cat((inp, azm), dim=1)
-        if self.use_positions:
-            inp += self.positions
+        
 
         inp = self.embed(inp)
+        if self.use_positions:
+            inp += self.positions
         if self.chm and not self.chm_concat:
             chm = self.chm_embed(chm)
             inp += chm

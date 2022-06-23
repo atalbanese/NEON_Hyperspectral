@@ -14,7 +14,7 @@ import h5py
 import transforms as tr
 import torch.nn.functional as f
 import torchvision.transforms as tt
-from einops import rearrange
+from einops import rearrange, reduce
 import rasterio as rs
 from rasterio import logging
 from validator import Validator
@@ -24,7 +24,6 @@ import numpy.ma as ma
 import pickle
 from einops.layers.torch import Rearrange, Reduce
 #from torch_geometric.data import Data
-
 
 class RenderedDataLoader(Dataset):
     def __init__(self,
@@ -43,13 +42,13 @@ class RenderedDataLoader(Dataset):
             to_return = torch.load(os.path.join(self.base_dir, to_open))
         except:
             print(to_open)
-            
+        to_return['img'][to_return['img'] != to_return['img']] = 0
+
+
         return to_return
 
 
-
-#TODO: Don't render patch with sum 0
-class RenderValidDataLoader(Dataset):
+class RenderWholePixDataLoader(Dataset):
     def __init__(self, 
                     pca_folder, 
                     tif_folder, 
@@ -70,6 +69,7 @@ class RenderValidDataLoader(Dataset):
         self.validator = validator
         self.mode = mode
         self.save_dir = save_dir
+        self.resize = 16
         self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
         self.rng = np.random.default_rng()
 
@@ -141,6 +141,18 @@ class RenderValidDataLoader(Dataset):
             lastrow = len(falserows) - falserows[::-1].argmin()
 
             return firstrow,lastrow,firstcol,lastcol
+        
+        def get_pad(arr, pad_size):
+            row_len = arr.shape[0]
+            col_len = arr.shape[1]
+
+            row_pad = (pad_size - row_len) // 2
+            col_pad = (pad_size - col_len) // 2
+            
+            add_row = (row_pad*2 + row_len) != pad_size
+            add_col = (col_pad*2 + col_len) != pad_size
+
+            return [(row_pad, row_pad+add_row), (col_pad, col_pad+add_col)]
 
         def grab_center(arr, diam):
             row_len = arr.shape[0]
@@ -161,41 +173,88 @@ class RenderValidDataLoader(Dataset):
             select_length = select_length.sum()
             if (select_length > 16):
                 crops = get_crop(superpixels, pix_num)
-                if (crops[1] - crops[0] >20) or (crops[3] - crops[2] >20):
+                if (crops[1] - crops[0] >self.resize) or (crops[3] - crops[2] >self.resize):
+                    continue
+                if (crops[1] - crops[0] <3) or (crops[3] - crops[2]<3):
                     continue
                 sp_crop = superpixels[crops[0]:crops[1], crops[2]:crops[3]] == pix_num
                 img_crop = img[crops[0]:crops[1], crops[2]:crops[3], :] * sp_crop[...,np.newaxis]
-                img_crop[img_crop != img_crop] = 0
+                if img_crop.sum() == 0:
+                    continue
+                mask = img_crop != img_crop
+                img_crop[mask] = 0
+                mask = reduce(mask, 'h w c-> () h w', 'max').squeeze(0)
+
 
                 chm_crop = chm[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop
-                chm_crop[chm_crop != chm_crop] = 0
+                if chm_crop.sum() == 0:
+                    continue
+                chm_mask = chm_crop != chm_crop
+                chm_crop[chm_mask] = 0
 
                 azm_crop = azm[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop
-                azm_crop[azm_crop != azm_crop] = 0
+                azm_mask = azm_crop != azm_crop
+                azm_crop[azm_mask] = 0  
 
-                img_center = grab_center(img_crop, self.patch_size)
-                if img_center.shape == (4, 4, 10):
-                    img_center = torch.from_numpy(img_center)
-                    img_center = ra(img_center)
+                mask += chm_mask
+                mask += azm_mask
 
-                    chm_center = grab_center(chm_crop, self.patch_size)
-                    chm_center = torch.from_numpy(chm_center)
+                mask = ~mask
 
-                    azm_center = grab_center(azm_crop, self.patch_size)
-                    azm_center = torch.from_numpy(azm_center)
+                pad = get_pad(img_crop, self.resize)
 
-                    to_save = {'img': img_center,
-                                'azm': azm_center,
-                                'chm': chm_center}
+                mask = np.pad(mask, pad)
 
-                    f_name = f"coords_{key}_sp_index_{pix_num}.pt"
+                chm_center = np.pad(chm_crop, pad)
+                azm_center = np.pad(azm_crop, pad)
 
-                    save_loc = os.path.join(self.save_dir, f_name)
+                pad.append((0,0))
+                img_center = np.pad(img_crop, pad)
 
-                    with open(save_loc, 'wb') as f:
-                        torch.save(to_save, save_loc)
+
+                img_center = torch.from_numpy(img_center)
+                img_center = ra(img_center)
+
+                chm_center = torch.from_numpy(chm_center)
+
+                azm_center = torch.from_numpy(azm_center)
+                mask = torch.from_numpy(mask)
+
+                to_save = {'img': img_center,
+                            'azm': azm_center,
+                            'chm': chm_center,
+                            'mask': mask}
+
+                f_name = f"coords_{key}_sp_index_{pix_num}.pt"
+
+                save_loc = os.path.join(self.save_dir, f_name)
+                with open(save_loc, 'wb') as f:
+                    torch.save(to_save, save_loc)
 
         return None
+
+class RenderedDataLoader(Dataset):
+    def __init__(self,
+                file_folder):
+        self.base_dir = file_folder
+        self.files = os.listdir(file_folder)
+
+    def __len__(self):
+        return len(self.files)
+
+    #Filter items with 0
+    def __getitem__(self, ix):
+        to_open = self.files[ix]
+        
+        try:
+            to_return = torch.load(os.path.join(self.base_dir, to_open))
+        except:
+            print(to_open)
+        to_return['img'][to_return['img'] != to_return['img']] = 0
+
+
+        return to_return
+
 
 class RenderDataLoader(Dataset):
     def __init__(self, 
@@ -218,6 +277,7 @@ class RenderDataLoader(Dataset):
         self.validator = validator
         self.mode = mode
         self.save_dir = save_dir
+        self.resize = 16
         self.files = [os.path.join(pca_folder,file) for file in os.listdir(pca_folder) if ".npy" in file]
         self.rng = np.random.default_rng()
 
@@ -289,6 +349,18 @@ class RenderDataLoader(Dataset):
             lastrow = len(falserows) - falserows[::-1].argmin()
 
             return firstrow,lastrow,firstcol,lastcol
+        
+        def get_pad(arr, pad_size):
+            row_len = arr.shape[0]
+            col_len = arr.shape[1]
+
+            row_pad = (pad_size - row_len) // 2
+            col_pad = (pad_size - col_len) // 2
+            
+            add_row = (row_pad*2 + row_len) != pad_size
+            add_col = (col_pad*2 + col_len) != pad_size
+
+            return [(row_pad, row_pad+add_row), (col_pad, col_pad+add_col)]
 
         def grab_center(arr, diam):
             row_len = arr.shape[0]
@@ -322,7 +394,7 @@ class RenderDataLoader(Dataset):
                 azm_crop[azm_crop != azm_crop] = 0
 
                 img_center = grab_center(img_crop, self.patch_size)
-                if img_center.shape == (4, 4, 10):
+                if (img_center.shape == (4, 4, 10)) and (img_center.sum() != 0):
                     img_center = torch.from_numpy(img_center)
                     img_center = ra(img_center)
 
@@ -339,9 +411,8 @@ class RenderDataLoader(Dataset):
                     f_name = f"coords_{key}_sp_index_{pix_num}.pt"
 
                     save_loc = os.path.join(self.save_dir, f_name)
-                    if not os.path.exists(save_loc):
-                        with open(save_loc, 'wb') as f:
-                            torch.save(to_save, save_loc)
+                    with open(save_loc, 'wb') as f:
+                        torch.save(to_save, save_loc)
 
         return None
 
@@ -1246,7 +1317,7 @@ if __name__ == "__main__":
     SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
     ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/raw_training'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/super_pixel_patches/raw_training'
 
 
     CHM_MEAN = 4.015508459469479
@@ -1267,7 +1338,7 @@ if __name__ == "__main__":
                     chm_mean = 4.015508459469479,
                     chm_std = 4.809300736115787)
 
-    render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, CHM_MEAN, CHM_STD, 'raw_training', SAVE_DIR, validator=valid)
+    render = RenderWholePixDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, CHM_MEAN, CHM_STD, 'raw_training', SAVE_DIR, validator=valid)
     # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 
     for ix in render:

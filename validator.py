@@ -25,6 +25,7 @@ from einops import rearrange
 from sklearn.decomposition import PCA, IncrementalPCA
 import torchvision.transforms as tt
 import sklearn.model_selection as ms
+import sklearn.utils.class_weight as cw
 
 
 #TODO: Clean this mess up
@@ -76,6 +77,7 @@ class Validator():
         self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
         print('here')
 
+    #TODO: Check shapes before saving
     def render_valid_data(self, save_dir, split, render_fixed_size=True):
         if split == 'train':
             data = self.train
@@ -104,7 +106,8 @@ class Validator():
                 chm = chm_open.read().astype(np.float32)
                 chm[chm==-9999] = np.nan
 
-                chm = (chm.squeeze(axis=0)- self.chm_mean)/self.chm_std
+                #chm = (chm.squeeze(axis=0)- self.chm_mean)/self.chm_std
+                chm = chm.squeeze(axis=0)
                 chm[chm != chm] = 0
             
             x = int(round(float(row['easting']) - float(row['file_west_bound']), 0))
@@ -115,32 +118,35 @@ class Validator():
             else:
                 diam = int(round(float(row['maxCrownDiameter'])*0.9/2))
                 bounds = (y-diam, y+diam, x-diam, x+diam)
-            img_crop = img[bounds[0]:bounds[1], bounds[2]:bounds[3],...]
-            chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3],...]
-            azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3],...]
-            mask = img_crop != img_crop
+            img_crop = img[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
+            if img_crop.shape == (4, 4, 10):
+                chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+                azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+                mask = img_crop != img_crop
 
 
-            img_crop = torch.from_numpy(img_crop)
-            img_crop = rearrange(img_crop, 'h w c -> c h w')
-            chm_crop = torch.from_numpy(chm_crop)
-            azm_crop = torch.from_numpy(azm_crop)
-            mask = torch.from_numpy(mask)
+                img_crop = torch.tensor(img_crop)
+                img_crop = rearrange(img_crop, 'h w c -> c h w')
+                chm_crop = torch.tensor(chm_crop)
+                azm_crop = torch.tensor(azm_crop)
+                mask = torch.tensor(mask)
+                mask = rearrange(mask, 'h w c -> c h w')
 
-            label = torch.zeros((len(self.taxa.keys()),chm_crop.shape[0],chm_crop.shape[1]), dtype=torch.float32)
-            label[self.taxa[taxa]] = 1.0
+                label = torch.zeros((len(self.taxa.keys()),chm_crop.shape[0],chm_crop.shape[1]), dtype=torch.float32).clone()
+                label[self.taxa[taxa]] = 1.0
 
-            to_save = {
-                'img': img_crop,
-                'chm': chm_crop,
-                'azm': azm_crop,
-                'mask': mask,
-                'target': label
-            }
+                to_save = {
+                    'img': img_crop,
+                    'chm': chm_crop,
+                    'azm': azm_crop,
+                    'mask': mask,
+                    'target': label,
+                    'height': float(row['height'])
+                }
 
-            f_name = f'{key}_{row["taxonID"]}_{x}_{y}.pt'
-            with open(os.path.join(save_dir, f_name), 'wb') as f:
-                torch.save(to_save, f)
+                f_name = f'{key}_{row["taxonID"]}_{x}_{y}.pt'
+                with open(os.path.join(save_dir, f_name), 'wb') as f:
+                    torch.save(to_save, f)
         
         return None
 

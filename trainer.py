@@ -96,8 +96,8 @@ def refine(num_channels=10,
                         num_classes=12, 
                         azm=False, 
                         chm=False, 
-                        log_every=5, 
-                        max_epochs=100, 
+                        log_every=25, 
+                        max_epochs=800, 
                         num_workers=1, 
                         extra_labels='', 
                         use_queue=False,  
@@ -106,17 +106,24 @@ def refine(num_channels=10,
                         chm_concat=False, 
                         positions=False,
                         data_folder=None,
+                        valid_folder=None,
+                        test_folder=None,
                         num_refine_classes = 5,
-                        ckpt = None
+                        ckpt = None,
+                        class_key = None,
+                        class_weights = None,
+                        freeze_backbone=True
                         ):
     data_folder = data_folder
 
     checkpoint_callback = ModelCheckpoint(
         dirpath='ckpts', 
-        filename=f'niwo_{num_channels}_channels_{num_classes}_classes_refine_{extra_labels}'+'_{epoch}',
-        every_n_epochs=log_every,
+        filename=f'niwo_{num_channels}_channels_{num_classes}_classes_refine_{extra_labels}'+'_ova_{ova:.2f}_{epoch}',
+        #every_n_epochs=log_every,
+        monitor='ova',
         save_on_train_epoch_end=True,
-        save_top_k = -1
+        mode='max',
+        save_top_k = 5
         )
 
     pl.seed_everything(42)
@@ -132,24 +139,65 @@ def refine(num_channels=10,
         'ckpt': ckpt
     }
 
-    dataset = RenderedDataLoader(data_folder)
-    train_loader = DataLoader(dataset, batch_size=32, num_workers=num_workers, pin_memory=True)
-    model = models.SWaVModelRefine(swav_config, num_refine_classes)
+    train_dataset = RenderedDataLoader(data_folder)
+    train_loader = DataLoader(train_dataset, batch_size=32, num_workers=num_workers)
+
+    valid_dataset = RenderedDataLoader(valid_folder)
+    valid_loader = DataLoader(valid_dataset, batch_size=1, num_workers=num_workers)
+
+    test_dataset = RenderedDataLoader(test_folder)
+    test_loader = DataLoader(test_dataset, batch_size=1, num_workers=num_workers)
+
+    model = models.SWaVModelRefine(swav_config, num_refine_classes, class_key=class_key, class_weights=class_weights, freeze_backbone=freeze_backbone)
     trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback])
-    trainer.fit(model, train_loader)
+    trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
 
 
 if __name__ == "__main__":
 
-    refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training',
+    refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_test',
+            valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_valid',
+            test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training',
             azm=True,
             chm_concat=True,
-            ckpt='ckpts/niwo_10_channels_12_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
+            num_classes=256,
+            extra_labels='lr_5e4_400_unfrozen',
+            class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
+            class_weights= [0.47228916, 0.60775194, 3.26666667, 1.225, 8.71111111],
+            positions=False,
+            freeze_backbone=False,
+            ckpt='ckpts/niwo_10_channels_256_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
 
-    # do_rendered_training(num_workers=8, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel')
+
+    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_test',
+    #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_valid',
+    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training',
+    #         azm=True,
+    #         chm_concat=True,
+    #         num_classes=24,
+    #         extra_labels='lr_5e4_800',
+    #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
+    #         class_weights= [0.47228916, 0.60775194, 3.26666667, 1.225, 8.71111111],
+    #         positions=False,
+    #         ckpt='ckpts/niwo_10_channels_24_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
+    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_test',
+    #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_valid',
+    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training',
+    #         azm=True,
+    #         chm_concat=True,
+    #         num_classes=256,
+    #         extra_labels='lr_5e4_800',
+    #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
+    #         class_weights= [0.47228916, 0.60775194, 3.26666667, 1.225, 8.71111111],
+    #         positions=False,
+    #         ckpt='ckpts/niwo_10_channels_256_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
+
+
+    # do_rendered_training(num_workers=8, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel_softmax_dim')
     # do_rendered_training(num_workers=8, num_classes=24, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel')
-    # do_rendered_training(num_workers=8, num_classes=256, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel')
     # do_rendered_training(num_workers=8, azm=True, chm_concat=True, positions=True, extra_labels='learnable_positions_azm_add_chm_concat_pre_rendered_per_pixel')
+    # do_rendered_training(num_workers=8, num_classes=256, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel')
+    
 
     # configs = [
     #     {'num_channels': 10,
