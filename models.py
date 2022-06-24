@@ -30,13 +30,17 @@ def get_classifications(x):
 
 #TODO: add validation and testing, actual accuracy assessment
 class SWaVModelRefine(pl.LightningModule):
-    def __init__(self, swav_config, num_output_classes, class_key, class_weights=None, freeze_backbone=True, **kwargs):
+    def __init__(self, swav_config, num_output_classes, class_key, class_weights=None, freeze_backbone=True, trained_backbone=True,**kwargs):
         super().__init__()
         self.freeze_backbone = freeze_backbone
-        if freeze_backbone:
-            self.model = SWaVModelSuperPixel(**swav_config).load_from_checkpoint(swav_config['ckpt'],**swav_config).eval()
+        if trained_backbone:
+            if freeze_backbone:
+                self.model = SWaVModelSuperPixel(**swav_config).load_from_checkpoint(swav_config['ckpt'],**swav_config).eval()
+            else:
+                self.model = SWaVModelSuperPixel(**swav_config).load_from_checkpoint(swav_config['ckpt'],**swav_config)
         else:
-            self.model = SWaVModelSuperPixel(**swav_config).load_from_checkpoint(swav_config['ckpt'],**swav_config)
+            self.freeze_backbone = False
+            self.model = SWaVModelSuperPixel(**swav_config)
         self.predict_mlp = nn.Sequential(nn.Linear(swav_config['num_classes'], swav_config['num_classes']*2),
                                          nn.BatchNorm1d(swav_config['num_classes']*2),
                                          nn.ReLU(),

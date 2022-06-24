@@ -97,7 +97,7 @@ def refine(num_channels=10,
                         azm=False, 
                         chm=False, 
                         log_every=25, 
-                        max_epochs=800, 
+                        max_epochs=410, 
                         num_workers=1, 
                         extra_labels='', 
                         use_queue=False,  
@@ -112,13 +112,14 @@ def refine(num_channels=10,
                         ckpt = None,
                         class_key = None,
                         class_weights = None,
-                        freeze_backbone=True
+                        freeze_backbone=True,
+                        trained_backbone=True
                         ):
     data_folder = data_folder
 
     checkpoint_callback = ModelCheckpoint(
         dirpath='ckpts', 
-        filename=f'niwo_{num_channels}_channels_{num_classes}_classes_refine_{extra_labels}'+'_ova_{ova:.2f}_{epoch}',
+        filename=f'niwo_{num_channels}_channels_{num_classes}_classes_refine_{extra_labels}'+'{ova:.2f}_{epoch}',
         #every_n_epochs=log_every,
         monitor='ova',
         save_on_train_epoch_end=True,
@@ -148,7 +149,7 @@ def refine(num_channels=10,
     test_dataset = RenderedDataLoader(test_folder)
     test_loader = DataLoader(test_dataset, batch_size=1, num_workers=num_workers)
 
-    model = models.SWaVModelRefine(swav_config, num_refine_classes, class_key=class_key, class_weights=class_weights, freeze_backbone=freeze_backbone)
+    model = models.SWaVModelRefine(swav_config, num_refine_classes, class_key=class_key, class_weights=class_weights, freeze_backbone=freeze_backbone, trained_backbone=trained_backbone)
     trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback])
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
 
@@ -161,11 +162,12 @@ if __name__ == "__main__":
             azm=True,
             chm_concat=True,
             num_classes=256,
-            extra_labels='lr_5e4_400_unfrozen',
+            extra_labels='lr_5e4_400_untrained',
             class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
             class_weights= [0.47228916, 0.60775194, 3.26666667, 1.225, 8.71111111],
             positions=False,
             freeze_backbone=False,
+            trained_backbone=False,
             ckpt='ckpts/niwo_10_channels_256_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
 
 
