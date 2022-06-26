@@ -97,7 +97,7 @@ def refine(num_channels=10,
                         azm=False, 
                         chm=False, 
                         log_every=25, 
-                        max_epochs=410, 
+                        max_epochs=200, 
                         num_workers=1, 
                         extra_labels='', 
                         use_queue=False,  
@@ -149,9 +149,12 @@ def refine(num_channels=10,
     test_dataset = RenderedDataLoader(test_folder)
     test_loader = DataLoader(test_dataset, batch_size=1, num_workers=num_workers)
 
+   
     model = models.SWaVModelRefine(swav_config, num_refine_classes, class_key=class_key, class_weights=class_weights, freeze_backbone=freeze_backbone, trained_backbone=trained_backbone)
     trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback])
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+    trainer.test(ckpt_path="best", dataloaders=test_loader)
+
 
 
 if __name__ == "__main__":
@@ -162,12 +165,12 @@ if __name__ == "__main__":
             azm=True,
             chm_concat=True,
             num_classes=256,
-            extra_labels='lr_5e4_400_untrained',
+            extra_labels='lr_5e4_400_trained_test',
             class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
             class_weights= [0.47228916, 0.60775194, 3.26666667, 1.225, 8.71111111],
             positions=False,
             freeze_backbone=False,
-            trained_backbone=False,
+            trained_backbone=True,
             ckpt='ckpts/niwo_10_channels_256_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
 
 

@@ -196,14 +196,61 @@ class SWaVModelRefine(pl.LightningModule):
         ova = self.calc_ova()
         user = self.calc_user_acc()
         producer = self.calc_prod_acc()
+        print(self.results)
 
         self.results = self.make_results_dict(self.class_key)
         self.log('ova', ova)
 
         print(f'\nOVA: {ova}\nUser: {user}\nProducer: {producer}')
+        
 
-    def test_step(self, x):
+    def test_step(self, x, _):
+        inp = x['img']
+        targets = x['target']
+        chm = x['chm'].unsqueeze(1)
+        azm = x['azm'].unsqueeze(1)
+        height = x['height']
+        mask = x['mask']
+        mask = reduce(mask, 'b c h w -> b () h w', 'max')
+
+        height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
+
+        for i, h in enumerate(height):
+            height_test = chm[i]
+            add_mask = height_test < (h - 3)
+            height_mask[i] = add_mask
+
+        mask += height_mask
+        mask = ~mask
+        mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
+
+        
+        inp = self.forward(inp, chm, azm)
+        inp = torch.softmax(inp, dim=1)
+        inp = inp[mask, :]
+
+        targets= rearrange(targets, 'b c h w -> (b h w) c')
+        targets=torch.argmax(targets, dim=1)
+        targets = targets[mask]
+
+        self.update_results(inp, targets)
+
+        #loss = self.loss(inp, targets)
+        #self.log('valid_loss', loss)
         return None
+
+    def test_epoch_end(self, _):
+        ova = self.calc_ova()
+        user = self.calc_user_acc()
+        producer = self.calc_prod_acc()
+        print(self.results)
+
+        self.results = self.make_results_dict(self.class_key)
+        self.log('ova', ova)
+
+        print(f'\nOVA: {ova}\nUser: {user}\nProducer: {producer}')
+        return None
+
 
 
 
