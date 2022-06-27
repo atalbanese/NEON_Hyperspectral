@@ -210,7 +210,7 @@ if __name__ == "__main__":
     #         num_classes=256,
     #         extra_labels='lr_5e4_400_untrained_pca_pca',
     #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
-    #         class_weights= [0.47228916, 0.60775194, 3.26666667, 1.225, 8.71111111],
+    #         class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
     #         positions=False,
     #         freeze_backbone=False,
     #         trained_backbone=False,

@@ -468,6 +468,14 @@ def bulk_shadow_index(args):
             mpsi = han_2018(img)
             np.save(os.path.join(out_dir, out_file), mpsi)
 
+def select_extra_bands(args):
+    file, in_dir, out_dir = args
+    if ".h5" in file:
+        out_file = file.split('.')[0] + '_extrabands.npy'
+        if not os.path.exists(os.path.join(out_dir, out_file)):
+            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=get_extra_bands())['bands']
+            bands = hp.stack_all(img, axis=2)
+            np.save(os.path.join(out_dir, out_file), bands)
 
     
 
@@ -567,7 +575,7 @@ if __name__ == '__main__':
     
 
     FILE = 'NEON_D13_NIWO_DP3_450000_4428000_reflectance.h5'
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
     PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_masked_10'
 
@@ -595,7 +603,7 @@ if __name__ == '__main__':
     
 
     with ProcessPool(4) as pool:
-        bulk_process(pool, [IN_DIR, OUT_DIR], bulk_shadow_index)
+        bulk_process(pool, [IN_DIR, OUT_DIR], select_extra_bands)
 
     # # # with ProcessPool(4) as pool:
     # # #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
