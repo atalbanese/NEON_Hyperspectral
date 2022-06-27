@@ -64,9 +64,10 @@ def do_rendered_training(num_channels=10,
                         queue_chunks=1, 
                         azm_concat=False, 
                         chm_concat=False, 
-                        positions=False
+                        positions=False,
+                        data_folder=None
                         ):
-    data_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/raw_training'
+    data_folder = data_folder
 
     checkpoint_callback = ModelCheckpoint(
         dirpath='ckpts', 
@@ -81,6 +82,48 @@ def do_rendered_training(num_channels=10,
     dataset = RenderedDataLoader(data_folder)
     train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=True)
     model = models.SWaVModelSuperPixel(azm=azm, 
+                                        chm=chm, 
+                                        use_queue=use_queue, 
+                                        queue_chunks=queue_chunks, 
+                                        num_classes=num_classes, 
+                                        azm_concat=azm_concat, 
+                                        chm_concat=chm_concat,
+                                        positions=positions
+                                        )
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback])
+    trainer.fit(model, train_loader)
+
+def do_rendered_trainingresnet(num_channels=10,
+                        batch_size=32,
+                        num_classes=12, 
+                        azm=False, 
+                        chm=False, 
+                        log_every=5, 
+                        max_epochs=10, 
+                        num_workers=4, 
+                        extra_labels='', 
+                        use_queue=False,  
+                        queue_chunks=1, 
+                        azm_concat=False, 
+                        chm_concat=False, 
+                        positions=False,
+                        data_folder=None
+                        ):
+    data_folder = data_folder
+
+    checkpoint_callback = ModelCheckpoint(
+        dirpath='ckpts', 
+        filename=f'niwo_{num_channels}_channels_{num_classes}_classes_resnet_{extra_labels}'+'_{epoch}',
+        every_n_epochs=log_every,
+        save_on_train_epoch_end=True,
+        save_top_k = -1
+        )
+
+    pl.seed_everything(42)
+
+    dataset = RenderedDataLoader(data_folder)
+    train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=True)
+    model = models.SWaVModelSuperPixelResnet(azm=azm, 
                                         chm=chm, 
                                         use_queue=use_queue, 
                                         queue_chunks=queue_chunks, 
@@ -159,49 +202,26 @@ def refine(num_channels=10,
 
 if __name__ == "__main__":
 
-    refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_test',
-            valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_valid',
-            test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training',
-            azm=True,
-            chm_concat=True,
-            num_classes=256,
-            extra_labels='lr_5e4_400_trained_test',
-            class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
-            class_weights= [0.47228916, 0.60775194, 3.26666667, 1.225, 8.71111111],
-            positions=False,
-            freeze_backbone=False,
-            trained_backbone=True,
-            ckpt='ckpts/niwo_10_channels_256_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
-
-
-    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_test',
+    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training',
     #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_valid',
-    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training',
-    #         azm=True,
-    #         chm_concat=True,
-    #         num_classes=24,
-    #         extra_labels='lr_5e4_800',
-    #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
-    #         class_weights= [0.47228916, 0.60775194, 3.26666667, 1.225, 8.71111111],
-    #         positions=False,
-    #         ckpt='ckpts/niwo_10_channels_24_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
-    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_test',
-    #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_valid',
-    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training',
+    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_test',
     #         azm=True,
     #         chm_concat=True,
     #         num_classes=256,
-    #         extra_labels='lr_5e4_800',
+    #         extra_labels='lr_5e4_400_untrained_pca_pca',
     #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
     #         class_weights= [0.47228916, 0.60775194, 3.26666667, 1.225, 8.71111111],
     #         positions=False,
+    #         freeze_backbone=False,
+    #         trained_backbone=False,
     #         ckpt='ckpts/niwo_10_channels_256_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
 
 
-    # do_rendered_training(num_workers=8, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel_softmax_dim')
-    # do_rendered_training(num_workers=8, num_classes=24, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel')
-    # do_rendered_training(num_workers=8, azm=True, chm_concat=True, positions=True, extra_labels='learnable_positions_azm_add_chm_concat_pre_rendered_per_pixel')
-    # do_rendered_training(num_workers=8, num_classes=256, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel')
+
+
+
+    # do_rendered_trainingresnet(num_workers=8, num_classes=256, azm=True, chm_concat=True, extra_labels='azm_add_chm_concat_pre_rendered_per_pixel',
+    #                             data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/super_pixel_patches/raw_training/')
     
 
     # configs = [

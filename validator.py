@@ -31,7 +31,7 @@ import sklearn.utils.class_weight as cw
 #TODO: Clean this mess up
 #Switch plots to plotly? Good for overlays
 class Validator():
-    def __init__(self, struct=False, rescale=False, train_split=0.2, valid_split=0.2, test_split=0.6,  **kwargs):
+    def __init__(self, struct=False, rescale=False, train_split=0.6, valid_split=0.2, test_split=0.2,  **kwargs):
         self.rescale=rescale
         self.file = kwargs["file"]
         self.img_dir = kwargs["img_dir"]
@@ -58,7 +58,7 @@ class Validator():
             return {f"{file.split('_')[param_1]}_{file.split('_')[param_2]}": file for file in file_list}
 
         self.orig_dict = make_dict(self.orig_files, -3, -2)
-        self.pca_dict = make_dict(self.pca_files, -5, -4)
+        self.pca_dict = make_dict(self.pca_files, -4, -3)
 
 
         if struct:
@@ -75,6 +75,7 @@ class Validator():
         self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
 
         self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
+        self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=self.train['taxonID'])
         print('here')
 
     #TODO: Check shapes before saving
@@ -840,18 +841,18 @@ def validate_config(validator, config_list):
 if __name__ == "__main__":
     NUM_CLASSES = 12
     NUM_CHANNELS = 10
-    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_masked_10'
     PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance_pca.npy')
     IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
     OUT_NAME = "test_inference_ckpt_6.npy"
     IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
    
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
-    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct.csv"
+    CURATED_FILE = "W:/Classes/Research/neon_mapped_harv.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
-    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo/'
-    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
-    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
+    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022'
+    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv/'
+    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
     SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/niwo/ica_plot_viz/'
     PLOT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/niwo/plot_locations/'
 
@@ -866,14 +867,14 @@ if __name__ == "__main__":
                     curated=CURATED_FILE, 
                     rescale=False, 
                     orig=ORIG_DIR, 
-                    prefix='D13',
-                    chm_mean = 4.015508459469479,
-                    chm_std = 4.809300736115787)
+                    prefix='D01',
+                    chm_mean = 15.696561055743224,
+                    chm_std = 9.548285574843716)
 
     #validate_config(valid, configs)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training', 'train', render_fixed_size=True)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_valid', 'valid', render_fixed_size=True)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_test', 'test', render_fixed_size=True)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/harv_2020_10_pca_ndvi_masked/label_training', 'train', render_fixed_size=True)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/harv_2020_10_pca_ndvi_masked/label_valid', 'valid', render_fixed_size=True)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/harv_2020_10_pca_ndvi_masked/label_test', 'test', render_fixed_size=True)
 
 
 

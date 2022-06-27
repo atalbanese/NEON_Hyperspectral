@@ -58,11 +58,11 @@ def han_2018(to_segment):
     mpsi = (hsv[:,:,0] - hsv[:,:,1]) * (rgb[:,:,0] - to_segment["nir"])
 
     #Scale MPSI 0 to 255
-    mpsi = rescale(mpsi, 255)
+    #mpsi = rescale(mpsi, 255)
 
     #Calculate neighborhood valley threshold from Fan 2011
-    thresh = neighborhood_valley_thresh(mpsi, 3)
-    print(f'found threshold: {thresh}')
+    #thresh = neighborhood_valley_thresh(mpsi, 3)
+    #print(f'found threshold: {thresh}')
     # shadow_mask = mpsi.copy()
     # shadow_mask[shadow_mask<thresh] = 0
     # shadow_mask[shadow_mask>=thresh] = 1
@@ -175,6 +175,18 @@ def get_bareness_bands():
         "blue": 482,
         'nir': 865,
         'swir': 1610
+    }
+
+def get_extra_bands():
+    return {
+        'red': 654,
+        "green": 561, 
+        "blue": 482,
+        'nir': 865,
+        'swir': 1610,
+        'nitrogen': 1510,
+        'lignin': 1754,
+        'xanthophyll': 531
     }
 
 def plot_output_files(dir):
@@ -447,6 +459,16 @@ def make_superpixels_masked(args):
             # plt.show()
             np.save(os.path.join(out_dir, super_file), segments)
 
+def bulk_shadow_index(args):
+    file, in_dir, out_dir = args
+    if ".h5" in file:
+        out_file = file.split('.')[0] + '_mpsi.npy'
+        if not os.path.exists(os.path.join(out_dir, out_file)):
+            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=get_shadow_bands())['bands']
+            mpsi = han_2018(img)
+            np.save(os.path.join(out_dir, out_file), mpsi)
+
+
     
 
 def build_inc_pca(args):
@@ -518,6 +540,12 @@ def bulk_process(pool, dirs, fn, **kwargs):
         except TimeoutError as e:
             print(e.args)
             continue
+        except ValueError as e:
+            print(e)
+            continue
+        except FileNotFoundError as e:
+            print(e)
+            continue
         except StopIteration:
             break
 
@@ -532,18 +560,18 @@ if __name__ == '__main__':
     #     OUT_DIR = '/data/shared/src/aalbanese/datasets/hs/masks/HARV'
     #     bulk_process(pool, IN_DIR, OUT_DIR, get_masks)
 
-    IN_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D16.ABBY.DP3.30006.001.2021-07.basic.20220522T204614Z.PROVISIONAL'
-    MASK_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ndvi/abby'
+    IN_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
+    MASK_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ndvi/harv'
     BANDS = get_shadow_bands()
 
     
 
     FILE = 'NEON_D13_NIWO_DP3_450000_4428000_reflectance.h5'
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/abby'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
-    PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/abby_masked_10'
+    PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_masked_10'
 
-    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/abby'
+    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022'
 
     # test = hp.pre_processing(os.path.join(IN_DIR, FILE), get_all=True)['bands']
     # for i in range(0, test.shape[2]):
@@ -567,16 +595,16 @@ if __name__ == '__main__':
     
 
     with ProcessPool(4) as pool:
-        bulk_process(pool, [IN_DIR, MASK_DIR], ndvi_mask)
+        bulk_process(pool, [IN_DIR, OUT_DIR], bulk_shadow_index)
+
+    # # # with ProcessPool(4) as pool:
+    # # #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
 
     # with ProcessPool(4) as pool:
-    #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
+    #     bulk_process(pool, [IN_DIR, PCA_DIR, MASK_DIR], masked_pca)
 
-    with ProcessPool(4) as pool:
-        bulk_process(pool, [IN_DIR, PCA_DIR, MASK_DIR], masked_pca)
-
-    with ProcessPool(8) as pool:
-        bulk_process(pool, [IN_DIR, OUT_DIR, PCA_DIR], make_superpixels_masked)
+    # with ProcessPool(8) as pool:
+    #     bulk_process(pool, [IN_DIR, OUT_DIR, PCA_DIR], make_superpixels_masked)
 
     #get_masks((IMG, IMG_DIR, MASK_DIR))
 

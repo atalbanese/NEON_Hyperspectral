@@ -21,7 +21,7 @@ class SWaVSuperPixelResnet(nn.Module):
                 num_classes=12, 
                 azm=False, 
                 chm=False, 
-                img_size=15,
+                img_size=16,
                 queue_chunks=1, 
                 azm_concat=False, 
                 chm_concat=False,
@@ -37,6 +37,7 @@ class SWaVSuperPixelResnet(nn.Module):
         self.azm_concat = azm_concat
         self.chm_concat = chm_concat
         self.patch_size = patch_size
+        self.img_size=img_size
 
         self.add_channel = 0
         if self.azm_concat:
@@ -61,13 +62,13 @@ class SWaVSuperPixelResnet(nn.Module):
 
         self.azm_embed = nn.Sequential(
                         Rearrange('b c h w -> b (h w) c'),
-                        nn.Linear(1, in_channels),
+                        nn.Linear(1, in_channels+self.add_channel),
                         Rearrange('b (h w) c -> b c h w ', h=img_size, w=img_size)
         )
 
         self.chm_embed = nn.Sequential(
                         Rearrange('b c h w -> b (h w) c'),
-                        nn.Linear(1, in_channels),
+                        nn.Linear(1, in_channels+self.add_channel),
                         Rearrange('b (h w) c -> b c h w ', h=img_size, w=img_size)
 
         )
@@ -80,7 +81,7 @@ class SWaVSuperPixelResnet(nn.Module):
         # encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=4, dim_feedforward=emb_size*2, batch_first=True)
         # self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
 
-        self.encoder = net_gen.ResnetGenerator(in_channels + self.add_channel, num_classes, use_dropout=True)
+        self.encoder = net_gen.ResnetGenerator(in_channels + self.add_channel, emb_size, use_dropout=True, n_blocks=4)
 
         self.projector = nn.Sequential(nn.Linear(emb_size, emb_size),
                                         nn.ReLU(),
@@ -129,6 +130,8 @@ class SWaVSuperPixelResnet(nn.Module):
 
         b,_,_,_, = x.shape
 
+        mask = x != 0
+
         if self.chm_concat:
             x = torch.cat((x, chm), dim=1)
         if self.azm_concat:
@@ -152,12 +155,13 @@ class SWaVSuperPixelResnet(nn.Module):
             azm_s = self.transforms_embed(azm)
             azm = self.azm_embed(azm)
             azm_s = self.azm_embed(azm_s)
-            x += azm
-            x_s += azm_s
+            x = x + azm
+            x_s = x_s + azm_s
 
         inp = torch.cat((x, x_s))
         inp = self.encoder(inp)
         inp = rearrange(inp, 'b c h w -> b (h w) c')
+        mask = rearrange(mask, 'b c h w -> b (h w) c')
         inp = self.projector(inp)
         inp = nn.functional.normalize(inp, dim=1, p=2)
 

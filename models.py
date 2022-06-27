@@ -26,9 +26,75 @@ def get_classifications(x):
     # masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
+class SWaVModelSuperPixelResnet(pl.LightningModule):
+    def __init__(self, 
+                    azm=True,
+                    chm=True, 
+                    pop_queue_start=14, 
+                    queue_start=15, 
+                    use_queue=False,  
+                    queue_chunks=1, 
+                    num_classes=12, 
+                    azm_concat=False, 
+                    chm_concat=False,
+                    positions=False, 
+                    **kwargs):
+        super().__init__()
+        self.model = networks.SWaVSuperPixelResnet(azm=azm, 
+                                                chm=chm, 
+                                                queue_chunks=queue_chunks, 
+                                                num_classes=num_classes, 
+                                                azm_concat=azm_concat, 
+                                                chm_concat=chm_concat,
+                                                positions=positions)
+        self.use_queue = use_queue
+        self.pop_queue_start = pop_queue_start
+        self.queue_start = queue_start
 
 
-#TODO: add validation and testing, actual accuracy assessment
+    def training_step(self, x):
+        inp = x['img']
+        chm = x['chm'].unsqueeze(1)
+        az = x['azm'].unsqueeze(1)
+
+        if torch.rand(1) > 0.5:
+            inp = TF.vflip(inp)
+            chm = TF.vflip(chm)
+            az = TF.vflip(az)
+
+        if torch.rand(1) > 0.5:
+            inp = TF.hflip(inp)
+            chm = TF.hflip(chm)
+            az = TF.hflip(az)
+
+
+        loss = self.model.forward_train(inp, chm, az)
+        self.log('train_loss', loss)
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=5e-4)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10, eta_min=5e-7)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+
+    def on_before_optimizer_step(self, optimizer, optimizer_idx):
+        if self.current_epoch < 1:
+            for name, p in self.model.named_parameters():
+                    if "prototypes" in name:
+                        p.grad = None
+    
+    def on_train_batch_start(self, batch, batch_idx):
+        self.model.norm_prototypes()
+        if self.use_queue:
+            if self.current_epoch == self.pop_queue_start:
+                self.model.populate_queue = True
+            if self.current_epoch == self.queue_start:
+                self.model.use_queue = True
+
+    def forward(self, x, chm, azm):
+        return self.model(x, chm, azm)
+
+#TODO: Make checkpoint saving work
 class SWaVModelRefine(pl.LightningModule):
     def __init__(self, swav_config, num_output_classes, class_key, class_weights=None, freeze_backbone=True, trained_backbone=True,**kwargs):
         super().__init__()

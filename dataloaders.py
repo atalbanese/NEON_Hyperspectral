@@ -349,18 +349,6 @@ class RenderDataLoader(Dataset):
             lastrow = len(falserows) - falserows[::-1].argmin()
 
             return firstrow,lastrow,firstcol,lastcol
-        
-        def get_pad(arr, pad_size):
-            row_len = arr.shape[0]
-            col_len = arr.shape[1]
-
-            row_pad = (pad_size - row_len) // 2
-            col_pad = (pad_size - col_len) // 2
-            
-            add_row = (row_pad*2 + row_len) != pad_size
-            add_col = (col_pad*2 + col_len) != pad_size
-
-            return [(row_pad, row_pad+add_row), (col_pad, col_pad+add_col)]
 
         def grab_center(arr, diam):
             row_len = arr.shape[0]
