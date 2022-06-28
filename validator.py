@@ -1,8 +1,5 @@
-import wave
 from imageio import save
 from matplotlib.widgets import Slider
-from matplotlib import colors
-from sklearn import cluster
 import geopandas as gpd
 from rasterio.plot import show
 import rasterio as rs
@@ -34,7 +31,10 @@ class Validator():
     def __init__(self, struct=False, rescale=False, train_split=0.6, valid_split=0.2, test_split=0.2,  **kwargs):
         self.rescale=rescale
         self.file = kwargs["file"]
-        self.img_dir = kwargs["img_dir"]
+        self.pca_dir = kwargs["pca_dir"]
+        self.ica_dir = kwargs['ica_dir']
+        self.raw_bands_dir = kwargs['raw_bands']
+        self.shadow_dir = kwargs['shadow']
         self.struct = struct
         self.curated = kwargs['curated']
         self.site_prefix = kwargs['prefix']
@@ -52,7 +52,7 @@ class Validator():
     
 
         self.orig_files = [os.path.join(kwargs['orig'], file) for file in os.listdir(kwargs['orig']) if ".h5" in file]
-        self.pca_files = [os.path.join(kwargs['img_dir'], file) for file in os.listdir(kwargs['img_dir']) if ".npy" in file]
+        self.pca_files = [os.path.join(kwargs['pca_dir'], file) for file in os.listdir(kwargs['pca_dir']) if ".npy" in file]
         
         def make_dict(file_list, param_1, param_2):
             return {f"{file.split('_')[param_1]}_{file.split('_')[param_2]}": file for file in file_list}
@@ -61,12 +61,20 @@ class Validator():
         self.pca_dict = make_dict(self.pca_files, -4, -3)
 
 
-        if struct:
-            self.chm_files = [os.path.join(kwargs['chm'], file) for file in os.listdir(kwargs['chm']) if ".tif" in file]
-            self.azm_files = [os.path.join(kwargs['azm'], file) for file in os.listdir(kwargs['azm']) if ".npy" in file]
 
-            self.chm_dict = make_dict(self.chm_files, -3, -2)
-            self.azm_dict = make_dict(self.azm_files, -4, -3)
+        self.chm_files = [os.path.join(kwargs['chm'], file) for file in os.listdir(kwargs['chm']) if ".tif" in file]
+        self.azm_files = [os.path.join(kwargs['azm'], file) for file in os.listdir(kwargs['azm']) if ".npy" in file]
+
+        self.chm_dict = make_dict(self.chm_files, -3, -2)
+        self.azm_dict = make_dict(self.azm_files, -4, -3)
+
+        self.ica_files = [os.path.join(self.ica_dir, file) for file in os.listdir(self.ica_dir) if ".npy" in file]
+        self.extra_files = [os.path.join(self.raw_bands_dir, file) for file in os.listdir(self.raw_bands_dir) if ".npy" in file]
+        self.shadow_files = [os.path.join(self.shadow_dir, file) for file in os.listdir(self.shadow_dir) if ".npy" in file]
+
+        self.ica_files_dict = make_dict(self.ica_files, -5, -4)
+        self.extra_files_dict = make_dict(self.extra_files, -4, -3)
+        self.shadow_dict = make_dict(self.shadow_files, -4, -3)
 
         self.cluster_groups = set()
 
@@ -87,14 +95,12 @@ class Validator():
         if split == 'test':
             data = self.test
 
-        img = None
-        chm = None
-        azm = None
+
         loaded_key = None
         for ix, row in data.iterrows():
             key = row['file_coords']
             if key != loaded_key:
-                img = np.load(self.pca_dict[key]).astype(np.float32)
+                pca = np.load(self.pca_dict[key]).astype(np.float32)
                 
      
                 #Azimuth
@@ -106,10 +112,18 @@ class Validator():
                 chm_open = rs.open(self.chm_dict[key])
                 chm = chm_open.read().astype(np.float32)
                 chm[chm==-9999] = np.nan
-
-                #chm = (chm.squeeze(axis=0)- self.chm_mean)/self.chm_std
                 chm = chm.squeeze(axis=0)
                 chm[chm != chm] = 0
+
+                #ICA
+                ica = np.load(self.ica_files_dict[key]).astype(np.float32)
+
+                #Shadow Index
+                shadow = np.load(self.shadow_dict[key]).astype(np.float32)
+
+                #Raw bands
+                extra = np.load(self.extra_files_dict[key]).astype(np.float32)
+
             
             x = int(round(float(row['easting']) - float(row['file_west_bound']), 0))
             y = 1000 - int(round(float(row['northing']- float(row['file_south_bound'])), 0))
@@ -119,15 +133,24 @@ class Validator():
             else:
                 diam = int(round(float(row['maxCrownDiameter'])*0.9/2))
                 bounds = (y-diam, y+diam, x-diam, x+diam)
-            img_crop = img[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
-            if img_crop.shape == (4, 4, 10):
+            pca_crop = pca[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
+            if pca_crop.shape == (4, 4, 10):
+                ica_crop = ica[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
                 chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
                 azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                mask = img_crop != img_crop
+                shadow_crop = shadow[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+                extra_crop = extra[bounds[0]:bounds[1], bounds[2]:bounds[3]]
 
 
-                img_crop = torch.tensor(img_crop)
-                img_crop = rearrange(img_crop, 'h w c -> c h w')
+                mask = pca_crop != pca_crop
+
+
+                pca_crop = torch.tensor(pca_crop)
+                pca_crop = rearrange(pca_crop, 'h w c -> c h w')
+                ica_crop = torch.tensor(ica_crop)
+                ica_crop = rearrange(ica_crop, 'h w c -> c h w')
+                shadow_crop = torch.tensor(shadow_crop)
+                extra_crop = torch.tensor(extra_crop)
                 chm_crop = torch.tensor(chm_crop)
                 azm_crop = torch.tensor(azm_crop)
                 mask = torch.tensor(mask)
@@ -137,7 +160,10 @@ class Validator():
                 label[self.taxa[taxa]] = 1.0
 
                 to_save = {
-                    'img': img_crop,
+                    'pca': pca_crop,
+                    'ica': ica_crop,
+                    'shadow': shadow_crop,
+                    'raw_bands': extra_crop,
                     'chm': chm_crop,
                     'azm': azm_crop,
                     'mask': mask,
@@ -276,11 +302,11 @@ class Validator():
 
 
     def get_valid_files(self):
-        if self.img_dir is not None:
+        if self.pca_dir is not None:
             coords = list(self.valid_data['file_coords'].unique())
 
-            all_files = os.listdir(self.img_dir)
-            valid_files = {coord:os.path.join(self.img_dir,file) for file in all_files for coord in coords if coord in file}
+            all_files = os.listdir(self.pca_dir)
+            valid_files = {coord:os.path.join(self.pca_dir,file) for file in all_files for coord in coords if coord in file}
             return valid_files
         else:
             return None
@@ -350,11 +376,11 @@ class Validator():
 
     #TODO: Make generalizable, can use orig_dict
     @staticmethod
-    def _map_plot(df, img_dir, save_dir, site_name, prefix):
+    def _map_plot(df, pca_dir, save_dir, site_name, prefix):
         fig, ax = plt.subplots(figsize=(10, 10))
         row = df.iloc[0]
         coords = row['file_coords']
-        open_file = os.path.join(img_dir, f'NEON_{prefix}_{site_name}_DP3_{coords}_reflectance.h5')
+        open_file = os.path.join(pca_dir, f'NEON_{prefix}_{site_name}_DP3_{coords}_reflectance.h5')
         rgb = hp.pre_processing(open_file, wavelength_ranges=utils.get_viz_bands())
         rgb = hp.make_rgb(rgb["bands"])
         rgb = exposure.adjust_gamma(rgb, 0.5)
@@ -369,11 +395,11 @@ class Validator():
 
     
     @staticmethod
-    def _map_trees(df, img_dir, save_dir, prefix):
+    def _map_trees(df, pca_dir, save_dir, prefix):
         fig, ax = plt.subplots(figsize=(10, 10))
         row = df.iloc[0]
         coords = row['file_coords']
-        open_file = os.path.join(img_dir, f'NEON_{prefix}_HARV_DP3_{coords}_reflectance.h5')
+        open_file = os.path.join(pca_dir, f'NEON_{prefix}_HARV_DP3_{coords}_reflectance.h5')
         rgb = hp.pre_processing(open_file, wavelength_ranges=utils.get_viz_bands())
         rgb = hp.make_rgb(rgb["bands"])
         rgb = exposure.adjust_gamma(rgb, 0.5)
@@ -395,7 +421,7 @@ class Validator():
 
     def map_trees(self, save_dir):
         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
-        grouped_files.apply(self._map_trees, self.img_dir, save_dir, self.site_prefix)
+        grouped_files.apply(self._map_trees, self.pca_dir, save_dir, self.site_prefix)
 
     def do_plot_inference(self, save_dir, model):
         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
@@ -612,11 +638,11 @@ def check_all(validator: Validator, model, save_dir, **kwargs):
         check_predictions(validator, model, coord, file, save_dir, **kwargs)
     return None
 
-def bulk_validation(ckpts_dir, img_dir, save_dir, valid_file, model_type, **kwargs):
+def bulk_validation(ckpts_dir, pca_dir, save_dir, valid_file, model_type, **kwargs):
     for ckpt in os.listdir(ckpts_dir):
          if ".ckpt" in ckpt:
              model = inference.load_ckpt(model_type, os.path.join(ckpts_dir, ckpt), **kwargs)
-             valid = Validator(file=valid_file, img_dir=img_dir, **kwargs)
+             valid = Validator(file=valid_file, pca_dir=pca_dir, **kwargs)
              ckpt_name = ckpt.replace(".ckpt", "")
              new_dir = os.path.join(save_dir, ckpt_name)
              if not os.path.isdir(new_dir):
@@ -841,23 +867,23 @@ def validate_config(validator, config_list):
 if __name__ == "__main__":
     NUM_CLASSES = 12
     NUM_CHANNELS = 10
-    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_masked_10'
-    PCA = os.path.join(PCA_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance_pca.npy')
-    IMG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
-    OUT_NAME = "test_inference_ckpt_6.npy"
-    IMG= os.path.join(IMG_DIR, 'NEON_D01_HARV_DP3_736000_4703000_reflectance.h5')
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
    
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
-    CURATED_FILE = "W:/Classes/Research/neon_mapped_harv.csv"
+    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
-    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022'
-    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/harv/'
-    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D01.HARV.DP3.30006.001.2019-08.basic.20220501T135554Z.RELEASE-2022'
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/niwo/ica_plot_viz/'
-    PLOT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/extracted_plots/niwo/plot_locations/'
+    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
+    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
+    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
+    ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
+    RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo'
+    SHADOW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
 
     valid = Validator(file=VALID_FILE, 
-                    img_dir=PCA_DIR, 
+                    pca_dir=PCA_DIR, 
+                    ica_dir=ICA_DIR,
+                    raw_bands=RAW_DIR,
+                    shadow=SHADOW_DIR,
                     site_name='NIWO', 
                     num_classes=NUM_CLASSES, 
                     plot_file=PLOT_FILE, 
@@ -867,14 +893,14 @@ if __name__ == "__main__":
                     curated=CURATED_FILE, 
                     rescale=False, 
                     orig=ORIG_DIR, 
-                    prefix='D01',
-                    chm_mean = 15.696561055743224,
-                    chm_std = 9.548285574843716)
+                    prefix='D13',
+                    chm_mean = 4.015508459469479,
+                    chm_std = 4.809300736115787)
 
     #validate_config(valid, configs)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/harv_2020_10_pca_ndvi_masked/label_training', 'train', render_fixed_size=True)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/harv_2020_10_pca_ndvi_masked/label_valid', 'valid', render_fixed_size=True)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/harv_2020_10_pca_ndvi_masked/label_test', 'test', render_fixed_size=True)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training', 'train', render_fixed_size=True)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid', 'valid', render_fixed_size=True)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test', 'test', render_fixed_size=True)
 
 
 

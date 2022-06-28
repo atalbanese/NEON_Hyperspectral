@@ -26,79 +26,16 @@ def get_classifications(x):
     # masks = torch.cat((masks, masks, masks), dim=1)
     return masks
 
-class SWaVModelSuperPixelResnet(pl.LightningModule):
-    def __init__(self, 
-                    azm=True,
-                    chm=True, 
-                    pop_queue_start=14, 
-                    queue_start=15, 
-                    use_queue=False,  
-                    queue_chunks=1, 
-                    num_classes=12, 
-                    azm_concat=False, 
-                    chm_concat=False,
-                    positions=False, 
-                    **kwargs):
-        super().__init__()
-        self.model = networks.SWaVSuperPixelResnet(azm=azm, 
-                                                chm=chm, 
-                                                queue_chunks=queue_chunks, 
-                                                num_classes=num_classes, 
-                                                azm_concat=azm_concat, 
-                                                chm_concat=chm_concat,
-                                                positions=positions)
-        self.use_queue = use_queue
-        self.pop_queue_start = pop_queue_start
-        self.queue_start = queue_start
 
-
-    def training_step(self, x):
-        inp = x['img']
-        chm = x['chm'].unsqueeze(1)
-        az = x['azm'].unsqueeze(1)
-
-        if torch.rand(1) > 0.5:
-            inp = TF.vflip(inp)
-            chm = TF.vflip(chm)
-            az = TF.vflip(az)
-
-        if torch.rand(1) > 0.5:
-            inp = TF.hflip(inp)
-            chm = TF.hflip(chm)
-            az = TF.hflip(az)
-
-
-        loss = self.model.forward_train(inp, chm, az)
-        self.log('train_loss', loss)
-        return loss
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=5e-4)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10, eta_min=5e-7)
-        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
-
-    def on_before_optimizer_step(self, optimizer, optimizer_idx):
-        if self.current_epoch < 1:
-            for name, p in self.model.named_parameters():
-                    if "prototypes" in name:
-                        p.grad = None
-    
-    def on_train_batch_start(self, batch, batch_idx):
-        self.model.norm_prototypes()
-        if self.use_queue:
-            if self.current_epoch == self.pop_queue_start:
-                self.model.populate_queue = True
-            if self.current_epoch == self.queue_start:
-                self.model.use_queue = True
-
-    def forward(self, x, chm, azm):
-        return self.model(x, chm, azm)
 
 #TODO: Make checkpoint saving work
 class SWaVModelRefine(pl.LightningModule):
-    def __init__(self, swav_config, num_output_classes, class_key, class_weights=None, freeze_backbone=True, trained_backbone=True,**kwargs):
+    def __init__(self, swav_config, num_output_classes, class_key, chm_mean, chm_std, height_threshold=3, class_weights=None, freeze_backbone=True, trained_backbone=True,**kwargs):
         super().__init__()
         self.freeze_backbone = freeze_backbone
+        self.height_threshold = height_threshold
+        self.chm_mean = chm_mean
+        self.chm_std = chm_std
         if trained_backbone:
             if freeze_backbone:
                 self.model = SWaVModelSuperPixel(**swav_config).load_from_checkpoint(swav_config['ckpt'],**swav_config).eval()
@@ -144,17 +81,8 @@ class SWaVModelRefine(pl.LightningModule):
 
         return None
 
-    def calc_prod_acc(self):
-        out_dict = {value:0 for value in self.class_key.values()}
-
-
-        return None
-    
-    def calc_user_acc(self):
-        return None
     
     def calc_ova(self):
-
         total_pixels = 0
         accurate_pixels = 0
         for key, value in self.results.items():
@@ -165,47 +93,51 @@ class SWaVModelRefine(pl.LightningModule):
 
         return accurate_pixels/total_pixels
 
+
+
     def training_step(self, x):
-        inp = x['img']
-        targets = x['target']
+        pca = x['pca']
+        ica = x['ica']
+        raw = x['raw_bands']
+        shadow = x['shadow'].unsqueeze(1)
         chm = x['chm'].unsqueeze(1)
         az = x['azm'].unsqueeze(1)
+        targets = x['target']
         height = x['height']
         mask = x['mask']
         mask = reduce(mask, 'b c h w -> b () h w', 'max')
-
-        if torch.rand(1) > 0.5:
-            inp = TF.vflip(inp)
-            chm = TF.vflip(chm)
-            az = TF.vflip(az)
-            mask = TF.vflip(mask)
-
-        if torch.rand(1) > 0.5:
-            inp = TF.hflip(inp)
-            chm = TF.hflip(chm)
-            az = TF.hflip(az)
-            mask = TF.hflip(mask)
 
         height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
 
         for i, h in enumerate(height):
             height_test = chm[i]
-            add_mask = height_test < (h - 3)
+            add_mask = height_test < (h - self.height_threshold)
             height_mask[i] = add_mask
+
+        chm = (chm - self.chm_mean)/self.chm_std
+        inp = torch.cat((pca,ica,raw,shadow,chm,az), dim=1)
 
         mask += height_mask
         mask = ~mask
+
+        if torch.rand(1) > 0.5:
+            inp = TF.vflip(inp)
+            mask = TF.vflip(mask)
+
+        if torch.rand(1) > 0.5:
+            inp = TF.hflip(inp)
+            mask = TF.hflip(mask)
+
         mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
         
 
-        
         if self.freeze_backbone:
             with torch.no_grad():
-                inp = self.model.forward(inp, chm, az)
+                inp = self.model.forward(inp)
             inp = rearrange(inp, 'b s f -> (b s) f')
             inp.requires_grad = True
         else:
-            inp = self.model.forward(inp, chm, az)
+            inp = self.model.forward(inp)
             inp = rearrange(inp, 'b s f -> (b s) f')
         inp = self.predict_mlp(inp)
 
@@ -222,12 +154,14 @@ class SWaVModelRefine(pl.LightningModule):
         self.log('train_loss', loss)
         return loss
     
-    #FIX THIS TO MATCH TRAIN
     def validation_step(self, x, _):
-        inp = x['img']
-        targets = x['target']
+        pca = x['pca']
+        ica = x['ica']
+        raw = x['raw_bands']
+        shadow = x['shadow'].unsqueeze(1)
         chm = x['chm'].unsqueeze(1)
-        azm = x['azm'].unsqueeze(1)
+        az = x['azm'].unsqueeze(1)
+        targets = x['target']
         height = x['height']
         mask = x['mask']
         mask = reduce(mask, 'b c h w -> b () h w', 'max')
@@ -236,15 +170,17 @@ class SWaVModelRefine(pl.LightningModule):
 
         for i, h in enumerate(height):
             height_test = chm[i]
-            add_mask = height_test < (h - 3)
+            add_mask = height_test < (h - self.height_threshold)
             height_mask[i] = add_mask
+
+        chm = (chm - self.chm_mean)/self.chm_std
+        inp = torch.cat((pca,ica,raw,shadow,chm,az), dim=1)
 
         mask += height_mask
         mask = ~mask
         mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
 
-        
-        inp = self.forward(inp, chm, azm)
+        inp = self.forward(inp)
         inp = torch.softmax(inp, dim=1)
         inp = inp[mask, :]
 
@@ -254,67 +190,31 @@ class SWaVModelRefine(pl.LightningModule):
 
         self.update_results(inp, targets)
 
-        #loss = self.loss(inp, targets)
-        #self.log('valid_loss', loss)
         return None
 
     def validation_epoch_end(self, _):
         ova = self.calc_ova()
-        user = self.calc_user_acc()
-        producer = self.calc_prod_acc()
         print(self.results)
 
         self.results = self.make_results_dict(self.class_key)
         self.log('ova', ova)
 
-        print(f'\nOVA: {ova}\nUser: {user}\nProducer: {producer}')
+        print(f'\nOVA: {ova}')
         
 
     def test_step(self, x, _):
-        inp = x['img']
-        targets = x['target']
-        chm = x['chm'].unsqueeze(1)
-        azm = x['azm'].unsqueeze(1)
-        height = x['height']
-        mask = x['mask']
-        mask = reduce(mask, 'b c h w -> b () h w', 'max')
+        self.validation_step(x, _)
 
-        height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
-
-        for i, h in enumerate(height):
-            height_test = chm[i]
-            add_mask = height_test < (h - 3)
-            height_mask[i] = add_mask
-
-        mask += height_mask
-        mask = ~mask
-        mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
-
-        
-        inp = self.forward(inp, chm, azm)
-        inp = torch.softmax(inp, dim=1)
-        inp = inp[mask, :]
-
-        targets= rearrange(targets, 'b c h w -> (b h w) c')
-        targets=torch.argmax(targets, dim=1)
-        targets = targets[mask]
-
-        self.update_results(inp, targets)
-
-        #loss = self.loss(inp, targets)
-        #self.log('valid_loss', loss)
         return None
 
     def test_epoch_end(self, _):
         ova = self.calc_ova()
-        user = self.calc_user_acc()
-        producer = self.calc_prod_acc()
         print(self.results)
 
         self.results = self.make_results_dict(self.class_key)
         self.log('ova', ova)
 
-        print(f'\nOVA: {ova}\nUser: {user}\nProducer: {producer}')
+        print(f'\nOVA: {ova}')
         return None
 
 
@@ -329,8 +229,8 @@ class SWaVModelRefine(pl.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
 
     
-    def forward(self, x, chm, azm):
-        out = self.model(x, chm, azm)
+    def forward(self, x):
+        out = self.model(x)
         out = rearrange(out, 'b s f -> (b s) f')
         out = self.predict_mlp(out)
         return out
@@ -374,14 +274,9 @@ class SWaVModelSuperPixel(pl.LightningModule):
 
         if torch.rand(1) > 0.5:
             inp = TF.vflip(inp)
-            # chm = TF.vflip(chm)
-            # az = TF.vflip(az)
 
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
-            # chm = TF.hflip(chm)
-            # az = TF.hflip(az)
-
 
         loss = self.model.forward_train(inp)
         self.log('train_loss', loss)
@@ -406,8 +301,10 @@ class SWaVModelSuperPixel(pl.LightningModule):
             if self.current_epoch == self.queue_start:
                 self.model.use_queue = True
 
-    def forward(self, x, chm, azm):
-        return self.model(x, chm, azm)
+    def forward(self, x):
+
+
+        return self.model(x)
 
 
 

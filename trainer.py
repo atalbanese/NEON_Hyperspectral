@@ -53,7 +53,7 @@ def do_rendered_training(num_channels=31,
 
 
 
-def refine(num_channels=10,
+def refine(chm_mean=None, chm_std =None, num_channels=31,
                         num_classes=12, 
                         azm=False, 
                         chm=False, 
@@ -75,6 +75,7 @@ def refine(num_channels=10,
                         class_weights = None,
                         freeze_backbone=True,
                         trained_backbone=True
+
                         ):
     data_folder = data_folder
 
@@ -111,7 +112,7 @@ def refine(num_channels=10,
     test_loader = DataLoader(test_dataset, batch_size=1, num_workers=num_workers)
 
    
-    model = models.SWaVModelRefine(swav_config, num_refine_classes, class_key=class_key, class_weights=class_weights, freeze_backbone=freeze_backbone, trained_backbone=trained_backbone)
+    model = models.SWaVModelRefine(swav_config, num_refine_classes, class_key, chm_mean, chm_std, class_weights=class_weights, freeze_backbone=freeze_backbone, trained_backbone=trained_backbone)
     trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback])
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     trainer.test(ckpt_path="best", dataloaders=test_loader)
@@ -120,27 +121,29 @@ def refine(num_channels=10,
 
 if __name__ == "__main__":
 
-    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_training',
-    #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_valid',
-    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_10_pca_ndvi_masked/label_test',
-    #         azm=True,
-    #         chm_concat=True,
-    #         num_classes=256,
-    #         extra_labels='lr_5e4_400_untrained_pca_pca',
-    #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
-    #         class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
-    #         positions=False,
-    #         freeze_backbone=False,
-    #         trained_backbone=False,
-    #         ckpt='ckpts/niwo_10_channels_256_classes_azm_add_chm_concat_pre_rendered_per_pixel_epoch=9.ckpt')
+    refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
+            valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
+            test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
+            num_classes=256,
+            extra_labels='all_data_200_epochs_trained_backbone_with_queue',
+            class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
+            class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
+            chm_mean = 4.015508459469479,
+            chm_std = 4.809300736115787,
+            positions=False,
+            freeze_backbone=False,
+            trained_backbone=True,
+            use_queue=True,
+            queue_chunks=5,
+            ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_queue_epoch=49.ckpt')
 
 
 
-    do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra', use_queue=False,
-                                data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/')
+    # do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra', use_queue=False,
+    #                             data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/')
 
-    do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra_queue', use_queue=True,
-                                data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/')
+    # do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra_queue', use_queue=True,
+    #                             data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/')
     
     
 
