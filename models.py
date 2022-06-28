@@ -91,7 +91,9 @@ class SWaVModelRefine(pl.LightningModule):
                 if key == i:
                     accurate_pixels += j
 
-        return accurate_pixels/total_pixels
+        if total_pixels != 0:            
+            return accurate_pixels/total_pixels
+        return 0
 
 
 
@@ -123,10 +125,12 @@ class SWaVModelRefine(pl.LightningModule):
         if torch.rand(1) > 0.5:
             inp = TF.vflip(inp)
             mask = TF.vflip(mask)
+            targets=TF.vflip(targets)
 
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
             mask = TF.hflip(mask)
+            targets=TF.hflip(targets)
 
         mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
         
@@ -230,7 +234,7 @@ class SWaVModelRefine(pl.LightningModule):
 
     
     def forward(self, x):
-        out = self.model(x)
+        out = self.model.forward(x)
         out = rearrange(out, 'b s f -> (b s) f')
         out = self.predict_mlp(out)
         return out
@@ -302,7 +306,6 @@ class SWaVModelSuperPixel(pl.LightningModule):
                 self.model.use_queue = True
 
     def forward(self, x):
-
 
         return self.model(x)
 

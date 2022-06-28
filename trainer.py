@@ -137,6 +137,34 @@ if __name__ == "__main__":
             queue_chunks=5,
             ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_queue_epoch=49.ckpt')
 
+    refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
+            valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
+            test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
+            num_classes=256,
+            extra_labels='all_data_200_epochs_trained_backbone',
+            class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
+            class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
+            chm_mean = 4.015508459469479,
+            chm_std = 4.809300736115787,
+            positions=False,
+            freeze_backbone=False,
+            trained_backbone=True,
+            ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_epoch=49.ckpt')
+
+    refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
+            valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
+            test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
+            num_classes=256,
+            extra_labels='all_data_200_epochs_untrained_backbone',
+            class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
+            class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
+            chm_mean = 4.015508459469479,
+            chm_std = 4.809300736115787,
+            positions=False,
+            freeze_backbone=False,
+            trained_backbone=False,
+            ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_epoch=49.ckpt')
+
 
 
     # do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra', use_queue=False,

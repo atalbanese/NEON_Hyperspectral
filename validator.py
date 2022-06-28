@@ -151,6 +151,7 @@ class Validator():
                 ica_crop = rearrange(ica_crop, 'h w c -> c h w')
                 shadow_crop = torch.tensor(shadow_crop)
                 extra_crop = torch.tensor(extra_crop)
+                extra_crop = rearrange(extra_crop, 'h w c -> c h w')
                 chm_crop = torch.tensor(chm_crop)
                 azm_crop = torch.tensor(azm_crop)
                 mask = torch.tensor(mask)

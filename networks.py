@@ -230,22 +230,10 @@ class SWaVSuperPixel(nn.Module):
 
 
     #TODO: Fix This
-    def forward(self, inp, chm, azm):
-        if self.chm_concat:
-            inp = torch.cat((inp, chm), dim=1)
-        if self.azm_concat:
-            inp = torch.cat((inp, azm), dim=1)
-        
-
+    def forward(self, inp):
+       
         inp = self.embed(inp)
-        if self.use_positions:
-            inp += self.positions
-        if self.chm and not self.chm_concat:
-            chm = self.chm_embed(chm)
-            inp += chm
-        if self.azm and not self.azm_concat:
-            azm= self.azm_embed(azm)
-            inp += azm
+
         inp = self.encoder(inp)
         inp = self.projector(inp)
         inp = nn.functional.normalize(inp, dim=1, p=2)
