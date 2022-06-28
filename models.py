@@ -339,7 +339,7 @@ class SWaVModelSuperPixel(pl.LightningModule):
     def __init__(self, 
                     azm=True,
                     chm=True, 
-                    pop_queue_start=14, 
+                    pop_queue_start=0, 
                     queue_start=15, 
                     use_queue=False,  
                     queue_chunks=1, 
@@ -362,22 +362,28 @@ class SWaVModelSuperPixel(pl.LightningModule):
 
 
     def training_step(self, x):
-        inp = x['img']
+        pca = x['pca']
+        ica = x['ica']
+        raw = x['raw_bands']
+        shadow = x['shadow']
         chm = x['chm'].unsqueeze(1)
         az = x['azm'].unsqueeze(1)
 
+
+        inp = torch.cat((pca,ica,raw,shadow,chm,az), dim=1)
+
         if torch.rand(1) > 0.5:
             inp = TF.vflip(inp)
-            chm = TF.vflip(chm)
-            az = TF.vflip(az)
+            # chm = TF.vflip(chm)
+            # az = TF.vflip(az)
 
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
-            chm = TF.hflip(chm)
-            az = TF.hflip(az)
+            # chm = TF.hflip(chm)
+            # az = TF.hflip(az)
 
 
-        loss = self.model.forward_train(inp, chm, az)
+        loss = self.model.forward_train(inp)
         self.log('train_loss', loss)
         return loss
 

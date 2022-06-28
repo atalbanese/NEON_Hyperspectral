@@ -249,8 +249,8 @@ class SWaVSuperPixelResnet(nn.Module):
 
 class SWaVSuperPixel(nn.Module):
     def __init__(self, 
-                in_channels=10, 
-                emb_size=64, 
+                in_channels=31, 
+                emb_size=128, 
                 temp=0.1, 
                 epsilon=0.05, 
                 patch_size = 4, 
@@ -258,27 +258,28 @@ class SWaVSuperPixel(nn.Module):
                 num_classes=12, 
                 azm=False, 
                 chm=False, 
-                queue_chunks=1, 
+                queue_chunks=5, 
                 azm_concat=False, 
                 chm_concat=False,
-                positions=False):
+                positions=False,
+                batch_size=2048):
         super(SWaVSuperPixel, self).__init__()
         self.populate_queue = False
         self.use_queue = False
         #TODO: Fix the queue
-        self.queue_base = torch.zeros((queue_chunks+1)*256, 2, emb_size).cuda()
-        self.queue_mod = torch.zeros((queue_chunks+1)*256, 2, emb_size).cuda()
+        self.queue_base = torch.zeros((queue_chunks)*batch_size, emb_size).cuda()
+        self.queue_mod = torch.zeros((queue_chunks)*batch_size, emb_size).cuda()
         self.chm = chm
         self.azm = azm
         self.azm_concat = azm_concat
         self.chm_concat = chm_concat
         self.patch_size = patch_size
 
-        self.add_channel = 0
-        if self.azm_concat:
-            self.add_channel += 1
-        if self.chm_concat:
-            self.add_channel +=1
+        # self.add_channel = 0
+        # if self.azm_concat:
+        #     self.add_channel += 1
+        # if self.chm_concat:
+        #     self.add_channel +=1
 
         self.queue_chunks = queue_chunks
 
@@ -295,7 +296,7 @@ class SWaVSuperPixel(nn.Module):
         #Todo: add positional embedding
         self.embed = nn.Sequential(
                         Rearrange('b c h w -> b (h w) c'),
-                        nn.Linear(in_channels + self.add_channel, emb_size)
+                        nn.Linear(in_channels, emb_size)
         )
 
         self.azm_embed = nn.Sequential(
@@ -313,8 +314,8 @@ class SWaVSuperPixel(nn.Module):
                                         Rearrange('b (h w) c -> b c h w', h=self.patch_size, w=self.patch_size)])
 
      
-        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=4, dim_feedforward=emb_size*2, batch_first=True)
-        self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=4)
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=8, dim_feedforward=emb_size*2, batch_first=True)
+        self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=8)
 
         self.projector = nn.Sequential(nn.Linear(emb_size, emb_size),
                                         nn.ReLU(),
@@ -359,14 +360,15 @@ class SWaVSuperPixel(nn.Module):
         return Q.t()
 
 
-    def forward_train(self, x, chm, azm):
+    # def forward_train(self, x, chm, azm):
+    def forward_train(self, x):
 
         b,_,_,_, = x.shape
 
-        if self.chm_concat:
-            x = torch.cat((x, chm), dim=1)
-        if self.azm_concat:
-            x= torch.cat((x, azm), dim=1)
+        # if self.chm_concat:
+        #     x = torch.cat((x, chm), dim=1)
+        # if self.azm_concat:
+        #     x= torch.cat((x, azm), dim=1)
         
 
         x_s = self.transforms_main(x)
@@ -374,23 +376,23 @@ class SWaVSuperPixel(nn.Module):
         x = self.embed(x)
         
         x_s = self.embed(x_s)
-        if self.use_positions:
-            x += self.positions
-            x_s += self.positions
+        # if self.use_positions:
+        #     x += self.positions
+        #     x_s += self.positions
 
-        if self.chm and not self.chm_concat:
-            chm_s = self.transforms_embed(chm)
-            chm = self.chm_embed(chm)
-            chm_s = self.chm_embed(chm_s)
-            x += chm
-            x_s += chm_s
+        # if self.chm and not self.chm_concat:
+        #     chm_s = self.transforms_embed(chm)
+        #     chm = self.chm_embed(chm)
+        #     chm_s = self.chm_embed(chm_s)
+        #     x += chm
+        #     x_s += chm_s
 
-        if self.azm and not self.azm_concat:
-            azm_s = self.transforms_embed(azm)
-            azm = self.azm_embed(azm)
-            azm_s = self.azm_embed(azm_s)
-            x += azm
-            x_s += azm_s
+        # if self.azm and not self.azm_concat:
+        #     azm_s = self.transforms_embed(azm)
+        #     azm = self.azm_embed(azm)
+        #     azm_s = self.azm_embed(azm_s)
+        #     x += azm
+        #     x_s += azm_s
 
         inp = torch.cat((x, x_s))
         inp = self.encoder(inp)
@@ -399,12 +401,9 @@ class SWaVSuperPixel(nn.Module):
 
         scores = self.prototypes(inp)
 
-        if self.populate_queue:
-            with torch.no_grad():
-                self.queue_base[b:] = self.queue_base[:-b].clone()
-                self.queue_base[:b] = inp[:b].detach()
-                self.queue_mod[b:] = self.queue_mod[:-b].clone()
-                self.queue_mod[:b] = inp[b:].detach()
+        o_b = b
+        b *= self.patch_size**2
+
 
         scores_t = scores[:b]
         scores_s = scores[b:]
@@ -420,12 +419,10 @@ class SWaVSuperPixel(nn.Module):
 
         if self.use_queue:
             #TODO: Fix this
-            qb_items = torch.cat(([self.queue_base[j] for j in range(self.queue_chunks)]))
-            qm_items = torch.cat(([self.queue_mod[j] for j in range(self.queue_chunks)]))
 
             t = torch.cat((
                 torch.mm(
-                    qb_items,
+                    self.queue_base,
                     self.prototypes.weight.t()
                 ),
                 t
@@ -433,22 +430,36 @@ class SWaVSuperPixel(nn.Module):
 
             s = torch.cat((
                 torch.mm(
-                    qm_items,
+                    self.queue_mod,
                     self.prototypes.weight.t()
                 ),
                 s
             ))
 
-
-        q_t = self.sinkhorn(t)
-        q_s = self.sinkhorn(s)
+            q_t = self.sinkhorn(t)[-b:]
+            q_s = self.sinkhorn(s)[-b:]
+        else:
+            q_t = self.sinkhorn(t)
+            q_s = self.sinkhorn(s)
 
         p_t = self.softmax(scores_t/self.temp)
         p_s = self.softmax(scores_s/self.temp)
 
         loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
 
-        b *= self.patch_size**2
+        b = q_t.shape[0]
+
+        if self.populate_queue:
+            with torch.no_grad():
+                base = inp[:o_b].detach()
+                base = self.ra(base)
+                self.queue_base[b:] = self.queue_base[:-b].clone()
+                self.queue_base[:b] = base
+
+                mod = inp[o_b:].detach()
+                mod = self.ra(mod)
+                self.queue_mod[b:] = self.queue_mod[:-b].clone()
+                self.queue_mod[:b] = mod
 
 
         #Try with and without /b
