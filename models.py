@@ -339,7 +339,7 @@ class SWaVModelSuperPixel(pl.LightningModule):
     def __init__(self, 
                     azm=True,
                     chm=True, 
-                    pop_queue_start=0, 
+                    pop_queue_start=14, 
                     queue_start=15, 
                     use_queue=False,  
                     queue_chunks=1, 
@@ -365,7 +365,7 @@ class SWaVModelSuperPixel(pl.LightningModule):
         pca = x['pca']
         ica = x['ica']
         raw = x['raw_bands']
-        shadow = x['shadow']
+        shadow = x['shadow'].unsqueeze(1)
         chm = x['chm'].unsqueeze(1)
         az = x['azm'].unsqueeze(1)
 

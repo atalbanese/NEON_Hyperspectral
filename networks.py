@@ -267,8 +267,8 @@ class SWaVSuperPixel(nn.Module):
         self.populate_queue = False
         self.use_queue = False
         #TODO: Fix the queue
-        self.queue_base = torch.zeros((queue_chunks)*batch_size, emb_size).cuda()
-        self.queue_mod = torch.zeros((queue_chunks)*batch_size, emb_size).cuda()
+        self.queue_base = torch.zeros((queue_chunks)*batch_size*patch_size**2, emb_size).cuda()
+        self.queue_mod = torch.zeros((queue_chunks)*batch_size*patch_size**2, emb_size).cuda()
         self.chm = chm
         self.azm = azm
         self.azm_concat = azm_concat
@@ -299,19 +299,19 @@ class SWaVSuperPixel(nn.Module):
                         nn.Linear(in_channels, emb_size)
         )
 
-        self.azm_embed = nn.Sequential(
-                        Rearrange('b c h w -> b (h w) c'),
-                        nn.Linear(1, emb_size)
-        )
+        # self.azm_embed = nn.Sequential(
+        #                 Rearrange('b c h w -> b (h w) c'),
+        #                 nn.Linear(1, emb_size)
+        # )
 
-        self.chm_embed = nn.Sequential(
-                        Rearrange('b c h w -> b (h w) c'),
-                        nn.Linear(1, emb_size)
-        )
+        # self.chm_embed = nn.Sequential(
+        #                 Rearrange('b c h w -> b (h w) c'),
+        #                 nn.Linear(1, emb_size)
+        # )
 
-        self.transforms_embed = tt.Compose([Rearrange('b c h w -> b (h w) c'),
-                                        tr.Blit(),
-                                        Rearrange('b (h w) c -> b c h w', h=self.patch_size, w=self.patch_size)])
+        # self.transforms_embed = tt.Compose([Rearrange('b c h w -> b (h w) c'),
+        #                                 tr.Blit(),
+        #                                 Rearrange('b (h w) c -> b c h w', h=self.patch_size, w=self.patch_size)])
 
      
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=8, dim_feedforward=emb_size*2, batch_first=True)
@@ -401,9 +401,6 @@ class SWaVSuperPixel(nn.Module):
 
         scores = self.prototypes(inp)
 
-        o_b = b
-        b *= self.patch_size**2
-
 
         scores_t = scores[:b]
         scores_s = scores[b:]
@@ -417,8 +414,10 @@ class SWaVSuperPixel(nn.Module):
         scores_t = self.ra(scores_t)
         scores_s = self.ra(scores_s)
 
+        o_b = b
+        b *= self.patch_size**2
+
         if self.use_queue:
-            #TODO: Fix this
 
             t = torch.cat((
                 torch.mm(
@@ -447,7 +446,7 @@ class SWaVSuperPixel(nn.Module):
 
         loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
 
-        b = q_t.shape[0]
+        #b = q_t.shape[0]
 
         if self.populate_queue:
             with torch.no_grad():

@@ -230,7 +230,8 @@ class RenderedDataLoader(Dataset):
             to_return = torch.load(os.path.join(self.base_dir, to_open))
         except:
             print(to_open)
-        to_return['img'][to_return['img'] != to_return['img']] = 0
+        to_return['pca'][to_return['pca'] != to_return['pca']] = 0
+        to_return['ica'][to_return['ica'] != to_return['ica']] = 0
 
 
         return to_return
