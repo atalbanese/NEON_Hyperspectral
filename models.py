@@ -288,7 +288,7 @@ class SWaVModelSuperPixel(pl.LightningModule):
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
 
-        self.ra(inp)
+        inp = self.ra(inp)
 
         loss = self.model.forward_train(inp)
         self.log('train_loss', loss)
