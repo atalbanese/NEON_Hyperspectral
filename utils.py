@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA, IncrementalPCA, FastICA
 from skimage.segmentation import slic
 from sklearn.neighbors import kneighbors_graph
-from skimage.segmentation import mark_boundaries, find_boundaries
+from skimage.segmentation import mark_boundaries, find_boundaries, watershed
 from sklearn import cluster
 import os
 from tqdm import tqdm
@@ -440,6 +440,32 @@ def make_superpixels_viz(args):
             # plt.show()
             np.save(os.path.join(out_dir, super_file), segments)
 
+def make_superpixels_chm(args):
+    file, in_dir, out_dir = args
+    if ".tif" in file:
+        chm_file = file.split(".")[0] + '_superpixel.npy'
+        # rgb_file =  file.split(".")[0].replace('CHM', 'reflectance') + '.h5'
+        if not os.path.exists(os.path.join(out_dir, chm_file)):
+            # rgb = hp.pre_processing(os.path.join(orig_dir, rgb_file), wavelength_ranges=get_viz_bands())
+            # rgb = hp.make_rgb(rgb["bands"])
+
+            chm_open = rs.open(os.path.join(in_dir, file))
+            chm = chm_open.read().astype(np.float32)
+            chm[chm==-9999] = np.nan
+            chm = chm.squeeze(axis=0)
+            mask = chm != 0
+            chm[~mask] = 0
+            c_max = chm.max()
+            chm = chm/c_max
+            # plt.imshow(chm)
+            # plt.show()
+            # plt.imshow(rgb)
+            # plt.show()
+            segments = slic(chm, n_segments=mask.sum()//36, slic_zero=True, mask=mask)
+            #segments = watershed(chm, markers=mask.sum()//36, compactness=0.01, mask=mask)
+           
+            np.save(os.path.join(out_dir, chm_file), segments)
+
 def make_superpixels_masked(args):
     file, in_dir, out_dir, mask_dir = args
     if ".h5" in file:
@@ -452,6 +478,7 @@ def make_superpixels_masked(args):
             mask = mask == mask
             mask = mask[:,:, 0]
             rgb[~mask] = 0
+            
 
             segments = slic(rgb, n_segments=mask.sum()//64, slic_zero=True, mask=mask)
             # rgb = exposure.adjust_gamma(rgb, 0.5) 
@@ -534,7 +561,7 @@ def bulk_process(pool, dirs, fn, **kwargs):
 
     args_list = list(zip(files, *dirs))
 
-    future = pool.map(fn, args_list, timeout=360)
+    future = pool.map(fn, args_list, timeout=1000)
     iterator = future.result()
     while True:
         try:
@@ -574,12 +601,14 @@ if __name__ == '__main__':
 
     
 
-    FILE = 'NEON_D13_NIWO_DP3_450000_4428000_reflectance.h5'
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo'
+    FILE = 'NEON_D13_NIWO_DP3_457000_4432000_CHM.tif'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo_chm'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
     PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_masked_10'
 
-    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/harv_2019/NEON_struct-ecosystem/NEON.D01.HARV.DP3.30015.001.2019-08.basic.20220511T165943Z.RELEASE-2022'
+    chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
+
+    #make_superpixels_chm((FILE, chm_fold, OUT_DIR, IN_DIR))
 
     # test = hp.pre_processing(os.path.join(IN_DIR, FILE), get_all=True)['bands']
     # for i in range(0, test.shape[2]):
@@ -602,8 +631,8 @@ if __name__ == '__main__':
 
     
 
-    with ProcessPool(4) as pool:
-        bulk_process(pool, [IN_DIR, OUT_DIR], select_extra_bands)
+    # with ProcessPool(4) as pool:
+    #     bulk_process(pool, [IN_DIR, OUT_DIR], select_extra_bands)
 
     # # # with ProcessPool(4) as pool:
     # # #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
@@ -611,8 +640,8 @@ if __name__ == '__main__':
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, PCA_DIR, MASK_DIR], masked_pca)
 
-    # with ProcessPool(8) as pool:
-    #     bulk_process(pool, [IN_DIR, OUT_DIR, PCA_DIR], make_superpixels_masked)
+    with ProcessPool(4) as pool:
+        bulk_process(pool, [chm_fold, OUT_DIR], make_superpixels_chm)
 
     #get_masks((IMG, IMG_DIR, MASK_DIR))
 

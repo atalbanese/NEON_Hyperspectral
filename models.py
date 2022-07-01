@@ -30,10 +30,11 @@ def get_classifications(x):
 
 #TODO: Make checkpoint saving work
 class SWaVModelRefine(pl.LightningModule):
-    def __init__(self, swav_config, num_output_classes, class_key, chm_mean, chm_std, height_threshold=3, class_weights=None, freeze_backbone=True, trained_backbone=True,**kwargs):
+    def __init__(self, swav_config, num_output_classes, class_key, chm_mean, chm_std, lr=3e-4, height_threshold=5, class_weights=None, freeze_backbone=True, trained_backbone=True,**kwargs):
         super().__init__()
         self.freeze_backbone = freeze_backbone
         self.height_threshold = height_threshold
+        self.lr = lr
         self.chm_mean = chm_mean
         self.chm_std = chm_std
         if trained_backbone:
@@ -44,17 +45,21 @@ class SWaVModelRefine(pl.LightningModule):
         else:
             self.freeze_backbone = False
             self.model = SWaVModelSuperPixel(**swav_config)
+        # self.predict_mlp = nn.Sequential(nn.Linear(swav_config['num_classes'], swav_config['num_classes']*2),
+        #                                  nn.BatchNorm1d(swav_config['num_classes']*2),
+        #                                  nn.ReLU(),
+        #                                  nn.Linear(swav_config['num_classes']*2, swav_config['num_classes']*2),
+        #                                  nn.BatchNorm1d(swav_config['num_classes']*2),
+        #                                  nn.ReLU(),
+        #                                  nn.Linear(swav_config['num_classes']*2, swav_config['num_classes']*2),
+        #                                  nn.BatchNorm1d(swav_config['num_classes']*2),
+        #                                  nn.ReLU(),
+        #                                  nn.Linear(swav_config['num_classes']*2, num_output_classes))
         self.predict_mlp = nn.Sequential(nn.Linear(swav_config['num_classes'], swav_config['num_classes']*2),
                                          nn.BatchNorm1d(swav_config['num_classes']*2),
                                          nn.ReLU(),
-                                         nn.Linear(swav_config['num_classes']*2, swav_config['num_classes']*2),
-                                         nn.BatchNorm1d(swav_config['num_classes']*2),
-                                         nn.ReLU(),
-                                         nn.Linear(swav_config['num_classes']*2, swav_config['num_classes']*2),
-                                         nn.BatchNorm1d(swav_config['num_classes']*2),
-                                         nn.ReLU(),
                                          nn.Linear(swav_config['num_classes']*2, num_output_classes))
-        
+        #self.positions = nn.Parameter(torch.randn((31, 4, 4)))
         if class_weights is not None: 
             self.loss = nn.CrossEntropyLoss(weight=torch.tensor(class_weights))
         else:
@@ -133,7 +138,7 @@ class SWaVModelRefine(pl.LightningModule):
             targets=TF.hflip(targets)
 
         mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
-        
+        #inp += self.positions
 
         if self.freeze_backbone:
             with torch.no_grad():
@@ -179,6 +184,7 @@ class SWaVModelRefine(pl.LightningModule):
 
         chm = (chm - self.chm_mean)/self.chm_std
         inp = torch.cat((pca,ica,raw,shadow,chm,az), dim=1)
+        #inp += self.positions
 
         mask += height_mask
         mask = ~mask
@@ -226,12 +232,13 @@ class SWaVModelRefine(pl.LightningModule):
 
     def configure_optimizers(self):
         if self.freeze_backbone:
-            optimizer = torch.optim.AdamW(self.predict_mlp.parameters(), lr=5e-4)
+            optimizer = torch.optim.AdamW(self.predict_mlp.parameters(), lr=self.lr)
         else:
-             optimizer = torch.optim.AdamW(self.parameters(), lr=5e-4)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10, eta_min=5e-7)
+             optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
+        #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
-
+    
     
     def forward(self, x):
         out = self.model.forward(x)

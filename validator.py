@@ -1,3 +1,4 @@
+from select import select
 from imageio import save
 from matplotlib.widgets import Slider
 import geopandas as gpd
@@ -18,11 +19,13 @@ import models
 import utils
 from skimage import exposure
 from scipy.stats import linregress
+from skimage.segmentation import mark_boundaries
 from einops import rearrange
 from sklearn.decomposition import PCA, IncrementalPCA
 import torchvision.transforms as tt
 import sklearn.model_selection as ms
 import sklearn.utils.class_weight as cw
+import math
 
 
 #TODO: Clean this mess up
@@ -35,6 +38,7 @@ class Validator():
         self.ica_dir = kwargs['ica_dir']
         self.raw_bands_dir = kwargs['raw_bands']
         self.shadow_dir = kwargs['shadow']
+        self.sp_dir = kwargs['superpixel']
         self.struct = struct
         self.curated = kwargs['curated']
         self.site_prefix = kwargs['prefix']
@@ -46,6 +50,7 @@ class Validator():
         self.chm_mean = kwargs['chm_mean']
         self.chm_std = kwargs['chm_std']
         self.valid_data, self.data_gdf = self.get_plot_data()
+
         self.valid_files = self.get_valid_files()
 
         self.valid_dict = self.make_valid_dict()
@@ -65,6 +70,9 @@ class Validator():
         self.chm_files = [os.path.join(kwargs['chm'], file) for file in os.listdir(kwargs['chm']) if ".tif" in file]
         self.azm_files = [os.path.join(kwargs['azm'], file) for file in os.listdir(kwargs['azm']) if ".npy" in file]
 
+        self.sp_files = [os.path.join(self.sp_dir, file) for file in os.listdir(self.sp_dir) if ".npy" in file]
+        self.sp_dict = make_dict(self.sp_files, -4, -3)
+
         self.chm_dict = make_dict(self.chm_files, -3, -2)
         self.azm_dict = make_dict(self.azm_files, -4, -3)
 
@@ -82,9 +90,25 @@ class Validator():
 
         self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
 
+        self.data_gdf = self.pick_superpixels()
+
         self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
         self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=self.train['taxonID'])
         print('here')
+
+    @staticmethod
+    def get_crop(arr, ix):
+            locs = arr != ix
+            falsecols = np.all(locs, axis=0)
+            falserows = np.all(locs, axis=1)
+
+            firstcol = falsecols.argmin()
+            firstrow = falserows.argmin()
+
+            lastcol = len(falsecols) - falsecols[::-1].argmin()
+            lastrow = len(falserows) - falserows[::-1].argmin()
+
+            return firstrow,lastrow,firstcol,lastcol
 
     #TODO: Check shapes before saving
     def render_valid_data(self, save_dir, split, render_fixed_size=True):
@@ -124,19 +148,40 @@ class Validator():
                 #Raw bands
                 extra = np.load(self.extra_files_dict[key]).astype(np.float32)
 
-            
-            x = int(round(float(row['easting']) - float(row['file_west_bound']), 0))
-            y = 1000 - int(round(float(row['northing']- float(row['file_south_bound'])), 0))
+                sp = np.load(self.sp_dict[key])
+                loaded_key = key
+
             taxa = row['taxonID']
-            if render_fixed_size:
-                bounds= (y-2, y+2, x-2, x+2)
-            else:
-                diam = int(round(float(row['maxCrownDiameter'])*0.9/2))
-                bounds = (y-diam, y+diam, x-diam, x+diam)
-            pca_crop = pca[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
-            if pca_crop.shape == (4, 4, 10):
+            super_pix_num = row['sp']
+            sp_mask = sp == super_pix_num
+            height = float(row['height'])
+            diam = float(row['maxCrownDiameter'])
+            rad = int(diam//2)
+            if rad>0:
+                masked_chm = chm * sp_mask
+                max_height = masked_chm.max()
+                height_pix = masked_chm == max_height
+                h_col = np.all(~height_pix, axis=0).argmin()
+                h_row = np.all(~height_pix, axis=1).argmin()
+
+
+                #NEED TO CHECK FOR OVERLAP SOMEHOW
+                #bounds = self.get_crop(sp, super_pix_num)
+                bounds = (h_row - rad, h_row+rad+1, h_col-rad, h_col+rad+1)
+                # if render_fixed_size:
+                #     bounds= (y-2, y+2, x-2, x+2)
+                # else:
+                #     diam = int(round(float(row['maxCrownDiameter'])*0.9/2))
+                #     bounds = (y-diam, y+diam, x-diam, x+diam)
+                sp_mask = sp_mask[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+                chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]] #* sp_mask
+                
+
+                pca_crop = pca[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
+
+                #if pca_crop.shape == (4, 4, 10):
                 ica_crop = ica[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
-                chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+                
                 azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
                 shadow_crop = shadow[bounds[0]:bounds[1], bounds[2]:bounds[3]]
                 extra_crop = extra[bounds[0]:bounds[1], bounds[2]:bounds[3]]
@@ -169,13 +214,13 @@ class Validator():
                     'azm': azm_crop,
                     'mask': mask,
                     'target': label,
-                    'height': float(row['height'])
+                    'height': height
                 }
 
-                f_name = f'{key}_{row["taxonID"]}_{x}_{y}.pt'
+                f_name = f'{key}_{row["taxonID"]}_{super_pix_num}.pt'
                 with open(os.path.join(save_dir, f_name), 'wb') as f:
                     torch.save(to_save, f)
-        
+            
         return None
 
 
@@ -228,24 +273,31 @@ class Validator():
         data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting, data_with_coords.northing), crs='EPSG:32618')
         data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['maxCrownDiameter']/2)
         data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
-        to_remove = set()
-        for ix, row in data_gdf.iterrows():
-            working_copy = data_gdf.loc[data_gdf.index != ix]
-            coverage = working_copy.crowns.contains(row.crowns)
-            cover_gdf = working_copy.loc[coverage]
-            if (cover_gdf['height']>row['height']).sum() > 0:
-                to_remove.add(ix)
-            intersect = working_copy.crowns.intersects(row.crowns)
-            inter_gdf = working_copy.loc[intersect]
-            if (inter_gdf['height']>row['height']).sum() > 0:
-                to_remove.add(ix)
 
-        data_gdf =  data_gdf.drop(list(to_remove))
+        #TODO: Test with and without this
+        #NEED TO DE-DEDUPE THIS BEFORE RUNNING BECAUSE ALEX
+        # to_remove = set()
+        # for ix, row in data_gdf.iterrows():
+        #     working_copy = data_gdf.loc[data_gdf.index != ix]
+        #     coverage = working_copy.crowns.contains(row.crowns)
+        #     cover_gdf = working_copy.loc[coverage]
+        #     if (cover_gdf['height']>row['height']).sum() > 0:
+        #         to_remove.add(ix)
+        #     intersect = working_copy.crowns.intersects(row.crowns)
+        #     inter_gdf = working_copy.loc[intersect]
+        #     if (inter_gdf['height']>row['height']).sum() > 0:
+        #         to_remove.add(ix)
+
+        # data_gdf =  data_gdf.drop(list(to_remove))
 
         data_gdf["file_west_bound"] = data_gdf["easting"] - data_gdf["easting"] % 1000
         data_gdf["file_south_bound"] = data_gdf["northing"] - data_gdf["northing"] % 1000
         data_gdf = data_gdf.astype({"file_west_bound": int,
                             "file_south_bound": int})
+
+        data_gdf['tree_x'] = data_gdf.easting - data_gdf.file_west_bound
+        data_gdf['tree_y'] = 1000 - (data_gdf.northing - data_gdf.file_south_bound)
+
         data_gdf = data_gdf.astype({"file_west_bound": str,
                             "file_south_bound": str})
                             
@@ -395,34 +447,111 @@ class Validator():
         plt.close()
 
     
+    #Fucking this up to test CHM superpixl
     @staticmethod
-    def _map_trees(df, pca_dir, save_dir, prefix):
-        fig, ax = plt.subplots(figsize=(10, 10))
-        row = df.iloc[0]
-        coords = row['file_coords']
-        open_file = os.path.join(pca_dir, f'NEON_{prefix}_HARV_DP3_{coords}_reflectance.h5')
-        rgb = hp.pre_processing(open_file, wavelength_ranges=utils.get_viz_bands())
-        rgb = hp.make_rgb(rgb["bands"])
-        rgb = exposure.adjust_gamma(rgb, 0.5)
+    def _select_pixels(df, vd):
+        # fig, ax = plt.subplots(figsize=(10, 10))
+        top_row = df.iloc[0]
+        coords = top_row['file_coords']
+        open_sp = vd.sp_dict[coords]
+        open_chm = vd.chm_dict[coords]
+        chm_open = rs.open(open_chm)
+        chm = chm_open.read().astype(np.float32)
+        chm[chm==-9999] = np.nan
+        chm = chm.squeeze(axis=0)
 
-        rgb = rgb[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
-        plt.imshow(rgb)
-        df['tree_x'] = df['tree_x'] - df['x_min']
-        df['tree_y'] = df['tree_y'] - df['y_min']
+        sp = np.load(open_sp)
+        c_max = chm.max()
+        chm_scale = chm/c_max
+
+        # boundaries = mark_boundaries(chm_scale, sp)
+
+        #rgb = rgb[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
+        # plt.imshow(boundaries)
 
         trees_df = df.loc[(df['tree_x'] == df['tree_x'])]
-        for ix, row in trees_df.iterrows():
-            ax.plot(row['tree_x'], row['tree_y'], marker="o")
-            ax.annotate(row['taxonID'], (row['tree_x'], row['tree_y']), textcoords='offset points', xytext= (0, 5), ha='center', color='white', fontsize='xx-large')
-        fig.tight_layout()
-        plt.savefig(os.path.join(save_dir, f'{row["plotID"]}_{coords}_trees.png'))
-        plt.close()
+        trees_df['sp'], trees_df['sp_height_dif'] = trees_df.apply(lambda row: vd._select_superpixel(row, sp, chm), axis=1).str
+        trees_df = trees_df.loc[trees_df['sp'] != -1]
+
+        if trees_df['sp'].duplicated().sum() != 0:
+            for pix_num in trees_df['sp'].unique():
+                to_dedupe = []
+                testing = trees_df.loc[trees_df['sp'] == pix_num]
+                if len(testing) > 1:
+                    min_height = testing['sp_height_dif'].min()
+                    #See if there are any with the same height difference
+                    h_testing = testing.loc[testing['sp_height_dif'] == min_height]
+                    #Remove any that aren't the minimum height difference
+                    to_remove = testing.loc[testing['sp_height_dif'] != min_height]
+                    to_dedupe= to_dedupe + list(to_remove.index)
+                    #If there are any with the same height difference, we need to check what species they are
+                    if len(h_testing) > 1:
+                        unique_species = h_testing['taxonID'].unique()
+                        if len(unique_species) == 1:
+                            #If all the species are the same just pick the first one
+                            to_dedupe = to_dedupe + list(h_testing.index[:-1])
+                        else:
+                            #If there are two species with the same height difference we don't have enough info to choose
+                            to_dedupe= to_dedupe + list(h_testing.index)
+                        
+
+                    trees_df = trees_df.drop(to_dedupe)
+
+        if trees_df['sp'].duplicated().sum() != 0:
+            print('here')
+
+        return trees_df
+        # for ix, row in trees_df.iterrows():
+            # ax.plot(row['tree_x'], row['tree_y'], marker="o")
+            # ax.annotate(f'{row["height"]/c_max:.2f}', (row['tree_x'], row['tree_y']), textcoords='offset points', xytext= (0, 5), ha='center', color='red', fontsize='xx-large')
+        # fig.tight_layout()
+        # plt.show()
+        # plt.savefig(os.path.join(save_dir, f'{row["plotID"]}_{coords}_trees.png'))
+        # plt.close()
+
+    @staticmethod
+    def _select_superpixel(row, sp, chm, select_buffer=5, upper_height_bound=5):
+        height = row['height']
+        x = round(row['tree_x'])
+        y = round(row['tree_y'])
+
+        sp_crop = sp[y-select_buffer:y+select_buffer, x-select_buffer:x+select_buffer]
 
 
+        unique_sp= np.unique(sp_crop)
 
-    def map_trees(self, save_dir):
-        grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
-        grouped_files.apply(self._map_trees, self.pca_dir, save_dir, self.site_prefix)
+        if unique_sp.sum() == 0:
+            return -1, -1
+
+        candidates = {}
+        for pix_num in unique_sp:
+            if pix_num == 0:
+                continue
+            chm_sp = chm[sp==pix_num]
+            sp_height = chm_sp.max()
+            height_dif = abs(sp_height - height)
+            if height_dif <= upper_height_bound:
+                candidates[pix_num] = height_dif
+        
+        if len(candidates.keys()) == 0:
+            return -1, -1
+
+        min_dif = 1000
+        top_candidate = None
+        for k, v in candidates.items():
+            if v < min_dif:
+                min_dif = v
+                top_candidate = k
+        if top_candidate is not None:
+            return top_candidate, min_dif
+        else:
+            return -1, -1
+
+
+    def pick_superpixels(self):
+        grouped_files = self.data_gdf.groupby(['file_coords', 'plotID'])
+        selected = grouped_files.apply(self._select_pixels, self)
+        return selected
 
     def do_plot_inference(self, save_dir, model):
         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
@@ -879,6 +1008,7 @@ if __name__ == "__main__":
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
     RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo'
     SHADOW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
+    SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo_chm'
 
     valid = Validator(file=VALID_FILE, 
                     pca_dir=PCA_DIR, 
@@ -894,14 +1024,17 @@ if __name__ == "__main__":
                     curated=CURATED_FILE, 
                     rescale=False, 
                     orig=ORIG_DIR, 
+                    superpixel=SP_DIR,
                     prefix='D13',
                     chm_mean = 4.015508459469479,
                     chm_std = 4.809300736115787)
 
+    #valid.pick_superpixels()
+
     #validate_config(valid, configs)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training', 'train', render_fixed_size=True)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid', 'valid', render_fixed_size=True)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test', 'test', render_fixed_size=True)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_training', 'train', render_fixed_size=True)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_valid', 'valid', render_fixed_size=True)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_test', 'test', render_fixed_size=True)
 
 
 
