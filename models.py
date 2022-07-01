@@ -45,16 +45,7 @@ class SWaVModelRefine(pl.LightningModule):
         else:
             self.freeze_backbone = False
             self.model = SWaVModelSuperPixel(**swav_config)
-        # self.predict_mlp = nn.Sequential(nn.Linear(swav_config['num_classes'], swav_config['num_classes']*2),
-        #                                  nn.BatchNorm1d(swav_config['num_classes']*2),
-        #                                  nn.ReLU(),
-        #                                  nn.Linear(swav_config['num_classes']*2, swav_config['num_classes']*2),
-        #                                  nn.BatchNorm1d(swav_config['num_classes']*2),
-        #                                  nn.ReLU(),
-        #                                  nn.Linear(swav_config['num_classes']*2, swav_config['num_classes']*2),
-        #                                  nn.BatchNorm1d(swav_config['num_classes']*2),
-        #                                  nn.ReLU(),
-        #                                  nn.Linear(swav_config['num_classes']*2, num_output_classes))
+
         self.predict_mlp = nn.Sequential(nn.Linear(swav_config['num_classes'], swav_config['num_classes']*2),
                                          nn.BatchNorm1d(swav_config['num_classes']*2),
                                          nn.ReLU(),
@@ -67,6 +58,9 @@ class SWaVModelRefine(pl.LightningModule):
 
         self.results = self.make_results_dict(class_key)
         self.class_key = class_key
+        self.ra = Rearrange('b c h w -> b (h w) c')
+
+
 
 
     def make_results_dict(self, classes):
@@ -140,6 +134,8 @@ class SWaVModelRefine(pl.LightningModule):
         mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
         #inp += self.positions
 
+
+        inp = self.ra(inp)
         if self.freeze_backbone:
             with torch.no_grad():
                 inp = self.model.forward(inp)
@@ -190,6 +186,8 @@ class SWaVModelRefine(pl.LightningModule):
         mask = ~mask
         mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
 
+        
+        inp = self.ra(inp)
         inp = self.forward(inp)
         inp = torch.softmax(inp, dim=1)
         inp = inp[mask, :]
@@ -270,6 +268,7 @@ class SWaVModelSuperPixel(pl.LightningModule):
         self.use_queue = use_queue
         self.pop_queue_start = pop_queue_start
         self.queue_start = queue_start
+        self.ra = Rearrange('b c h w -> b (h w) c')
 
 
     def training_step(self, x):
@@ -289,13 +288,15 @@ class SWaVModelSuperPixel(pl.LightningModule):
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
 
+        self.ra(inp)
+
         loss = self.model.forward_train(inp)
         self.log('train_loss', loss)
         return loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=5e-4)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 10, eta_min=5e-7)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
 
     def on_before_optimizer_step(self, optimizer, optimizer_idx):

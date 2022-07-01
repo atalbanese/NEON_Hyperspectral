@@ -110,8 +110,21 @@ class Validator():
 
             return firstrow,lastrow,firstcol,lastcol
 
+    @staticmethod
+    def get_pad(arr, pad_size):
+            row_len = arr.shape[0]
+            col_len = arr.shape[1]
+
+            row_pad = (pad_size - row_len) // 2
+            col_pad = (pad_size - col_len) // 2
+            
+            add_row = (row_pad*2 + row_len) != pad_size
+            add_col = (col_pad*2 + col_len) != pad_size
+
+            return [(row_pad, row_pad+add_row), (col_pad, col_pad+add_col)]
+
     #TODO: Check shapes before saving
-    def render_valid_data(self, save_dir, split, render_fixed_size=True):
+    def render_valid_data(self, save_dir, split, out_size=4):
         if split == 'train':
             data = self.train
         if split == 'valid':
@@ -157,6 +170,8 @@ class Validator():
             height = float(row['height'])
             diam = float(row['maxCrownDiameter'])
             rad = int(diam//2)
+            #Ensure nothing is bigger than 4x4
+            rad = 1 
             if rad>0:
                 masked_chm = chm * sp_mask
                 max_height = masked_chm.max()
@@ -166,25 +181,30 @@ class Validator():
 
 
                 #NEED TO CHECK FOR OVERLAP SOMEHOW
-                #bounds = self.get_crop(sp, super_pix_num)
                 bounds = (h_row - rad, h_row+rad+1, h_col-rad, h_col+rad+1)
-                # if render_fixed_size:
-                #     bounds= (y-2, y+2, x-2, x+2)
-                # else:
-                #     diam = int(round(float(row['maxCrownDiameter'])*0.9/2))
-                #     bounds = (y-diam, y+diam, x-diam, x+diam)
-                sp_mask = sp_mask[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]] #* sp_mask
+
+
+                #Just grabbing 3x3 crops right now
+                #y_pad = out_size - (bounds[1]-bounds[0])
+                #x_pad = out_size - (bounds[3]-bounds[2])
+
+                chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+                #chm_crop = np.pad(chm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
                 
 
                 pca_crop = pca[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
+                #pca_crop = np.pad(pca_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
 
                 #if pca_crop.shape == (4, 4, 10):
                 ica_crop = ica[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
+                #ica_crop = np.pad(ica_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
                 
                 azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+                #azm_crop = np.pad(azm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
                 shadow_crop = shadow[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+                #shadow_crop = np.pad(shadow_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
                 extra_crop = extra[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+                #extra_crop = np.pad(extra_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
 
 
                 mask = pca_crop != pca_crop
@@ -202,7 +222,7 @@ class Validator():
                 mask = torch.tensor(mask)
                 mask = rearrange(mask, 'h w c -> c h w')
 
-                label = torch.zeros((len(self.taxa.keys()),chm_crop.shape[0],chm_crop.shape[1]), dtype=torch.float32).clone()
+                label = torch.zeros((len(self.taxa.keys()),out_size, out_size), dtype=torch.float32).clone()
                 label[self.taxa[taxa]] = 1.0
 
                 to_save = {
@@ -1032,9 +1052,9 @@ if __name__ == "__main__":
     #valid.pick_superpixels()
 
     #validate_config(valid, configs)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_training', 'train', render_fixed_size=True)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_valid', 'valid', render_fixed_size=True)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_test', 'test', render_fixed_size=True)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_training', 'train')
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_valid', 'valid')
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_test', 'test')
 
 
 

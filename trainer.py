@@ -14,8 +14,8 @@ def do_rendered_training(num_channels=31,
                         num_classes=12, 
                         azm=False, 
                         chm=False, 
-                        log_every=10, 
-                        max_epochs=50, 
+                        log_every=20, 
+                        max_epochs=200, 
                         num_workers=4, 
                         extra_labels='', 
                         use_queue=False,  
@@ -147,27 +147,11 @@ if __name__ == "__main__":
     #TRY WITHOUT CHM FILTER
     #TRY FEWER INPUTS
 
-    refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
-            valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
-            test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
-            num_classes=256,
-            extra_labels='all_data_400_epochs_trained_backbone_smaller_predict_positions_',
-            class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
-            class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
-            chm_mean = 4.015508459469479,
-            chm_std = 4.809300736115787,
-            positions=False,
-            freeze_backbone=False,
-            trained_backbone=True,
-            use_queue=True,
-            queue_chunks=5,
-            ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_epoch=49.ckpt')
-    
     # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
     #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
     #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
     #         num_classes=256,
-    #         extra_labels='all_data_400_epochs_trained_backbone_smaller_predict_height_3_',
+    #         extra_labels='all_data_400_epochs_trained_backbone_smaller_predict_positions_',
     #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
     #         class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
     #         chm_mean = 4.015508459469479,
@@ -177,74 +161,14 @@ if __name__ == "__main__":
     #         trained_backbone=True,
     #         use_queue=True,
     #         queue_chunks=5,
-    #         height_threshold=3,
     #         ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_epoch=49.ckpt')
     
-    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
-    #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
-    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
-    #         num_classes=256,
-    #         extra_labels='all_data_400_epochs_from_9_trained_backbone_smaller_predict_',
-    #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
-    #         class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
-    #         chm_mean = 4.015508459469479,
-    #         chm_std = 4.809300736115787,
-    #         positions=False,
-    #         freeze_backbone=False,
-    #         trained_backbone=True,
-    #         use_queue=True,
-    #         queue_chunks=5,
-    #         ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_epoch=9.ckpt')
-
-    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
-    #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
-    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
-    #         num_classes=256,
-    #         extra_labels='all_data_400_epochs_trained_backbone_queue_smaller_predict_',
-    #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
-    #         class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
-    #         chm_mean = 4.015508459469479,
-    #         chm_std = 4.809300736115787,
-    #         positions=False,
-    #         freeze_backbone=False,
-    #         trained_backbone=True,
-    #         use_queue=True,
-    #         queue_chunks=5,
-    #         ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_queue_epoch=49.ckpt')
-
-
-    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
-    #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
-    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
-    #         num_classes=256,
-    #         extra_labels='all_data_200_epochs_trained_backbone_',
-    #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
-    #         class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
-    #         chm_mean = 4.015508459469479,
-    #         chm_std = 4.809300736115787,
-    #         positions=False,
-    #         freeze_backbone=False,
-    #         trained_backbone=True,
-    #         ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_epoch=49.ckpt')
-
-    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
-    #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
-    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
-    #         num_classes=256,
-    #         extra_labels='all_data_200_epochs_untrained_backbone_',
-    #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
-    #         class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
-    #         chm_mean = 4.015508459469479,
-    #         chm_std = 4.809300736115787,
-    #         positions=False,
-    #         freeze_backbone=False,
-    #         trained_backbone=False,
-    #         ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_epoch=49.ckpt')
 
 
 
-    # do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra', use_queue=False,
-    #                             data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/')
+
+    do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra_400_epochs', use_queue=False,
+                                data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/')
 
     # do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra_queue', use_queue=True,
     #                             data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/')

@@ -58,10 +58,8 @@ class SWaVSuperPixel(nn.Module):
                                         Rearrange('b (h w) c -> b c h w', h=self.patch_size, w=self.patch_size)])
 
         #Todo: add positional embedding
-        self.embed = nn.Sequential(
-                        Rearrange('b c h w -> b (h w) c'),
-                        nn.Linear(in_channels, emb_size)
-        )
+        self.embed = nn.Linear(in_channels, emb_size)
+
 
         # self.azm_embed = nn.Sequential(
         #                 Rearrange('b c h w -> b (h w) c'),
