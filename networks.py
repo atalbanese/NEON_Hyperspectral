@@ -21,7 +21,7 @@ class SWaVUnified(nn.Module):
                 temp=0.1, 
                 epsilon=0.05,  
                 sinkhorn_iters=3):
-        super(SWaVSuperPixel, self).__init__()
+        super(SWaVUnified, self).__init__()
         
         self.transforms_main = tt.Compose([
                                         tr.Blit(p=0.5),

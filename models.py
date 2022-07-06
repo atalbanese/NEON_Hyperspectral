@@ -93,8 +93,7 @@ class SwaVModelUnified(pl.LightningModule):
             cur = inp[key]
             if len(cur.shape) != 4:
                 cur = cur.unsqueeze(1)
-            if cur.shape[1] != value:
-                cur = cur[:,:value,...]
+            
             if key == 'mask':
                 continue
             if key == 'targets':
@@ -103,6 +102,8 @@ class SwaVModelUnified(pl.LightningModule):
                 continue
             if key == "chm":
                 chm = (chm - self.chm_mean)/self.chm_std
+            if cur.shape[1] != value:
+                cur = cur[:,:value,...]
             to_cat.append(cur)
         return torch.cat(to_cat, dim=1)
 
@@ -181,12 +182,12 @@ class SwaVModelUnified(pl.LightningModule):
 
 
 
-    def training_step(self, inp, batch_idx, optimizer_idx):
+    def training_step(self, inp):
         
-        if self.pre_training and (optimizer_idx == 0):
+        if self.pre_training:
             return self.pre_training_step(inp)
             
-        if (not self.pre_training) and (optimizer_idx == 1):
+        else:
             return self.refine_step(inp)
 
         return None

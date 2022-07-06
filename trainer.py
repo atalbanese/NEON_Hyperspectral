@@ -170,7 +170,7 @@ def unified_training(class_key,
                                     trained_backbone,
                                     features_dict,
                                     num_intermediate_classes,
-                                    pre_training=False)
+                                    pre_training=True)
 
     pre_train_data = RenderedDataLoader(pre_train_folder)
     pre_train_loader = DataLoader(pre_train_data, batch_size=pre_train_batch_size, num_workers=pre_train_workers, pin_memory=True)
@@ -189,7 +189,7 @@ def unified_training(class_key,
 
     pre_trainer.fit(pre_model, pre_train_loader)
 
-    refine_model = models.SwaVModelUnified.load_from_checkpoint(pre_train_ckpt)
+    refine_model = models.SwaVModelUnified.load_from_checkpoint(pre_train_ckpt, pre_training=False)
     refiner.fit(refine_model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     refiner.test(ckpt_path='best', dataloaders=test_loader)
     
@@ -207,20 +207,48 @@ if __name__ == "__main__":
     #TRY WITHOUT CHM FILTER
     #TRY FEWER INPUTS
 
-    refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
-            valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
-            test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
-            num_classes=256,
-            extra_labels='trained_backbone_superpixel_training_data_lr_5e4_NO_BN_SWA',
-            class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PICOL', 3: 'PIFL2'},
-            class_weights= [0.6434426229508197, 0.7405660377358491, 1.353448275862069, 2.8035714285714284],
-            chm_mean = 4.015508459469479,
-            chm_std = 4.809300736115787,
-            positions=False,
-            freeze_backbone=False,
-            trained_backbone=True,
-            use_queue=False,
-            ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_400_epochs_epoch=199.ckpt')
+    unified_training(class_key={0: 'PIEN', 1: 'ABLAL', 2: 'PICOL', 3: 'PIFL2'},
+                    chm_mean=4.015508459469479,
+                    chm_std=4.809300736115787,
+                    lr=5e-4,
+                    height_threshold=5,
+                    class_weights=[0.6434426229508197, 0.7405660377358491, 1.353448275862069, 2.8035714285714284],
+                    trained_backbone=True,
+                    features_dict={
+                        'pca' : 10,
+                        'ica': 10,
+                        'raw': 8,
+                        'shadow': 1, 
+                        'chm': 1,
+                        'az': 1 
+                    },
+                    num_intermediate_classes = 256,
+                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/',
+                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
+                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
+                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
+                    pre_training_epochs = 1,
+                    refine_epochs = 1,
+                    pre_train_batch_size = 2048,
+                    refine_batch_size = 32,
+                    pre_train_workers = 1,
+                    refine_workers = 1,
+                    extra_labels= 'initial_test')
+
+    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
+    #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
+    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
+    #         num_classes=256,
+    #         extra_labels='trained_backbone_superpixel_training_data_lr_5e4_NO_BN_SWA',
+    #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PICOL', 3: 'PIFL2'},
+    #         class_weights= [0.6434426229508197, 0.7405660377358491, 1.353448275862069, 2.8035714285714284],
+    #         chm_mean = 4.015508459469479,
+    #         chm_std = 4.809300736115787,
+    #         positions=False,
+    #         freeze_backbone=False,
+    #         trained_backbone=True,
+    #         use_queue=False,
+    #         ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_400_epochs_epoch=199.ckpt')
     
 
 
