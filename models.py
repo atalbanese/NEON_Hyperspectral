@@ -14,17 +14,245 @@ from einops.layers.torch import Rearrange
 import numpy.ma as ma
 import numpy as np
 
-def save_grid(tb, inp, name, epoch):  
-    #img_grid = rearrange(inp, 'b h w -> h (b w)')
-    tb.add_image(name, inp, epoch, dataformats='HW')
 
-def get_classifications(x):
-    #norms = torch.nn.functional.softmax(x, dim=1)
-    masks = x.argmax(1)
 
-    # masks = torch.unsqueeze(masks, 1) * 255.0/59
-    # masks = torch.cat((masks, masks, masks), dim=1)
-    return masks
+#TODO: test out additional augmentations for labelled training
+class SwaVModelUnified(pl.LightningModule):
+    def __init__(self, 
+                class_key,
+                chm_mean, 
+                chm_std, 
+                lr, 
+                height_threshold, 
+                class_weights, 
+                trained_backbone, 
+                features_dict, 
+                num_intermediate_classes,
+                pre_training):
+        super().__init__()
+        self.save_hyperparameters()
+        self.features_dict = features_dict
+        self.num_channels = self.calc_num_channels()
+        self.num_output_classes = len(class_weights)
+        self.class_key = class_key
+        self.chm_mean = chm_mean
+        self.chm_std = chm_std
+        self.lr = lr
+        self.height_threshold = height_threshold
+        self.trained_backbone = trained_backbone
+        self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes)
+        self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes*2),
+                                         nn.BatchNorm1d(num_intermediate_classes*2),
+                                         nn.ReLU(),
+                                         nn.Linear(num_intermediate_classes*2, self.num_output_classes))
+        self.loss = nn.CrossEntropyLoss(weight=torch.tensor(class_weights))
+        self.results = self.make_results_dict(class_key)
+        self.class_key = class_key
+        self.pre_training = pre_training
+        self.ra = Rearrange('b c h w -> b (h w) c')
+
+
+    def calc_num_channels(self):
+        out = 0
+        for v in self.features_dict.values():
+            out += v
+        return v
+
+    def make_results_dict(self, classes):
+        out = {value:{v:0 for v in classes.values()} for value in classes.values()}
+        return out
+
+    def update_results(self, inp, target):
+        inp = torch.argmax(inp, dim=1)
+        pred = list(inp)
+        targets = list(target)
+
+        for p, t in list(zip(pred, targets)):
+            p_label = self.class_key[int(p)]
+            t_label = self.class_key[int(t)]
+
+            self.results[t_label][p_label] += 1
+        return None
+
+    def calc_ova(self):
+        total_pixels = 0
+        accurate_pixels = 0
+        for key, value in self.results.items():
+            for i, j in value.items():
+                total_pixels += j
+                if key == i:
+                    accurate_pixels += j
+
+        if total_pixels != 0:            
+            return accurate_pixels/total_pixels
+        return 0
+
+    def prep_data(self, inp):
+        to_cat = []
+        for key, value in self.features_dict.items():
+            cur = inp[key]
+            if len(cur.shape) != 4:
+                cur = cur.unsqueeze(1)
+            if cur.shape[1] != value:
+                cur = cur[:,:value,...]
+            if key == 'mask':
+                continue
+            if key == 'targets':
+                continue
+            if key == 'height':
+                continue
+            if key == "chm":
+                chm = (chm - self.chm_mean)/self.chm_std
+            to_cat.append(cur)
+        return torch.cat(to_cat, dim=1)
+
+    def pre_training_step(self, inp):
+        inp = self.prep_data(inp)
+        if torch.rand(1) > 0.5:
+            inp = TF.vflip(inp)
+
+        if torch.rand(1) > 0.5:
+            inp = TF.hflip(inp)
+
+        inp = self.ra(inp)
+
+        loss = self.swav.forward_train(inp)
+        self.log('pre_train_loss', loss)
+        return loss
+
+    def refine_step(self, inp, validating=False):
+        chm = None
+        mask = None
+        if "chm" in inp:
+            chm = inp['chm']
+            height = inp['height']
+            mask = inp['mask']
+            mask = reduce(mask, 'b c h w -> b () h w', 'max')
+
+            height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
+
+            for i, h in enumerate(height):
+                height_test = chm[i]
+                add_mask = height_test < (h - self.height_threshold)
+                height_mask[i] = add_mask
+
+            mask += height_mask
+            mask = ~mask
+        inp = self.prep_data(inp)
+
+        vflipped = False
+        hflipped = False
+        if torch.rand(1) > 0.5:
+            inp = TF.vflip(inp)
+            vflipped = True
+
+        if torch.rand(1) > 0.5:
+            inp = TF.hflip(inp)
+            hflipped = True
+
+        inp = self.ra(inp)
+
+        inp = self.swav.forward(inp)
+        inp = rearrange(inp, 'b s f -> (b s) f')
+        inp = self.predict(inp)
+
+        inp = torch.softmax(inp, dim=1)
+        
+        targets= rearrange(targets, 'b c h w -> (b h w) c')
+        targets=torch.argmax(targets, dim=1)
+        
+
+        if mask is not None:
+            if vflipped:
+                mask = TF.vflip(mask)
+            if hflipped:
+                mask = TF.hflip(mask)
+            mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
+            inp = inp[mask, :]
+            targets = targets[mask]
+
+        if not validating: 
+            loss = self.loss(inp, targets)
+            self.log('refine_loss', loss)
+            return loss
+        else:
+            self.update_results(inp, targets)
+            return None
+
+
+
+    def training_step(self, inp, batch_idx, optimizer_idx):
+        
+        if self.pre_training and (optimizer_idx == 0):
+            return self.pre_training_step(inp)
+            
+        if (not self.pre_training) and (optimizer_idx == 1):
+            return self.refine_step(inp)
+
+        return None
+
+    def validation_step(self, inp, _):
+        if not self.pre_training:
+            self.refine_step(inp, validating=True)
+        return None
+
+    def validation_epoch_end(self, _):
+        if not self.pre_training:
+            ova = self.calc_ova()
+            print(self.results)
+
+            self.results = self.make_results_dict(self.class_key)
+            self.log('ova', ova)
+
+            print(f'\nOVA: {ova}')
+        
+
+    def test_step(self, x, _):
+        if not self.pre_training:
+            self.validation_step(x, _)
+
+        return None
+
+    def test_epoch_end(self, _):
+        if not self.pre_training:
+            ova = self.calc_ova()
+            print(self.results)
+
+            self.results = self.make_results_dict(self.class_key)
+            self.log('test_ova', ova)
+
+            print(f'\nOVA: {ova}')
+            return None
+
+    def on_before_optimizer_step(self, optimizer, optimizer_idx):
+        if (self.current_epoch < 1) and (self.pre_training):
+            for name, p in self.swav.named_parameters():
+                    if "prototypes" in name:
+                        p.grad = None
+    
+    def on_train_batch_start(self, batch, batch_idx):
+        if self.pre_training:
+            self.swav.norm_prototypes()
+
+    def configure_optimizers(self):
+        if self.pre_training:
+            optimizer = torch.optim.AdamW(self.swav.parameters(), lr=self.lr)
+        else:
+            optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+    
+    
+    def forward(self, x):
+        x = self.prep_data(x)
+        out = self.swav.forward(x)
+        out = rearrange(out, 'b s f -> (b s) f')
+        out = self.predict(out)
+        return out
+    
+    
+
+    
 
 
 
@@ -225,6 +453,8 @@ class SWaVModelRefine(pl.LightningModule):
 
         print(f'\nOVA: {ova}')
         return None
+
+    
 
 
 
@@ -1369,3 +1599,15 @@ class HyperSimSiamWaveAugment(pl.LightningModule):
     
     def forward(self, x):
         return self.network.predict(x)
+
+def save_grid(tb, inp, name, epoch):  
+    #img_grid = rearrange(inp, 'b h w -> h (b w)')
+    tb.add_image(name, inp, epoch, dataformats='HW')
+
+def get_classifications(x):
+    #norms = torch.nn.functional.softmax(x, dim=1)
+    masks = x.argmax(1)
+
+    # masks = torch.unsqueeze(masks, 1) * 255.0/59
+    # masks = torch.cat((masks, masks, masks), dim=1)
+    return masks

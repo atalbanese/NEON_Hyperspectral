@@ -58,7 +58,7 @@ def refine(chm_mean=None, chm_std =None, num_channels=31,
                         azm=False, 
                         chm=False, 
                         log_every=50, 
-                        max_epochs=800, 
+                        max_epochs=200, 
                         num_workers=1, 
                         extra_labels='', 
                         use_queue=False,  
@@ -113,10 +113,90 @@ def refine(chm_mean=None, chm_std =None, num_channels=31,
 
    
     model = models.SWaVModelRefine(swav_config, num_refine_classes, class_key, chm_mean, chm_std, class_weights=class_weights, freeze_backbone=freeze_backbone, trained_backbone=trained_backbone, height_threshold=height_threshold)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback, StochasticWeightAveraging(swa_epoch_start=50)])
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback, StochasticWeightAveraging(50)])
     #trainer.tune(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     trainer.test(ckpt_path='best', dataloaders=test_loader)
+
+def unified_training(class_key,
+                    chm_mean,
+                    chm_std,
+                    lr,
+                    height_threshold,
+                    class_weights,
+                    trained_backbone,
+                    features_dict,
+                    num_intermediate_classes,
+                    pre_train_folder,
+                    train_folder,
+                    valid_folder,
+                    test_folder,
+                    pre_training_epochs,
+                    refine_epochs,
+                    pre_train_batch_size,
+                    refine_batch_size,
+                    pre_train_workers,
+                    refine_workers,
+                    extra_labels):
+
+    pl.seed_everything(42)
+
+    refine_callback = ModelCheckpoint(
+        dirpath='ckpts/unified_training', 
+        filename=f'niwo_refine_{extra_labels}'+'{ova:.2f}_{epoch}',
+        #every_n_epochs=log_every,
+        monitor='ova',
+        save_on_train_epoch_end=True,
+        mode='max',
+        save_top_k = 5
+        )
+
+    pre_train_callback = ModelCheckpoint(
+        dirpath='ckpts/unified_training', 
+        filename=f'niwo_pre_train_{extra_labels}'+'_{epoch}',
+        every_n_epochs=pre_training_epochs,
+        save_on_train_epoch_end=True,
+        save_top_k = -1
+        )
+    
+    pre_train_ckpt = f'ckpts/unified_training/niwo_pre_train_{extra_labels}_epoch={pre_training_epochs}.ckpt'
+
+    pre_model = models.SwaVModelUnified(class_key,
+                                    chm_mean,
+                                    chm_std,
+                                    lr,
+                                    height_threshold,
+                                    class_weights,
+                                    trained_backbone,
+                                    features_dict,
+                                    num_intermediate_classes,
+                                    pre_training=False)
+
+    pre_train_data = RenderedDataLoader(pre_train_folder)
+    pre_train_loader = DataLoader(pre_train_data, batch_size=pre_train_batch_size, num_workers=pre_train_workers, pin_memory=True)
+
+    train_dataset = RenderedDataLoader(train_folder)
+    train_loader = DataLoader(train_dataset, batch_size=refine_batch_size, num_workers=refine_workers)
+
+    valid_dataset = RenderedDataLoader(valid_folder)
+    valid_loader = DataLoader(valid_dataset, batch_size=1, num_workers=refine_workers)
+
+    test_dataset = RenderedDataLoader(test_folder)
+    test_loader = DataLoader(test_dataset, batch_size=1, num_workers=refine_workers)
+
+    pre_trainer = pl.Trainer(accelerator="gpu", max_epochs=pre_training_epochs, callbacks=[pre_train_callback])
+    refiner = pl.Trainer(accelerator="gpu", max_epochs=refine_epochs, callbacks=[refine_callback])
+
+    pre_trainer.fit(pre_model, pre_train_loader)
+
+    refine_model = models.SwaVModelUnified.load_from_checkpoint(pre_train_ckpt)
+    refiner.fit(refine_model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+    refiner.test(ckpt_path='best', dataloaders=test_loader)
+    
+
+
+    
+
 
 
 
@@ -131,7 +211,7 @@ if __name__ == "__main__":
             valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
             test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
             num_classes=256,
-            extra_labels='trained_backbone_superpixel_training_data_lr_5e4_SWA_long_start_50',
+            extra_labels='trained_backbone_superpixel_training_data_lr_5e4_NO_BN_SWA',
             class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PICOL', 3: 'PIFL2'},
             class_weights= [0.6434426229508197, 0.7405660377358491, 1.353448275862069, 2.8035714285714284],
             chm_mean = 4.015508459469479,

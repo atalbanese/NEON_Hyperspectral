@@ -536,7 +536,7 @@ def select_extra_bands(args):
     if ".h5" in file:
         out_file = file.split('.')[0] + '_extrabands.npy'
         if not os.path.exists(os.path.join(out_dir, out_file)):
-            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=fn)['bands']
+            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=fn())['bands']
             bands = hp.stack_all(img, axis=2)
             np.save(os.path.join(out_dir, out_file), bands)
 
@@ -638,9 +638,10 @@ if __name__ == '__main__':
     
 
     FILE = 'NEON_D13_NIWO_DP3_457000_4432000_CHM.tif'
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo_chm'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
     PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_masked_10'
+    FN = get_extra_bands_all
 
     chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
 
@@ -667,8 +668,8 @@ if __name__ == '__main__':
 
     
 
-    # with ProcessPool(4) as pool:
-    #     bulk_process(pool, [IN_DIR, OUT_DIR], select_extra_bands)
+    with ProcessPool(4) as pool:
+        bulk_process(pool, [IN_DIR, OUT_DIR, FN], select_extra_bands)
 
     # # # with ProcessPool(4) as pool:
     # # #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
@@ -676,8 +677,8 @@ if __name__ == '__main__':
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, PCA_DIR, MASK_DIR], masked_pca)
 
-    with ProcessPool(4) as pool:
-        bulk_process(pool, [chm_fold, OUT_DIR], make_superpixels_chm)
+    # with ProcessPool(4) as pool:
+    #     bulk_process(pool, [chm_fold, OUT_DIR], make_superpixels_chm)
 
     #get_masks((IMG, IMG_DIR, MASK_DIR))
 
