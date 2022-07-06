@@ -177,7 +177,27 @@ def get_bareness_bands():
         'swir': 1610
     }
 
-def get_extra_bands():
+def get_extra_bands_all():
+    return {
+        'red': 654,
+        "green": 561, 
+        "blue": 482,
+        'nir': 865,
+        'swir': 1610,
+        'nitrogen': 1510,
+        'lignin': 1754,
+        'xanthophyll': 531,
+        #These are new per shi 2021 since hard to differentiate spruce and fir
+        'disease_water': 1660,
+        'red_edge_1': 714,
+        'red_edge_2': 733,
+        'red_edge_3': 752,
+        'swir_2': 2090,
+        'swir_3': 2210,
+        'swir_4': 2280
+    }
+
+def get_extra_bands_scholl():
     return {
         'red': 654,
         "green": 561, 
@@ -187,6 +207,22 @@ def get_extra_bands():
         'nitrogen': 1510,
         'lignin': 1754,
         'xanthophyll': 531
+    }
+
+def get_extra_bands_shi():
+    return {
+        'red': 654,
+        "green": 561, 
+        "blue": 482,
+        'nir': 865,
+        'swir': 1610,
+        'disease_water': 1660,
+        'red_edge_1': 714,
+        'red_edge_2': 733,
+        'red_edge_3': 752,
+        'swir_2': 2090,
+        'swir_3': 2210,
+        'swir_4': 2280
     }
 
 def plot_output_files(dir):
@@ -496,11 +532,11 @@ def bulk_shadow_index(args):
             np.save(os.path.join(out_dir, out_file), mpsi)
 
 def select_extra_bands(args):
-    file, in_dir, out_dir = args
+    file, in_dir, out_dir, fn = args
     if ".h5" in file:
         out_file = file.split('.')[0] + '_extrabands.npy'
         if not os.path.exists(os.path.join(out_dir, out_file)):
-            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=get_extra_bands())['bands']
+            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=fn)['bands']
             bands = hp.stack_all(img, axis=2)
             np.save(os.path.join(out_dir, out_file), bands)
 

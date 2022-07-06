@@ -58,7 +58,7 @@ def refine(chm_mean=None, chm_std =None, num_channels=31,
                         azm=False, 
                         chm=False, 
                         log_every=50, 
-                        max_epochs=400, 
+                        max_epochs=800, 
                         num_workers=1, 
                         extra_labels='', 
                         use_queue=False,  
@@ -69,7 +69,7 @@ def refine(chm_mean=None, chm_std =None, num_channels=31,
                         data_folder=None,
                         valid_folder=None,
                         test_folder=None,
-                        num_refine_classes = 5,
+                        num_refine_classes = 4,
                         ckpt = None,
                         class_key = None,
                         class_weights = None,
@@ -80,33 +80,13 @@ def refine(chm_mean=None, chm_std =None, num_channels=31,
     data_folder = data_folder
 
     checkpoint_callback = ModelCheckpoint(
-        dirpath='ckpts/overnight', 
+        dirpath='ckpts/sp_training', 
         filename=f'niwo_{num_channels}_channels_{num_classes}_classes_refine_{extra_labels}'+'{ova:.2f}_{epoch}',
         #every_n_epochs=log_every,
         monitor='ova',
         save_on_train_epoch_end=True,
         mode='max',
         save_top_k = 5
-        )
-
-    loss_callback = ModelCheckpoint(
-        dirpath='ckpts/overnight', 
-        filename=f'niwo_{num_channels}_channels_{num_classes}_classes_refine_{extra_labels}'+'{train_loss:.2f}_{epoch}',
-        #every_n_epochs=log_every,
-        monitor='train_loss',
-        save_on_train_epoch_end=True,
-        mode='min',
-        save_top_k = 5
-        )
-
-    every_callback = ModelCheckpoint(
-        dirpath='ckpts/overnight/log_every', 
-        filename=f'niwo_{num_channels}_channels_{num_classes}_classes_refine_{extra_labels}'+'{epoch}',
-        every_n_epochs=log_every,
-        #monitor='train_loss',
-        save_on_train_epoch_end=True,
-        #mode='min',
-        save_top_k = -1
         )
 
     pl.seed_everything(42)
@@ -133,7 +113,7 @@ def refine(chm_mean=None, chm_std =None, num_channels=31,
 
    
     model = models.SWaVModelRefine(swav_config, num_refine_classes, class_key, chm_mean, chm_std, class_weights=class_weights, freeze_backbone=freeze_backbone, trained_backbone=trained_backbone, height_threshold=height_threshold)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback, every_callback, loss_callback])
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=max_epochs, callbacks=[checkpoint_callback, StochasticWeightAveraging(swa_epoch_start=50)])
     #trainer.tune(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     trainer.test(ckpt_path='best', dataloaders=test_loader)
@@ -147,28 +127,27 @@ if __name__ == "__main__":
     #TRY WITHOUT CHM FILTER
     #TRY FEWER INPUTS
 
-    # refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
-    #         valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
-    #         test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
-    #         num_classes=256,
-    #         extra_labels='all_data_400_epochs_trained_backbone_smaller_predict_positions_',
-    #         class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PIFL2', 3: 'PICOL', 4: 'SALIX'},
-    #         class_weights= [0.47, 0.61038961, 3.35714286, 1.23684211, 7.83333333],
-    #         chm_mean = 4.015508459469479,
-    #         chm_std = 4.809300736115787,
-    #         positions=False,
-    #         freeze_backbone=False,
-    #         trained_backbone=True,
-    #         use_queue=True,
-    #         queue_chunks=5,
-    #         ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_epoch=49.ckpt')
+    refine(data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training',
+            valid_folder= 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid',
+            test_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test',
+            num_classes=256,
+            extra_labels='trained_backbone_superpixel_training_data_lr_5e4_SWA_long_start_50',
+            class_key= {0: 'PIEN', 1: 'ABLAL', 2: 'PICOL', 3: 'PIFL2'},
+            class_weights= [0.6434426229508197, 0.7405660377358491, 1.353448275862069, 2.8035714285714284],
+            chm_mean = 4.015508459469479,
+            chm_std = 4.809300736115787,
+            positions=False,
+            freeze_backbone=False,
+            trained_backbone=True,
+            use_queue=False,
+            ckpt='ckpts/niwo_31_channels_256_classes_pca_ica_shadow_extra_400_epochs_epoch=199.ckpt')
     
 
 
 
 
-    do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra_400_epochs', use_queue=False,
-                                data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/')
+    # do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra_400_epochs', use_queue=False,
+    #                             data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/')
 
     # do_rendered_training(num_workers=8, num_classes=256, extra_labels='pca_ica_shadow_extra_queue', use_queue=True,
     #                             data_folder='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training/')

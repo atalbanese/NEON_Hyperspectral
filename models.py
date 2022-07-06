@@ -30,8 +30,9 @@ def get_classifications(x):
 
 #TODO: Make checkpoint saving work
 class SWaVModelRefine(pl.LightningModule):
-    def __init__(self, swav_config, num_output_classes, class_key, chm_mean, chm_std, lr=3e-4, height_threshold=5, class_weights=None, freeze_backbone=True, trained_backbone=True,**kwargs):
+    def __init__(self, swav_config, num_output_classes, class_key, chm_mean, chm_std, lr=5e-4, height_threshold=5, class_weights=None, freeze_backbone=True, trained_backbone=True,**kwargs):
         super().__init__()
+        self.save_hyperparameters()
         self.freeze_backbone = freeze_backbone
         self.height_threshold = height_threshold
         self.lr = lr
@@ -235,6 +236,7 @@ class SWaVModelRefine(pl.LightningModule):
              optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
         #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+        #scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, 20, T_mult=2)
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
     
     
@@ -258,6 +260,7 @@ class SWaVModelSuperPixel(pl.LightningModule):
                     positions=False, 
                     **kwargs):
         super().__init__()
+        self.save_hyperparameters()
         self.model = networks.SWaVSuperPixel(azm=azm, 
                                                 chm=chm, 
                                                 queue_chunks=queue_chunks, 
@@ -296,7 +299,7 @@ class SWaVModelSuperPixel(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=5e-4)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=5e-9)
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
 
     def on_before_optimizer_step(self, optimizer, optimizer_idx):

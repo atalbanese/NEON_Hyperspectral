@@ -52,10 +52,10 @@ class SWaVSuperPixel(nn.Module):
             self.positions = nn.Parameter(torch.randn((self.patch_size**2, emb_size)))
 
 
-        self.transforms_main = tt.Compose([Rearrange('b c h w -> b (h w) c'),
+        self.transforms_main = tt.Compose([
                                         tr.Blit(p=0.5),
-                                        tr.Block(p=0.5),
-                                        Rearrange('b (h w) c -> b c h w', h=self.patch_size, w=self.patch_size)])
+                                        tr.Block(p=0.5)
+                                       ])
 
         #Todo: add positional embedding
         self.embed = nn.Linear(in_channels, emb_size)
@@ -125,7 +125,7 @@ class SWaVSuperPixel(nn.Module):
     # def forward_train(self, x, chm, azm):
     def forward_train(self, x):
 
-        b,_,_,_, = x.shape
+        b = x.shape[0]
 
         # if self.chm_concat:
         #     x = torch.cat((x, chm), dim=1)

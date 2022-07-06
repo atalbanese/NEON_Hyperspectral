@@ -88,9 +88,10 @@ class Validator():
 
         self.last_cluster = {}
 
-        self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
+        
 
         self.data_gdf = self.pick_superpixels()
+        self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
 
         self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
         self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=self.train['taxonID'])
@@ -209,37 +210,37 @@ class Validator():
 
                 mask = pca_crop != pca_crop
 
+                if pca_crop.shape == (3, 3, 10):
+                    pca_crop = torch.tensor(pca_crop)
+                    pca_crop = rearrange(pca_crop, 'h w c -> c h w')
+                    ica_crop = torch.tensor(ica_crop)
+                    ica_crop = rearrange(ica_crop, 'h w c -> c h w')
+                    shadow_crop = torch.tensor(shadow_crop)
+                    extra_crop = torch.tensor(extra_crop)
+                    extra_crop = rearrange(extra_crop, 'h w c -> c h w')
+                    chm_crop = torch.tensor(chm_crop)
+                    azm_crop = torch.tensor(azm_crop)
+                    mask = torch.tensor(mask)
+                    mask = rearrange(mask, 'h w c -> c h w')
 
-                pca_crop = torch.tensor(pca_crop)
-                pca_crop = rearrange(pca_crop, 'h w c -> c h w')
-                ica_crop = torch.tensor(ica_crop)
-                ica_crop = rearrange(ica_crop, 'h w c -> c h w')
-                shadow_crop = torch.tensor(shadow_crop)
-                extra_crop = torch.tensor(extra_crop)
-                extra_crop = rearrange(extra_crop, 'h w c -> c h w')
-                chm_crop = torch.tensor(chm_crop)
-                azm_crop = torch.tensor(azm_crop)
-                mask = torch.tensor(mask)
-                mask = rearrange(mask, 'h w c -> c h w')
+                    label = torch.zeros((len(self.taxa.keys()),out_size, out_size), dtype=torch.float32).clone()
+                    label[self.taxa[taxa]] = 1.0
 
-                label = torch.zeros((len(self.taxa.keys()),out_size, out_size), dtype=torch.float32).clone()
-                label[self.taxa[taxa]] = 1.0
+                    to_save = {
+                        'pca': pca_crop,
+                        'ica': ica_crop,
+                        'shadow': shadow_crop,
+                        'raw_bands': extra_crop,
+                        'chm': chm_crop,
+                        'azm': azm_crop,
+                        'mask': mask,
+                        'target': label,
+                        'height': height
+                    }
 
-                to_save = {
-                    'pca': pca_crop,
-                    'ica': ica_crop,
-                    'shadow': shadow_crop,
-                    'raw_bands': extra_crop,
-                    'chm': chm_crop,
-                    'azm': azm_crop,
-                    'mask': mask,
-                    'target': label,
-                    'height': height
-                }
-
-                f_name = f'{key}_{row["taxonID"]}_{super_pix_num}.pt'
-                with open(os.path.join(save_dir, f_name), 'wb') as f:
-                    torch.save(to_save, f)
+                    f_name = f'{key}_{row["taxonID"]}_{super_pix_num}.pt'
+                    with open(os.path.join(save_dir, f_name), 'wb') as f:
+                        torch.save(to_save, f)
             
         return None
 
@@ -1052,9 +1053,11 @@ if __name__ == "__main__":
     #valid.pick_superpixels()
 
     #validate_config(valid, configs)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_training', 'train')
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_valid', 'valid')
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/sp_labels/label_test', 'test')
+
+    #NEED TO TEST SCHOLL METHOD AGAIN W/O DUPLICATES
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training', 'train', out_size=3)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid', 'valid', out_size=3)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test', 'test', out_size=3)
 
 
 
