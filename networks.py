@@ -108,7 +108,7 @@ class SWaVUnified(nn.Module):
         scores_t = self.ra(scores_t)
         scores_s = self.ra(scores_s)
 
-        b *= self.patch_size**2
+        b = scores_t.shape[0]
 
 
         q_t = self.sinkhorn(t)

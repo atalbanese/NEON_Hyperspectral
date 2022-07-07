@@ -56,7 +56,7 @@ class SwaVModelUnified(pl.LightningModule):
         out = 0
         for v in self.features_dict.values():
             out += v
-        return v
+        return out
 
     def make_results_dict(self, classes):
         out = {value:{v:0 for v in classes.values()} for value in classes.values()}
@@ -90,18 +90,19 @@ class SwaVModelUnified(pl.LightningModule):
     def prep_data(self, inp):
         to_cat = []
         for key, value in self.features_dict.items():
-            cur = inp[key]
-            if len(cur.shape) != 4:
-                cur = cur.unsqueeze(1)
-            
             if key == 'mask':
                 continue
             if key == 'targets':
                 continue
             if key == 'height':
                 continue
+            cur = inp[key]
+            if len(cur.shape) != 4:
+                cur = cur.unsqueeze(1)
+            
+            
             if key == "chm":
-                chm = (chm - self.chm_mean)/self.chm_std
+                cur = (cur - self.chm_mean)/self.chm_std
             if cur.shape[1] != value:
                 cur = cur[:,:value,...]
             to_cat.append(cur)
@@ -124,8 +125,9 @@ class SwaVModelUnified(pl.LightningModule):
     def refine_step(self, inp, validating=False):
         chm = None
         mask = None
+        targets = inp['target']
         if "chm" in inp:
-            chm = inp['chm']
+            chm = inp['chm'].unsqueeze(1)
             height = inp['height']
             mask = inp['mask']
             mask = reduce(mask, 'b c h w -> b () h w', 'max')
