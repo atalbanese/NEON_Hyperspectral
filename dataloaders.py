@@ -18,6 +18,7 @@ from einops import rearrange, reduce
 import rasterio as rs
 from rasterio import logging
 from validator import Validator
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 
@@ -250,7 +251,7 @@ class RenderDataLoader(Dataset):
                     chm_std, 
                     mode,
                     save_dir,
-                    patch_size=4, 
+                    patch_size=3, 
                     validator=None, 
                     **kwargs):
         self.pca_folder = pca_folder
@@ -389,6 +390,9 @@ class RenderDataLoader(Dataset):
 
                 chm_crop = chm[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop
                 chm_crop[chm_crop != chm_crop] = 0
+                #Need to ensure theres some canopy height data
+                if chm_crop.sum() == 0:
+                    continue
 
                 azm_crop = azm[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop
                 azm_crop[azm_crop != azm_crop] = 0
@@ -410,6 +414,8 @@ class RenderDataLoader(Dataset):
                     extra_center = ra(extra_center)
 
                     chm_center = self.grab_center(chm_crop, self.patch_size)
+                    if chm_center.sum() == 0:
+                        continue
                     chm_center = torch.from_numpy(chm_center)
 
                     azm_center = self.grab_center(azm_crop, self.patch_size)
@@ -431,7 +437,7 @@ class RenderDataLoader(Dataset):
                     with open(save_loc, 'wb') as f:
                         torch.save(to_save, save_loc)
 
-        return None
+        return 1
 
 
 
@@ -480,10 +486,11 @@ if __name__ == "__main__":
                     prefix='D13',
                     chm_mean = 4.015508459469479,
                     chm_std = 4.809300736115787,
-                    patch_size=3)
+                    )
 
-    render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid)
+    render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid, patch_size=3)
+    train_loader = DataLoader(render, batch_size=1, num_workers=8)
     # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 
-    for ix in tqdm(render):
+    for ix in tqdm(train_loader):
         print(ix)

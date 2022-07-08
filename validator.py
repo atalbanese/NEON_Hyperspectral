@@ -170,7 +170,7 @@ class Validator():
             sp_mask = sp == super_pix_num
             height = float(row['height'])
             diam = float(row['maxCrownDiameter'])
-            rad = int(diam//2)
+            #rad = int(diam//2)
             #Ensure nothing is bigger than 4x4
             rad = 1 
             if rad>0:
