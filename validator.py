@@ -1027,7 +1027,7 @@ if __name__ == "__main__":
     AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
     ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
-    RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo'
+    RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
     SHADOW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
     SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo_chm'
 
@@ -1055,9 +1055,9 @@ if __name__ == "__main__":
     #validate_config(valid, configs)
 
     #NEED TO TEST SCHOLL METHOD AGAIN W/O DUPLICATES
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_training', 'train', out_size=3)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_valid', 'valid', out_size=3)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/label_test', 'test', out_size=3)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/label_training', 'train', out_size=3)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/label_valid', 'valid', out_size=3)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/label_test', 'test', out_size=3)
 
 
 

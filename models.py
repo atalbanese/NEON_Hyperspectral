@@ -30,7 +30,7 @@ class SwaVModelUnified(pl.LightningModule):
                 num_intermediate_classes,
                 pre_training):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters('lr', 'height_threshold', 'trained_backbone', 'features_dict', 'num_intermediate_classes', 'pre_training')
         self.features_dict = features_dict
         self.num_channels = self.calc_num_channels()
         self.num_output_classes = len(class_weights)
@@ -126,21 +126,21 @@ class SwaVModelUnified(pl.LightningModule):
         chm = None
         mask = None
         targets = inp['target']
-        if "chm" in inp:
-            chm = inp['chm'].unsqueeze(1)
-            height = inp['height']
-            mask = inp['mask']
-            mask = reduce(mask, 'b c h w -> b () h w', 'max')
 
-            height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
+        chm = inp['chm'].unsqueeze(1)
+        height = inp['height']
+        mask = inp['mask']
+        mask = reduce(mask, 'b c h w -> b () h w', 'max')
 
-            for i, h in enumerate(height):
-                height_test = chm[i]
-                add_mask = height_test < (h - self.height_threshold)
-                height_mask[i] = add_mask
+        height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
 
-            mask += height_mask
-            mask = ~mask
+        for i, h in enumerate(height):
+            height_test = chm[i]
+            add_mask = height_test < (h - self.height_threshold)
+            height_mask[i] = add_mask
+
+        mask += height_mask
+        mask = ~mask
         inp = self.prep_data(inp)
 
         vflipped = False
@@ -242,6 +242,7 @@ class SwaVModelUnified(pl.LightningModule):
             optimizer = torch.optim.AdamW(self.swav.parameters(), lr=self.lr)
         else:
             optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+            print('Optimizing all parameters')
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
     

@@ -355,7 +355,7 @@ class RenderDataLoader(Dataset):
             chm = chm_open.read().astype(np.float32)
             chm[chm==-9999] = np.nan
 
-        chm = (chm.squeeze(axis=0)- self.chm_mean)/self.chm_std
+        chm = chm.squeeze(axis=0)
         chm[chm != chm] = 0
 
         #Superpix
@@ -397,7 +397,7 @@ class RenderDataLoader(Dataset):
                 shadow_crop[shadow_crop != shadow_crop] = 0
 
                 pca_center = self.grab_center(pca_crop, self.patch_size)
-                if (pca_center.shape == (4, 4, 10)) and (pca_center.sum() != 0):
+                if (pca_center.shape == (self.patch_size, self.patch_size, 10)) and (pca_center.sum() != 0):
                     pca_center = torch.from_numpy(pca_center)
                     pca_center = ra(pca_center)
                     
@@ -445,7 +445,7 @@ if __name__ == "__main__":
     PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
     SHADOW_DIR ='C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
-    EXTRA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo'
+    RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
    
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
     CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct.csv"
@@ -456,14 +456,17 @@ if __name__ == "__main__":
     SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
     ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra/raw_training'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/raw_training'
 
 
     CHM_MEAN = 4.015508459469479
     CHM_STD =  4.809300736115787
 
     valid = Validator(file=VALID_FILE, 
-                    img_dir=PCA_DIR, 
+                    pca_dir=PCA_DIR, 
+                    ica_dir=ICA_DIR,
+                    raw_bands=RAW_DIR,
+                    shadow=SHADOW_DIR,
                     site_name='NIWO', 
                     num_classes=NUM_CLASSES, 
                     plot_file=PLOT_FILE, 
@@ -473,11 +476,13 @@ if __name__ == "__main__":
                     curated=CURATED_FILE, 
                     rescale=False, 
                     orig=ORIG_DIR, 
+                    superpixel=SP_DIR,
                     prefix='D13',
                     chm_mean = 4.015508459469479,
-                    chm_std = 4.809300736115787)
+                    chm_std = 4.809300736115787,
+                    patch_size=3)
 
-    render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, EXTRA_DIR, SHADOW_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid)
+    render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid)
     # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 
     for ix in tqdm(render):
