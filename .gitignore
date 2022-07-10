@@ -12,3 +12,4 @@ lightning_logs/*
 *.ckpt
 *.csv
 *.tif
+exp_logs/*

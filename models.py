@@ -30,7 +30,7 @@ class SwaVModelUnified(pl.LightningModule):
                 num_intermediate_classes,
                 pre_training):
         super().__init__()
-        self.save_hyperparameters('lr', 'height_threshold', 'trained_backbone', 'features_dict', 'num_intermediate_classes', 'pre_training')
+        self.save_hyperparameters('lr', 'height_threshold', 'trained_backbone', 'features_dict', 'num_intermediate_classes', 'pre_training', 'class_key', 'chm_mean', 'chm_std', 'class_weights')
         self.features_dict = features_dict
         self.num_channels = self.calc_num_channels()
         self.num_output_classes = len(class_weights)
