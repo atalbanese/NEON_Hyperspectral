@@ -125,7 +125,7 @@ class Validator():
             return [(row_pad, row_pad+add_row), (col_pad, col_pad+add_col)]
 
     #TODO: Check shapes before saving
-    def render_valid_data(self, save_dir, split, out_size=4):
+    def render_valid_data(self, save_dir, split, out_size=4, target_size=3):
         if split == 'train':
             data = self.train
         if split == 'valid':
@@ -172,7 +172,7 @@ class Validator():
             diam = float(row['maxCrownDiameter'])
             #rad = int(diam//2)
             #Ensure nothing is bigger than 4x4
-            rad = 1 
+            rad = out_size//2 
             if rad>0:
                 masked_chm = chm * sp_mask
                 max_height = masked_chm.max()
@@ -210,7 +210,7 @@ class Validator():
 
                 mask = pca_crop != pca_crop
 
-                if pca_crop.shape == (3, 3, 10):
+                if pca_crop.shape == (out_size, out_size, 10):
                     pca_crop = torch.tensor(pca_crop)
                     pca_crop = rearrange(pca_crop, 'h w c -> c h w')
                     ica_crop = torch.tensor(ica_crop)
@@ -223,7 +223,7 @@ class Validator():
                     mask = torch.tensor(mask)
                     mask = rearrange(mask, 'h w c -> c h w')
 
-                    label = torch.zeros((len(self.taxa.keys()),out_size, out_size), dtype=torch.float32).clone()
+                    label = torch.zeros((len(self.taxa.keys()),target_size, target_size), dtype=torch.float32).clone()
                     label[self.taxa[taxa]] = 1.0
 
                     to_save = {

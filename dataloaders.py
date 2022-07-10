@@ -371,7 +371,7 @@ class RenderDataLoader(Dataset):
         for pix_num in sp_values[1:]:
             select_length = sp_inverse == pix_num
             select_length = select_length.sum()
-            if (select_length > 16):
+            if (select_length > self.patch_size**2):
                 crops = self.get_crop(superpixels, pix_num)
                 if (crops[1] - crops[0] >20) or (crops[3] - crops[2] >20):
                     continue

@@ -27,7 +27,8 @@ def unified_training(class_key,
                     refine_batch_size,
                     pre_train_workers,
                     refine_workers,
-                    log_dir):
+                    log_dir,
+                    swa=False):
 
     pl.seed_everything(42)
     extra_labels = ""
@@ -63,7 +64,8 @@ def unified_training(class_key,
                                     trained_backbone,
                                     features_dict,
                                     num_intermediate_classes,
-                                    pre_training=True)
+                                    pre_training=True,
+                                   )
 
     pre_train_data = RenderedDataLoader(pre_train_folder)
     pre_train_loader = DataLoader(pre_train_data, batch_size=pre_train_batch_size, num_workers=pre_train_workers, pin_memory=True)
@@ -83,7 +85,12 @@ def unified_training(class_key,
     
     pre_trainer.fit(pre_model, pre_train_loader)
 
-    refiner = pl.Trainer(accelerator="gpu", max_epochs=refine_epochs, callbacks=[refine_callback], logger=tb_logger)
+    refine_callbacks = [refine_callback]
+
+    if swa:
+        refine_callbacks.append(StochasticWeightAveraging(swa_epoch_start=50))
+
+    refiner = pl.Trainer(accelerator="gpu", max_epochs=refine_epochs, callbacks=refine_callbacks, logger=tb_logger)
 
     refine_model = models.SwaVModelUnified.load_from_checkpoint(pre_train_ckpt, pre_training=False)
     refiner.fit(refine_model, train_dataloaders=train_loader, val_dataloaders=valid_loader)

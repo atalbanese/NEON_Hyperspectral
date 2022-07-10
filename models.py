@@ -28,7 +28,9 @@ class SwaVModelUnified(pl.LightningModule):
                 trained_backbone, 
                 features_dict, 
                 num_intermediate_classes,
-                pre_training):
+                pre_training,
+                mode='default', 
+                augment_refine = 'false'):
         super().__init__()
         self.save_hyperparameters('lr', 'height_threshold', 'trained_backbone', 'features_dict', 'num_intermediate_classes', 'pre_training', 'class_key', 'chm_mean', 'chm_std', 'class_weights')
         self.features_dict = features_dict
@@ -40,7 +42,14 @@ class SwaVModelUnified(pl.LightningModule):
         self.lr = lr
         self.height_threshold = height_threshold
         self.trained_backbone = trained_backbone
-        self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes)
+        self.augment_refine = augment_refine
+        self.mode = mode
+        if self.mode == 'default':
+            self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes)
+        if self.mode == 'patch':
+            self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes)
+        if self.mode == 'pixel_patch':
+            self.swav = networks.SWaVUnifiedPerPixelPatch(self.num_channels, num_intermediate_classes)
         self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes*2),
                                          nn.BatchNorm1d(num_intermediate_classes*2),
                                          nn.ReLU(),
@@ -116,7 +125,8 @@ class SwaVModelUnified(pl.LightningModule):
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
 
-        inp = self.ra(inp)
+        if self.mode != 'pixel_patch':
+            inp = self.ra(inp)
 
         loss = self.swav.forward_train(inp)
         self.log('pre_train_loss', loss)
@@ -153,8 +163,11 @@ class SwaVModelUnified(pl.LightningModule):
             inp = TF.hflip(inp)
             hflipped = True
 
-        inp = self.ra(inp)
-
+        if self.mode != 'pixel_patch':
+            inp = self.ra(inp)
+        if self.augment_refine:
+            inp = self.swav.transforms_main(inp)
+            
         inp = self.swav.forward(inp)
         inp = rearrange(inp, 'b s f -> (b s) f')
         inp = self.predict(inp)
