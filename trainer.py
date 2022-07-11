@@ -28,16 +28,18 @@ def unified_training(class_key,
                     pre_train_workers,
                     refine_workers,
                     log_dir,
-                    swa=False):
+                    swa=False,
+                    extra_labels="",
+                    pre_training=True):
 
     pl.seed_everything(42)
-    extra_labels = ""
+    feature_labels = ""
     for key, value in features_dict.items():
-        extra_labels = extra_labels + f"{key}_{value}_"
+        feature_labels = feature_labels + f"{key}_{value}_"
 
     refine_callback = ModelCheckpoint(
         dirpath='ckpts/unified_training', 
-        filename=f'niwo_refine_{extra_labels}'+'{ova:.2f}_{epoch}',
+        filename=f'niwo_refine_{feature_labels}{extra_labels}'+'{ova:.2f}_{epoch}',
         #every_n_epochs=log_every,
         monitor='ova',
         save_on_train_epoch_end=True,
@@ -47,13 +49,13 @@ def unified_training(class_key,
 
     pre_train_callback = ModelCheckpoint(
         dirpath='ckpts/unified_training', 
-        filename=f'niwo_pre_train_{extra_labels}'+'{epoch}',
+        filename=f'niwo_pre_train_{feature_labels}{extra_labels}'+'{epoch}',
         every_n_epochs=pre_training_epochs,
         save_on_train_epoch_end=True,
         save_top_k = -1
         )
     
-    pre_train_ckpt = f'ckpts/unified_training/niwo_pre_train_{extra_labels}epoch={pre_training_epochs-1}.ckpt'
+    pre_train_ckpt = f'ckpts/unified_training/niwo_pre_train_{feature_labels}{extra_labels}epoch={pre_training_epochs-1}.ckpt'
 
     pre_model = models.SwaVModelUnified(class_key,
                                     chm_mean,
@@ -81,9 +83,10 @@ def unified_training(class_key,
 
     tb_logger = pl_loggers.TensorBoardLogger(save_dir=log_dir)
 
-    pre_trainer = pl.Trainer(accelerator="gpu", max_epochs=pre_training_epochs, callbacks=[pre_train_callback], logger=tb_logger)
-    
-    pre_trainer.fit(pre_model, pre_train_loader)
+    if pre_training:
+        pre_trainer = pl.Trainer(accelerator="gpu", max_epochs=pre_training_epochs, callbacks=[pre_train_callback], logger=tb_logger)
+        
+        pre_trainer.fit(pre_model, pre_train_loader)
 
     refine_callbacks = [refine_callback]
 

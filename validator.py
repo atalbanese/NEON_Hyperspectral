@@ -31,7 +31,7 @@ import math
 #TODO: Clean this mess up
 #Switch plots to plotly? Good for overlays
 class Validator():
-    def __init__(self, struct=False, rescale=False, train_split=0.6, valid_split=0.2, test_split=0.2,  **kwargs):
+    def __init__(self, struct=False, rescale=False, train_split=0.6, valid_split=0.2, test_split=0.2, use_sp=True, scholl_filter=False, scholl_output=False,  **kwargs):
         self.rescale=rescale
         self.file = kwargs["file"]
         self.pca_dir = kwargs["pca_dir"]
@@ -54,7 +54,9 @@ class Validator():
         self.valid_files = self.get_valid_files()
 
         self.valid_dict = self.make_valid_dict()
-    
+        self.use_sp = use_sp
+        self.scholl_filter= scholl_filter
+        self.scholl_output = scholl_output
 
         self.orig_files = [os.path.join(kwargs['orig'], file) for file in os.listdir(kwargs['orig']) if ".h5" in file]
         self.pca_files = [os.path.join(kwargs['pca_dir'], file) for file in os.listdir(kwargs['pca_dir']) if ".npy" in file]
@@ -89,8 +91,8 @@ class Validator():
         self.last_cluster = {}
 
         
-
-        self.data_gdf = self.pick_superpixels()
+        if use_sp:
+            self.data_gdf = self.pick_superpixels()
         self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
 
         self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
@@ -124,7 +126,7 @@ class Validator():
 
             return [(row_pad, row_pad+add_row), (col_pad, col_pad+add_col)]
 
-    #TODO: Check shapes before saving
+
     def render_valid_data(self, save_dir, split, out_size=4, target_size=3):
         if split == 'train':
             data = self.train
@@ -166,14 +168,14 @@ class Validator():
                 loaded_key = key
 
             taxa = row['taxonID']
-            super_pix_num = row['sp']
-            sp_mask = sp == super_pix_num
+            
             height = float(row['height'])
-            diam = float(row['maxCrownDiameter'])
-            #rad = int(diam//2)
-            #Ensure nothing is bigger than 4x4
+
+
             rad = out_size//2 
-            if rad>0:
+            if self.use_sp:
+                super_pix_num = row['sp']
+                sp_mask = sp == super_pix_num
                 masked_chm = chm * sp_mask
                 max_height = masked_chm.max()
                 height_pix = masked_chm == max_height
@@ -183,64 +185,69 @@ class Validator():
 
                 #NEED TO CHECK FOR OVERLAP SOMEHOW
                 bounds = (h_row - rad, h_row+rad+1, h_col-rad, h_col+rad+1)
-
-
-                #Just grabbing 3x3 crops right now
-                #y_pad = out_size - (bounds[1]-bounds[0])
-                #x_pad = out_size - (bounds[3]-bounds[2])
-
-                chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #chm_crop = np.pad(chm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
+            elif self.scholl_output:
+                t_col = int(row['tree_x'])
+                t_row = int(row['tree_y'])
+                bounds = (t_row - rad, t_row+rad+1, t_col-rad, t_col+rad+1)
                 
 
-                pca_crop = pca[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
-                #pca_crop = np.pad(pca_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
 
-                #if pca_crop.shape == (4, 4, 10):
-                ica_crop = ica[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
-                #ica_crop = np.pad(ica_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
-                
-                azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #azm_crop = np.pad(azm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
-                shadow_crop = shadow[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #shadow_crop = np.pad(shadow_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
-                extra_crop = extra[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #extra_crop = np.pad(extra_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
+            #Just grabbing 3x3 crops right now
+            #y_pad = out_size - (bounds[1]-bounds[0])
+            #x_pad = out_size - (bounds[3]-bounds[2])
+
+            chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+            #chm_crop = np.pad(chm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
+            
+
+            pca_crop = pca[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
+            #pca_crop = np.pad(pca_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
+
+            #if pca_crop.shape == (4, 4, 10):
+            ica_crop = ica[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
+            #ica_crop = np.pad(ica_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
+            
+            azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+            #azm_crop = np.pad(azm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
+            shadow_crop = shadow[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+            #shadow_crop = np.pad(shadow_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
+            extra_crop = extra[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+            #extra_crop = np.pad(extra_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
 
 
-                mask = pca_crop != pca_crop
+            mask = pca_crop != pca_crop
 
-                if pca_crop.shape == (out_size, out_size, 10):
-                    pca_crop = torch.tensor(pca_crop)
-                    pca_crop = rearrange(pca_crop, 'h w c -> c h w')
-                    ica_crop = torch.tensor(ica_crop)
-                    ica_crop = rearrange(ica_crop, 'h w c -> c h w')
-                    shadow_crop = torch.tensor(shadow_crop)
-                    extra_crop = torch.tensor(extra_crop)
-                    extra_crop = rearrange(extra_crop, 'h w c -> c h w')
-                    chm_crop = torch.tensor(chm_crop)
-                    azm_crop = torch.tensor(azm_crop)
-                    mask = torch.tensor(mask)
-                    mask = rearrange(mask, 'h w c -> c h w')
+            if pca_crop.shape == (out_size, out_size, 10):
+                pca_crop = torch.tensor(pca_crop)
+                pca_crop = rearrange(pca_crop, 'h w c -> c h w')
+                ica_crop = torch.tensor(ica_crop)
+                ica_crop = rearrange(ica_crop, 'h w c -> c h w')
+                shadow_crop = torch.tensor(shadow_crop)
+                extra_crop = torch.tensor(extra_crop)
+                extra_crop = rearrange(extra_crop, 'h w c -> c h w')
+                chm_crop = torch.tensor(chm_crop)
+                azm_crop = torch.tensor(azm_crop)
+                mask = torch.tensor(mask)
+                mask = rearrange(mask, 'h w c -> c h w')
 
-                    label = torch.zeros((len(self.taxa.keys()),target_size, target_size), dtype=torch.float32).clone()
-                    label[self.taxa[taxa]] = 1.0
+                label = torch.zeros((len(self.taxa.keys()),target_size, target_size), dtype=torch.float32).clone()
+                label[self.taxa[taxa]] = 1.0
 
-                    to_save = {
-                        'pca': pca_crop,
-                        'ica': ica_crop,
-                        'shadow': shadow_crop,
-                        'raw_bands': extra_crop,
-                        'chm': chm_crop,
-                        'azm': azm_crop,
-                        'mask': mask,
-                        'target': label,
-                        'height': height
-                    }
+                to_save = {
+                    'pca': pca_crop,
+                    'ica': ica_crop,
+                    'shadow': shadow_crop,
+                    'raw_bands': extra_crop,
+                    'chm': chm_crop,
+                    'azm': azm_crop,
+                    'mask': mask,
+                    'target': label,
+                    'height': height
+                }
 
-                    f_name = f'{key}_{row["taxonID"]}_{super_pix_num}.pt'
-                    with open(os.path.join(save_dir, f_name), 'wb') as f:
-                        torch.save(to_save, f)
+                f_name = f'{key}_{row["taxonID"]}_{row["individualID"]}.pt'
+                with open(os.path.join(save_dir, f_name), 'wb') as f:
+                    torch.save(to_save, f)
             
         return None
 
@@ -290,26 +297,26 @@ class Validator():
                                           'adjNorthing': 'northing'})
         data_with_coords = curated.loc[(curated.easting == curated.easting) & (curated.northing==curated.northing) & (curated.maxCrownDiameter == curated.maxCrownDiameter)]
             
-        #data_with_coords = data_with_coords.merge(data, how='inner', on='individualID')
         data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting, data_with_coords.northing), crs='EPSG:32618')
         data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['maxCrownDiameter']/2)
         data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
 
         #TODO: Test with and without this
-        #NEED TO DE-DEDUPE THIS BEFORE RUNNING BECAUSE ALEX
-        # to_remove = set()
-        # for ix, row in data_gdf.iterrows():
-        #     working_copy = data_gdf.loc[data_gdf.index != ix]
-        #     coverage = working_copy.crowns.contains(row.crowns)
-        #     cover_gdf = working_copy.loc[coverage]
-        #     if (cover_gdf['height']>row['height']).sum() > 0:
-        #         to_remove.add(ix)
-        #     intersect = working_copy.crowns.intersects(row.crowns)
-        #     inter_gdf = working_copy.loc[intersect]
-        #     if (inter_gdf['height']>row['height']).sum() > 0:
-        #         to_remove.add(ix)
 
-        # data_gdf =  data_gdf.drop(list(to_remove))
+        if self.scholl_filter:
+            to_remove = set()
+            for ix, row in data_gdf.iterrows():
+                working_copy = data_gdf.loc[data_gdf.index != ix]
+                coverage = working_copy.crowns.contains(row.crowns)
+                cover_gdf = working_copy.loc[coverage]
+                if (cover_gdf['height']>row['height']).sum() > 0:
+                    to_remove.add(ix)
+                intersect = working_copy.crowns.intersects(row.crowns)
+                inter_gdf = working_copy.loc[intersect]
+                if (inter_gdf['height']>row['height']).sum() > 0:
+                    to_remove.add(ix)
+
+            data_gdf =  data_gdf.drop(list(to_remove))
 
         data_gdf["file_west_bound"] = data_gdf["easting"] - data_gdf["easting"] % 1000
         data_gdf["file_south_bound"] = data_gdf["northing"] - data_gdf["northing"] % 1000
@@ -324,10 +331,7 @@ class Validator():
                             
         data_gdf['file_coords'] = data_gdf['file_west_bound'] + '_' + data_gdf['file_south_bound']
 
-        
-        #data['approx_sq_m'] = ((data['maxCrownDiameter']/2)**2) * np.pi
-
-        
+               
         plots = pd.read_csv(self.plot_file, usecols=['plotID', 'siteID', 'subtype', 'easting', 'northing', 'plotSize'])
         plots = plots.loc[plots['siteID'] == self.site_name]
         plots = plots.loc[plots['subtype'] == 'basePlot']
@@ -1021,7 +1025,7 @@ if __name__ == "__main__":
     PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
    
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
-    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct.csv"
+    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct_de_dupe.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
     CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
     AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
@@ -1048,7 +1052,10 @@ if __name__ == "__main__":
                     superpixel=SP_DIR,
                     prefix='D13',
                     chm_mean = 4.015508459469479,
-                    chm_std = 4.809300736115787)
+                    chm_std = 4.809300736115787,
+                    use_sp=True,
+                    scholl_filter=False,
+                    scholl_output=True)
 
     #valid.pick_superpixels()
 
