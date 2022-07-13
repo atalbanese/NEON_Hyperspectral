@@ -30,13 +30,13 @@ class SwaVModelUnified(pl.LightningModule):
                 num_intermediate_classes,
                 pre_training,
                 mode='default', 
-                augment_refine = 'false'):
+                augment_refine = 'false',
+                scheduler=True):
         super().__init__()
         self.save_hyperparameters('lr', 'height_threshold', 'trained_backbone', 'features_dict', 'num_intermediate_classes', 'pre_training', 'class_key', 'chm_mean', 'chm_std', 'class_weights')
         self.features_dict = features_dict
         self.num_channels = self.calc_num_channels()
-        self.num_output_classes = len(class_weights)
-        self.class_key = class_key
+        self.num_output_classes = len(class_key.keys())
         self.chm_mean = chm_mean
         self.chm_std = chm_std
         self.lr = lr
@@ -44,19 +44,24 @@ class SwaVModelUnified(pl.LightningModule):
         self.trained_backbone = trained_backbone
         self.augment_refine = augment_refine
         self.mode = mode
+        self.scheduler = scheduler
         if self.mode == 'default':
-            self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes)
+            self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes, n_head=16, n_layers=16)
         if self.mode == 'patch':
             self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes)
         if self.mode == 'pixel_patch':
             self.swav = networks.SWaVUnifiedPerPixelPatch(self.num_channels, num_intermediate_classes)
-        self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes*2),
-                                         nn.BatchNorm1d(num_intermediate_classes*2),
+        self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes//2),
+                                         nn.BatchNorm1d(num_intermediate_classes//2),
                                          nn.ReLU(),
-                                         nn.Linear(num_intermediate_classes*2, self.num_output_classes))
-        self.loss = nn.CrossEntropyLoss(weight=torch.tensor(class_weights))
-        self.results = self.make_results_dict(class_key)
-        self.class_key = class_key
+                                         nn.Linear(num_intermediate_classes//2, self.num_output_classes))
+        if class_weights is not None:
+            self.loss = nn.CrossEntropyLoss(weight=torch.tensor(class_weights), label_smoothing=0.1)
+        else:
+            self.loss = nn.CrossEntropyLoss(label_smoothing=0.1)
+
+        self.class_key = {value:key for key, value in class_key.items()}
+        self.results = self.make_results_dict(self.class_key)
         self.pre_training = pre_training
         self.ra = Rearrange('b c h w -> b (h w) c')
 
@@ -73,6 +78,7 @@ class SwaVModelUnified(pl.LightningModule):
 
     def update_results(self, inp, target):
         inp = torch.argmax(inp, dim=1)
+        #target = torch.argmax(target, dim=1)
         pred = list(inp)
         targets = list(target)
 
@@ -137,20 +143,20 @@ class SwaVModelUnified(pl.LightningModule):
         mask = None
         targets = inp['target']
 
-        chm = inp['chm'].unsqueeze(1)
-        height = inp['height']
-        mask = inp['mask']
-        mask = reduce(mask, 'b c h w -> b () h w', 'max')
+        # chm = inp['chm'].unsqueeze(1)
+        # height = inp['height']
+        # mask = inp['mask']
+        # mask = reduce(mask, 'b c h w -> b () h w', 'max')
 
-        height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
+        # height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
 
-        for i, h in enumerate(height):
-            height_test = chm[i]
-            add_mask = height_test < (h - self.height_threshold)
-            height_mask[i] = add_mask
+        # for i, h in enumerate(height):
+        #     height_test = chm[i]
+        #     add_mask = height_test < (h - self.height_threshold)
+        #     height_mask[i] = add_mask
 
-        mask += height_mask
-        mask = ~mask
+        # mask += height_mask
+        # mask = ~mask
         inp = self.prep_data(inp)
 
         vflipped = False
@@ -189,9 +195,11 @@ class SwaVModelUnified(pl.LightningModule):
 
         if not validating: 
             loss = self.loss(inp, targets)
-            self.log('refine_loss', loss)
+            self.log('train_loss', loss)
             return loss
         else:
+            loss = self.loss(inp, targets)
+            self.log('valid_loss', loss)
             self.update_results(inp, targets)
             return None
 
@@ -254,10 +262,15 @@ class SwaVModelUnified(pl.LightningModule):
         if self.pre_training:
             optimizer = torch.optim.AdamW(self.swav.parameters(), lr=self.lr)
         else:
-            optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
-            print('Optimizing all parameters')
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
-        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+            optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, self.parameters()), lr=self.lr)
+        
+        to_return = {"optimizer": optimizer, "monitor": "train_loss"}
+        if self.scheduler:
+
+            #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=40)
+            to_return['scheduler'] = scheduler
+        return to_return
     
     
     def forward(self, x):
