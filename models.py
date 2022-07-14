@@ -46,7 +46,7 @@ class SwaVModelUnified(pl.LightningModule):
         self.mode = mode
         self.scheduler = scheduler
         if self.mode == 'default':
-            self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes, n_head=16, n_layers=16)
+            self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes, n_head=16, n_layers=12)
         if self.mode == 'patch':
             self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes)
         if self.mode == 'pixel_patch':
@@ -143,20 +143,20 @@ class SwaVModelUnified(pl.LightningModule):
         mask = None
         targets = inp['target']
 
-        # chm = inp['chm'].unsqueeze(1)
-        # height = inp['height']
-        # mask = inp['mask']
-        # mask = reduce(mask, 'b c h w -> b () h w', 'max')
+        chm = inp['chm'].unsqueeze(1)
+        height = inp['height']
+        mask = inp['mask']
+        mask = reduce(mask, 'b c h w -> b () h w', 'max')
 
-        # height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
+        height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
 
-        # for i, h in enumerate(height):
-        #     height_test = chm[i]
-        #     add_mask = height_test < (h - self.height_threshold)
-        #     height_mask[i] = add_mask
+        for i, h in enumerate(height):
+            height_test = chm[i]
+            add_mask = height_test < (h - self.height_threshold)
+            height_mask[i] = add_mask
 
-        # mask += height_mask
-        # mask = ~mask
+        mask += height_mask
+        mask = ~mask
         inp = self.prep_data(inp)
 
         vflipped = False

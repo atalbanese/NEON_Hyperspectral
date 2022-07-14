@@ -24,6 +24,7 @@ class FeatureExtractorFreezeUnfreeze(BaseFinetuning):
                  modules=pl_module.swav,
                  optimizer=optimizer,
                  train_bn=True,
+                 lr=5e-6
              )
 
 
@@ -161,18 +162,50 @@ if __name__ == "__main__":
                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_valid',
                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_test',
                     pre_training_epochs = 15,
-                    refine_epochs = 600,
+                    refine_epochs = 500,
+                    pre_train_batch_size = 2048,
+                    refine_batch_size = 64,
+                    pre_train_workers = 8,
+                    refine_workers = 1,
+                    log_dir='exp_logs/',
+                    pre_training=True,
+                    extra_labels='small_mlp_',
+                    swa=False,
+                    mode='default',
+                    scheduler=True,
+                    initial_freeze=450)
+
+    unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},
+                    chm_mean=4.015508459469479,
+                    chm_std=4.809300736115787,
+                    base_lr=5e-4,
+                    refine_lr=5e-4,
+                    height_threshold=5,
+                    class_weights=[0.64344262, 0.74056604, 1.35344828, 2.80357143],
+                    trained_backbone=True,
+                    features_dict={
+                        'pca' : 3,
+                        'ica': 3,
+                        'raw_bands': 15,
+                    },
+                    num_intermediate_classes = 256,
+                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/raw_training/',
+                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_training',
+                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_valid',
+                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_test',
+                    pre_training_epochs = 15,
+                    refine_epochs = 500,
                     pre_train_batch_size = 2048,
                     refine_batch_size = 64,
                     pre_train_workers = 8,
                     refine_workers = 1,
                     log_dir='exp_logs/',
                     pre_training=False,
-                    extra_labels='small_mlp_large_transformer_',
-                    swa=True,
+                    extra_labels='small_mlp_',
+                    swa=False,
                     mode='default',
                     scheduler=True,
-                    initial_freeze=300)
+                    initial_freeze=450)
     
     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},
                     chm_mean=4.015508459469479,
@@ -193,18 +226,20 @@ if __name__ == "__main__":
                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_valid',
                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_test',
                     pre_training_epochs = 15,
-                    refine_epochs = 600,
+                    refine_epochs = 500,
                     pre_train_batch_size = 2048,
                     refine_batch_size = 64,
                     pre_train_workers = 8,
                     refine_workers = 1,
                     log_dir='exp_logs/',
                     pre_training=False,
-                    extra_labels='small_mlp_large_transformer_no_freeze',
-                    swa=True,
+                    extra_labels='small_mlp_',
+                    swa=False,
                     mode='default',
                     scheduler=True,
                     initial_freeze=None)
+
+
 
     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},
                     chm_mean=4.015508459469479,
@@ -225,18 +260,18 @@ if __name__ == "__main__":
                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_valid',
                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_test',
                     pre_training_epochs = 15,
-                    refine_epochs = 600,
+                    refine_epochs = 500,
                     pre_train_batch_size = 2048,
                     refine_batch_size = 64,
                     pre_train_workers = 8,
                     refine_workers = 1,
                     log_dir='exp_logs/',
                     pre_training=True,
-                    extra_labels='small_mlp_large_transformer_512_classes',
-                    swa=True,
+                    extra_labels='small_mlp_512_classes',
+                    swa=False,
                     mode='default',
                     scheduler=True,
-                    initial_freeze=300)
+                    initial_freeze=450)
     
     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},
                     chm_mean=4.015508459469479,
@@ -257,18 +292,18 @@ if __name__ == "__main__":
                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_valid',
                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_test',
                     pre_training_epochs = 15,
-                    refine_epochs = 600,
+                    refine_epochs = 500,
                     pre_train_batch_size = 2048,
                     refine_batch_size = 64,
                     pre_train_workers = 8,
                     refine_workers = 1,
                     log_dir='exp_logs/',
                     pre_training=True,
-                    extra_labels='small_mlp_large_transformer_8_classes_',
-                    swa=True,
+                    extra_labels='small_mlp_8_classes_',
+                    swa=False,
                     mode='default',
                     scheduler=True,
-                    initial_freeze=300)
+                    initial_freeze=450)
 
 
     # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},
