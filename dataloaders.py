@@ -100,7 +100,7 @@ class MixingDataLoader(Dataset):
         
 
 
-        return to_return
+        # return to_return
 
 
 
@@ -322,6 +322,7 @@ class RenderDataLoader(Dataset):
                     ica_folder,
                     extra_bands_folder, 
                     shadow_folder,
+                    index_folder,
                     chm_mean, 
                     chm_std, 
                     mode,
@@ -352,6 +353,7 @@ class RenderDataLoader(Dataset):
         self.ica_files = [os.path.join(ica_folder, file) for file in os.listdir(ica_folder) if ".npy" in file]
         self.extra_files = [os.path.join(extra_bands_folder, file) for file in os.listdir(extra_bands_folder) if ".npy" in file]
         self.shadow_files = [os.path.join(shadow_folder, file) for file in os.listdir(shadow_folder) if ".npy" in file]
+        self.index_files = [os.path.join(index_folder, file) for file in os.listdir(index_folder) if ".npy" in file]
 
         self.pca_files_dict = make_dict(self.pca_files, -4, -3)
         self.chm_dict = make_dict(self.chm_files, -3, -2)
@@ -360,8 +362,9 @@ class RenderDataLoader(Dataset):
         self.ica_files_dict = make_dict(self.ica_files, -5, -4)
         self.extra_files_dict = make_dict(self.extra_files, -4, -3)
         self.shadow_dict = make_dict(self.shadow_files, -4, -3)
+        self.index_dict = make_dict(self.index_files, -4, -3)
 
-        self.all_files = set(self.pca_files_dict.keys()) & set(self.chm_dict.keys()) & set(self.azimuth_dict.keys()) & set(self.superpix_dict.keys()) & set(self.ica_files_dict.keys()) & set(self.extra_files_dict.keys()) & set(self.shadow_dict.keys())
+        self.all_files = set(self.pca_files_dict.keys()) & set(self.chm_dict.keys()) & set(self.azimuth_dict.keys()) & set(self.superpix_dict.keys()) & set(self.ica_files_dict.keys()) & set(self.extra_files_dict.keys()) & set(self.shadow_dict.keys()) & set(self.index_dict.keys())
 
         self.filter_files()
 
@@ -418,6 +421,11 @@ class RenderDataLoader(Dataset):
 
         #Raw bands
         extra = np.load(self.extra_files_dict[key]).astype(np.float32)
+
+        #Indexes
+
+        indexes = np.load(self.index_dict[key]).astype(np.float32)
+        indexes = rearrange(indexes, 'c h w -> h w c')
      
         #Azimuth
         azm = np.load(self.azimuth_dict[key]).astype(np.float32)
@@ -475,6 +483,9 @@ class RenderDataLoader(Dataset):
                 shadow_crop = shadow[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop
                 shadow_crop[shadow_crop != shadow_crop] = 0
 
+                indexes_crop = indexes[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop[...,np.newaxis]
+                indexes_crop[indexes_crop != indexes_crop] = 0
+
                 pca_center = self.grab_center(pca_crop, self.patch_size)
                 if (pca_center.shape == (self.patch_size, self.patch_size, 10)) and (pca_center.sum() != 0):
                     pca_center = torch.from_numpy(pca_center)
@@ -483,6 +494,10 @@ class RenderDataLoader(Dataset):
                     ica_center = self.grab_center(ica_crop, self.patch_size)
                     ica_center = torch.from_numpy(ica_center)
                     ica_center = ra(ica_center)
+
+                    index_center = self.grab_center(indexes_crop, self.patch_size)
+                    index_center = torch.from_numpy(index_center)
+                    index_center = ra(index_center)
 
                     extra_center = self.grab_center(extra_crop, self.patch_size)
                     extra_center = torch.from_numpy(extra_center)
@@ -504,7 +519,8 @@ class RenderDataLoader(Dataset):
                                 'raw_bands': extra_center,
                                 'shadow': shadow_center,
                                 'azm': azm_center,
-                                'chm': chm_center}
+                                'chm': chm_center,
+                                'indexes': index_center}
 
                     f_name = f"coords_{key}_sp_index_{pix_num}.pt"
 
@@ -537,7 +553,8 @@ if __name__ == "__main__":
     SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
     ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/raw_training_5_5'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/raw_training_indexes'
+    INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo'
 
 
     CHM_MEAN = 4.015508459469479
@@ -558,12 +575,13 @@ if __name__ == "__main__":
                     rescale=False, 
                     orig=ORIG_DIR, 
                     superpixel=SP_DIR,
+                    indexes=INDEX_DIR,
                     prefix='D13',
                     chm_mean = 4.015508459469479,
                     chm_std = 4.809300736115787,
                     )
 
-    render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid, patch_size=5)
+    render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, INDEX_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid, patch_size=3)
     train_loader = DataLoader(render, batch_size=1, num_workers=8)
     # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 

@@ -36,6 +36,7 @@ class Validator():
         self.ica_dir = kwargs['ica_dir']
         self.raw_bands_dir = kwargs['raw_bands']
         self.shadow_dir = kwargs['shadow']
+        self.indexes_dir = kwargs['indexes']
         self.sp_dir = kwargs['superpixel']
         self.struct = struct
         self.curated = kwargs['curated']
@@ -69,6 +70,7 @@ class Validator():
         self.orig_dict = make_dict(self.orig_files, -3, -2)
         self.pca_dict = make_dict(self.pca_files, -4, -3)
 
+        self.indexes_files = [os.path.join(kwargs['indexes'], file) for file in os.listdir(kwargs['indexes']) if ".npy" in file]
 
 
         self.chm_files = [os.path.join(kwargs['chm'], file) for file in os.listdir(kwargs['chm']) if ".tif" in file]
@@ -87,6 +89,7 @@ class Validator():
         self.ica_files_dict = make_dict(self.ica_files, -5, -4)
         self.extra_files_dict = make_dict(self.extra_files, -4, -3)
         self.shadow_dict = make_dict(self.shadow_files, -4, -3)
+        self.indexes_dict = make_dict(self.indexes_files, -4, -3)
 
         self.cluster_groups = set()
 
@@ -166,6 +169,10 @@ class Validator():
                 #Raw bands
                 extra = np.load(self.extra_files_dict[key]).astype(np.float32)
 
+                indexes = np.load(self.indexes_dict[key]).astype(np.float32)
+
+                indexes = rearrange(indexes, 'c h w -> h w c')
+
                 sp = np.load(self.sp_dict[key])
                 loaded_key = key
 
@@ -217,6 +224,8 @@ class Validator():
             extra_crop = extra[bounds[0]:bounds[1], bounds[2]:bounds[3]]
             #extra_crop = np.pad(extra_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
 
+            index_crop = indexes[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+
 
             mask = pca_crop != pca_crop
 
@@ -232,6 +241,8 @@ class Validator():
                 azm_crop = torch.tensor(azm_crop)
                 mask = torch.tensor(mask)
                 mask = rearrange(mask, 'h w c -> c h w')
+                index_crop = torch.tensor(index_crop)
+                index_crop = rearrange(index_crop, 'h w c -> c h w')
 
                 label = torch.zeros((len(self.taxa.keys()),target_size, target_size), dtype=torch.float32).clone()
                 label[self.taxa[taxa]] = 1.0
@@ -245,7 +256,8 @@ class Validator():
                     'azm': azm_crop,
                     'mask': mask,
                     'target': label,
-                    'height': height
+                    'height': height,
+                    'indexes': index_crop
                 }
 
                 f_name = f'{key}_{row["taxonID"]}_{row["individualID"]}.pt'

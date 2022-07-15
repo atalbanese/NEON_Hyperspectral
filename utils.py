@@ -22,6 +22,9 @@ import numpy.ma as ma
 import random 
 import rasterio as rs
 
+import indexes as ixs
+
+
 def get_features(inp, feature_band=2):
     return np.reshape(inp, (-1,inp.shape[feature_band]))
 
@@ -542,6 +545,19 @@ def select_extra_bands(args):
             bands = hp.stack_all(img, axis=2)
             np.save(os.path.join(out_dir, out_file), bands)
 
+def get_all_indexes(args):
+    file, in_dir, out_dir = args
+    if ".h5" in file:
+        out_file = file.split('.')[0] + '_indexbands.npy'
+        if not os.path.exists(os.path.join(out_dir, out_file)):
+            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=ixs.BANDS)['bands']
+            to_stack = []
+            for ix_fn in ixs.INDEX_FNS:
+                to_stack.append(ix_fn(img))
+            
+            out = np.stack(to_stack)
+            np.save(os.path.join(out_dir, out_file), out)
+    
     
 
 def build_inc_pca(args):
@@ -639,8 +655,8 @@ if __name__ == '__main__':
 
     
 
-    FILE = 'NEON_D13_NIWO_DP3_457000_4432000_CHM.tif'
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
+    FILE = 'NEON_D13_NIWO_DP3_445000_4432000_reflectance.h5'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo/'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
     PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_masked_10'
     FN = get_extra_bands_all
@@ -667,11 +683,11 @@ if __name__ == '__main__':
     #img_stats_chm(chm_fold)
     #img_stats_min_max('C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels', '')
 
-
+    #get_all_indexes((FILE, IN_DIR, OUT_DIR))
     
 
     with ProcessPool(4) as pool:
-        bulk_process(pool, [IN_DIR, OUT_DIR, FN], select_extra_bands)
+        bulk_process(pool, [IN_DIR, OUT_DIR], get_all_indexes)
 
     # # # with ProcessPool(4) as pool:
     # # #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
