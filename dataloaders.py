@@ -20,12 +20,87 @@ from rasterio import logging
 from validator import Validator
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
+from numpy.random import default_rng
 
 import numpy.ma as ma
 import pickle
 from einops.layers.torch import Rearrange, Reduce
 #from torch_geometric.data import Data
+
+
+
+class MixingDataLoader(Dataset):
+    def __init__(self,
+                file_folder,
+                class_key):
+        self.base_dir = file_folder
+        
+        self.class_key = class_key
+
+        self.files = self.sort_files(os.listdir(file_folder))
+
+        self.rng = default_rng()
+    
+    def sort_files(self, file_list):
+        taxa = self.class_key.values()
+        list_store = {t:[] for t in taxa}
+
+        for f in file_list:
+            for t in taxa:
+                if t in f:
+                    list_store[t].append(f)
+                    break
+
+        return self.mix_files(list_store)
+
+    def mix_files(self, file_dict):
+
+        total_files = 0
+        for v in file_dict.values():
+            total_files += len(v)
+        
+        mix = []
+        for i in total_files:
+            for v in file_dict.values():
+                mix.append(v[self.rng.choice(len(v))])
+
+        return mix
+
+        
+    #Try weighting rng by class weights
+    def mix_tensors(self, to_mix):
+        to_mix = torch.cat(to_mix, dim=0)
+        target = torch.randn_like(to_mix)
+        target = torch.softmax(target, dim=0)
+
+        to_add = to_mix * target
+
+        out = reduce(to_add, 'b c h w -> () c h w', reduction='sum')
+        return out, target
+
+    def __len__(self):
+        return len(self.files)
+
+    #Filter items with 0
+    def __getitem__(self, ix):
+        to_open = self.files[ix]
+        
+        try:
+            to_mix = []
+            for f in to_open:
+                to_stack = torch.load(os.path.join(self.base_dir, f))
+                to_stack['pca'][to_stack['pca'] != to_stack['pca']] = 0
+                to_stack['ica'][to_stack['ica'] != to_stack['ica']] = 0
+                to_mix.append(to_stack)
+            
+            
+
+        except:
+            print(to_open)
+        
+
+
+        return to_return
 
 
 
