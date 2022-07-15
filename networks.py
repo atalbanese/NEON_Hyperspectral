@@ -21,7 +21,7 @@ class SWaVUnifiedPerPixelPatch(nn.Module):
                 temp=0.1, 
                 epsilon=0.05,  
                 sinkhorn_iters=3):
-        super(SWaVUnified, self).__init__()
+        super(SWaVUnifiedPerPixelPatch, self).__init__()
         
         self.transforms_main = tt.Compose([
                                         tr.Blit(p=0.5),
@@ -123,6 +123,17 @@ class SWaVUnifiedPerPixelPatch(nn.Module):
         loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
 
         return loss/b
+    
+    def forward(self, inp):
+       
+        inp = self.embed(inp)
+
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+        return scores
 
 
 

@@ -225,6 +225,8 @@ def get_extra_bands_shi():
         'swir_4': 2280
     }
 
+
+
 def plot_output_files(dir):
     for file in os.listdir(dir):
         if ".npy" in file:

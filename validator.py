@@ -13,9 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import h5_helper as hp
-import inference
 import os
-import models
 import utils
 from skimage import exposure
 from scipy.stats import linregress
@@ -31,7 +29,7 @@ import math
 #TODO: Clean this mess up
 #Switch plots to plotly? Good for overlays
 class Validator():
-    def __init__(self, struct=False, rescale=False, train_split=0.6, valid_split=0.2, test_split=0.2,  **kwargs):
+    def __init__(self, struct=False, rescale=False, train_split=0.6, valid_split=0.2, test_split=0.2, use_sp=True, scholl_filter=False, scholl_output=False, filter_species=None,  **kwargs):
         self.rescale=rescale
         self.file = kwargs["file"]
         self.pca_dir = kwargs["pca_dir"]
@@ -49,12 +47,18 @@ class Validator():
         self.orig_dir = kwargs['orig']
         self.chm_mean = kwargs['chm_mean']
         self.chm_std = kwargs['chm_std']
+        self.use_sp = use_sp
+        self.scholl_filter = scholl_filter
+        self.scholl_output = scholl_output
+        self.filter_species = filter_species
+
         self.valid_data, self.data_gdf = self.get_plot_data()
 
         self.valid_files = self.get_valid_files()
 
         self.valid_dict = self.make_valid_dict()
-    
+        
+        
 
         self.orig_files = [os.path.join(kwargs['orig'], file) for file in os.listdir(kwargs['orig']) if ".h5" in file]
         self.pca_files = [os.path.join(kwargs['pca_dir'], file) for file in os.listdir(kwargs['pca_dir']) if ".npy" in file]
@@ -89,8 +93,8 @@ class Validator():
         self.last_cluster = {}
 
         
-
-        self.data_gdf = self.pick_superpixels()
+        if use_sp:
+            self.data_gdf = self.pick_superpixels()
         self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
 
         self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
@@ -124,8 +128,8 @@ class Validator():
 
             return [(row_pad, row_pad+add_row), (col_pad, col_pad+add_col)]
 
-    #TODO: Check shapes before saving
-    def render_valid_data(self, save_dir, split, out_size=4, target_size=3):
+
+    def render_valid_data(self, save_dir, split, out_size=3, target_size=3):
         if split == 'train':
             data = self.train
         if split == 'valid':
@@ -166,14 +170,14 @@ class Validator():
                 loaded_key = key
 
             taxa = row['taxonID']
-            super_pix_num = row['sp']
-            sp_mask = sp == super_pix_num
+            
             height = float(row['height'])
-            diam = float(row['maxCrownDiameter'])
-            #rad = int(diam//2)
-            #Ensure nothing is bigger than 4x4
+
+
             rad = out_size//2 
-            if rad>0:
+            if self.use_sp:
+                super_pix_num = row['sp']
+                sp_mask = sp == super_pix_num
                 masked_chm = chm * sp_mask
                 max_height = masked_chm.max()
                 height_pix = masked_chm == max_height
@@ -183,64 +187,70 @@ class Validator():
 
                 #NEED TO CHECK FOR OVERLAP SOMEHOW
                 bounds = (h_row - rad, h_row+rad+1, h_col-rad, h_col+rad+1)
-
-
-                #Just grabbing 3x3 crops right now
-                #y_pad = out_size - (bounds[1]-bounds[0])
-                #x_pad = out_size - (bounds[3]-bounds[2])
-
-                chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #chm_crop = np.pad(chm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
+            elif self.scholl_output:
+                t_col = int(row['tree_x'])
+                t_row = int(row['tree_y'])
+                #LOOKUP HOW I USED TO DO THIS
+                bounds = (t_row - rad, t_row+rad+1, t_col-rad, t_col+rad+1)
                 
 
-                pca_crop = pca[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
-                #pca_crop = np.pad(pca_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
 
-                #if pca_crop.shape == (4, 4, 10):
-                ica_crop = ica[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
-                #ica_crop = np.pad(ica_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
-                
-                azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #azm_crop = np.pad(azm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
-                shadow_crop = shadow[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #shadow_crop = np.pad(shadow_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
-                extra_crop = extra[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #extra_crop = np.pad(extra_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
+            #Just grabbing 3x3 crops right now
+            #y_pad = out_size - (bounds[1]-bounds[0])
+            #x_pad = out_size - (bounds[3]-bounds[2])
+
+            chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+            #chm_crop = np.pad(chm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
+            
+
+            pca_crop = pca[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
+            #pca_crop = np.pad(pca_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
+
+            #if pca_crop.shape == (4, 4, 10):
+            ica_crop = ica[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
+            #ica_crop = np.pad(ica_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
+            
+            azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+            #azm_crop = np.pad(azm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
+            shadow_crop = shadow[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+            #shadow_crop = np.pad(shadow_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
+            extra_crop = extra[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+            #extra_crop = np.pad(extra_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
 
 
-                mask = pca_crop != pca_crop
+            mask = pca_crop != pca_crop
 
-                if pca_crop.shape == (out_size, out_size, 10):
-                    pca_crop = torch.tensor(pca_crop)
-                    pca_crop = rearrange(pca_crop, 'h w c -> c h w')
-                    ica_crop = torch.tensor(ica_crop)
-                    ica_crop = rearrange(ica_crop, 'h w c -> c h w')
-                    shadow_crop = torch.tensor(shadow_crop)
-                    extra_crop = torch.tensor(extra_crop)
-                    extra_crop = rearrange(extra_crop, 'h w c -> c h w')
-                    chm_crop = torch.tensor(chm_crop)
-                    azm_crop = torch.tensor(azm_crop)
-                    mask = torch.tensor(mask)
-                    mask = rearrange(mask, 'h w c -> c h w')
+            if pca_crop.shape == (out_size, out_size, 10):
+                pca_crop = torch.tensor(pca_crop)
+                pca_crop = rearrange(pca_crop, 'h w c -> c h w')
+                ica_crop = torch.tensor(ica_crop)
+                ica_crop = rearrange(ica_crop, 'h w c -> c h w')
+                shadow_crop = torch.tensor(shadow_crop)
+                extra_crop = torch.tensor(extra_crop)
+                extra_crop = rearrange(extra_crop, 'h w c -> c h w')
+                chm_crop = torch.tensor(chm_crop)
+                azm_crop = torch.tensor(azm_crop)
+                mask = torch.tensor(mask)
+                mask = rearrange(mask, 'h w c -> c h w')
 
-                    label = torch.zeros((len(self.taxa.keys()),target_size, target_size), dtype=torch.float32).clone()
-                    label[self.taxa[taxa]] = 1.0
+                label = torch.zeros((len(self.taxa.keys()),target_size, target_size), dtype=torch.float32).clone()
+                label[self.taxa[taxa]] = 1.0
 
-                    to_save = {
-                        'pca': pca_crop,
-                        'ica': ica_crop,
-                        'shadow': shadow_crop,
-                        'raw_bands': extra_crop,
-                        'chm': chm_crop,
-                        'azm': azm_crop,
-                        'mask': mask,
-                        'target': label,
-                        'height': height
-                    }
+                to_save = {
+                    'pca': pca_crop,
+                    'ica': ica_crop,
+                    'shadow': shadow_crop,
+                    'raw_bands': extra_crop,
+                    'chm': chm_crop,
+                    'azm': azm_crop,
+                    'mask': mask,
+                    'target': label,
+                    'height': height
+                }
 
-                    f_name = f'{key}_{row["taxonID"]}_{super_pix_num}.pt'
-                    with open(os.path.join(save_dir, f_name), 'wb') as f:
-                        torch.save(to_save, f)
+                f_name = f'{key}_{row["taxonID"]}_{row["individualID"]}.pt'
+                with open(os.path.join(save_dir, f_name), 'wb') as f:
+                    torch.save(to_save, f)
             
         return None
 
@@ -290,26 +300,27 @@ class Validator():
                                           'adjNorthing': 'northing'})
         data_with_coords = curated.loc[(curated.easting == curated.easting) & (curated.northing==curated.northing) & (curated.maxCrownDiameter == curated.maxCrownDiameter)]
             
-        #data_with_coords = data_with_coords.merge(data, how='inner', on='individualID')
         data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting, data_with_coords.northing), crs='EPSG:32618')
+        data_gdf = data_gdf.loc[data_gdf['taxonID'] != self.filter_species]
         data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['maxCrownDiameter']/2)
         data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
 
         #TODO: Test with and without this
-        #NEED TO DE-DEDUPE THIS BEFORE RUNNING BECAUSE ALEX
-        # to_remove = set()
-        # for ix, row in data_gdf.iterrows():
-        #     working_copy = data_gdf.loc[data_gdf.index != ix]
-        #     coverage = working_copy.crowns.contains(row.crowns)
-        #     cover_gdf = working_copy.loc[coverage]
-        #     if (cover_gdf['height']>row['height']).sum() > 0:
-        #         to_remove.add(ix)
-        #     intersect = working_copy.crowns.intersects(row.crowns)
-        #     inter_gdf = working_copy.loc[intersect]
-        #     if (inter_gdf['height']>row['height']).sum() > 0:
-        #         to_remove.add(ix)
 
-        # data_gdf =  data_gdf.drop(list(to_remove))
+        if self.scholl_filter:
+            to_remove = set()
+            for ix, row in data_gdf.iterrows():
+                working_copy = data_gdf.loc[data_gdf.index != ix]
+                coverage = working_copy.crowns.contains(row.crowns)
+                cover_gdf = working_copy.loc[coverage]
+                if (cover_gdf['height']>row['height']).sum() > 0:
+                    to_remove.add(ix)
+                intersect = working_copy.crowns.intersects(row.crowns)
+                inter_gdf = working_copy.loc[intersect]
+                if (inter_gdf['height']>row['height']).sum() > 0:
+                    to_remove.add(ix)
+
+            data_gdf =  data_gdf.drop(list(to_remove))
 
         data_gdf["file_west_bound"] = data_gdf["easting"] - data_gdf["easting"] % 1000
         data_gdf["file_south_bound"] = data_gdf["northing"] - data_gdf["northing"] % 1000
@@ -324,10 +335,7 @@ class Validator():
                             
         data_gdf['file_coords'] = data_gdf['file_west_bound'] + '_' + data_gdf['file_south_bound']
 
-        
-        #data['approx_sq_m'] = ((data['maxCrownDiameter']/2)**2) * np.pi
-
-        
+               
         plots = pd.read_csv(self.plot_file, usecols=['plotID', 'siteID', 'subtype', 'easting', 'northing', 'plotSize'])
         plots = plots.loc[plots['siteID'] == self.site_name]
         plots = plots.loc[plots['subtype'] == 'basePlot']
@@ -468,7 +476,6 @@ class Validator():
         plt.close()
 
     
-    #Fucking this up to test CHM superpixl
     @staticmethod
     def _select_pixels(df, vd):
         # fig, ax = plt.subplots(figsize=(10, 10))
@@ -580,42 +587,42 @@ class Validator():
         self.save_valid_df(save_dir)
 
 
-    @staticmethod
-    def _plot_inference(df, validator, save_dir, model, get_stats=True):
-        if len(df)>0:
-            row = df.iloc[0]
-            file_key = row['file_coords']
-            if file_key in validator.valid_files:
-                plot_id = row['plotID']
-                if file_key not in validator.last_cluster:
-                    f = validator.valid_files[file_key]
-                    if not validator.struct:
-                        clustered = inference.swav_inference_big(model, f)
-                    else:
-                        c = validator.chm_dict[file_key]
-                        a = validator.azm_dict[file_key]
-                        clustered = inference.swav_inference_big_struct_4(model, f, c, a, validator.chm_mean, validator.chm_std, rescale=validator.rescale)
-                        if get_stats:
-                            validator.validate_from_gdf(file_key, clustered)
+    # @staticmethod
+    # def _plot_inference(df, validator, save_dir, model, get_stats=True):
+    #     if len(df)>0:
+    #         row = df.iloc[0]
+    #         file_key = row['file_coords']
+    #         if file_key in validator.valid_files:
+    #             plot_id = row['plotID']
+    #             if file_key not in validator.last_cluster:
+    #                 f = validator.valid_files[file_key]
+    #                 if not validator.struct:
+    #                     clustered = inference.swav_inference_big(model, f)
+    #                 else:
+    #                     c = validator.chm_dict[file_key]
+    #                     a = validator.azm_dict[file_key]
+    #                     clustered = inference.swav_inference_big_struct_4(model, f, c, a, validator.chm_mean, validator.chm_std, rescale=validator.rescale)
+    #                     if get_stats:
+    #                         validator.validate_from_gdf(file_key, clustered)
 
-                    validator.last_cluster[file_key] = clustered
-                else:
-                    clustered = validator.last_cluster[file_key]
-                plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
-                np.save(os.path.join(save_dir, f'{plot_id}_clustered.npy'), clustered)
+    #                 validator.last_cluster[file_key] = clustered
+    #             else:
+    #                 clustered = validator.last_cluster[file_key]
+    #             plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
+    #             np.save(os.path.join(save_dir, f'{plot_id}_clustered.npy'), clustered)
             
-                clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
-                plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
-                plt.bar(*np.unique(clustered, return_counts=True))
+    #             clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
+    #             plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
+    #             plt.bar(*np.unique(clustered, return_counts=True))
                 
-                plt.title(plot_id)
-                plt.xlabel('Classification')
-                plt.ylabel('Pixel Count')
-                #plt.xlim(0, 10)
+    #             plt.title(plot_id)
+    #             plt.xlabel('Classification')
+    #             plt.ylabel('Pixel Count')
+    #             #plt.xlim(0, 10)
 
-                plt.savefig(os.path.join(save_dir, plot_id + "_hist.png"))
-                plt.close()
-        return df
+    #             plt.savefig(os.path.join(save_dir, plot_id + "_hist.png"))
+    #             plt.close()
+    #     return df
 
 
         #plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
@@ -778,29 +785,29 @@ class Validator():
         return None
     
 
-def check_predictions(validator: Validator, model, coords, h5_file, save_dir, **kwargs):
-    y = inference.do_inference(model, h5_file, True, True, **kwargs)
-    np.save(os.path.join(save_dir,coords+".npy"), y)
-    validator.validate(coords, y)
-    return None
+# def check_predictions(validator: Validator, model, coords, h5_file, save_dir, **kwargs):
+#     y = inference.do_inference(model, h5_file, True, True, **kwargs)
+#     np.save(os.path.join(save_dir,coords+".npy"), y)
+#     validator.validate(coords, y)
+#     return None
 
-def check_all(validator: Validator, model, save_dir, **kwargs):
-    for coord, file in validator.valid_files.items():
-        check_predictions(validator, model, coord, file, save_dir, **kwargs)
-    return None
+# def check_all(validator: Validator, model, save_dir, **kwargs):
+#     for coord, file in validator.valid_files.items():
+#         check_predictions(validator, model, coord, file, save_dir, **kwargs)
+#     return None
 
-def bulk_validation(ckpts_dir, pca_dir, save_dir, valid_file, model_type, **kwargs):
-    for ckpt in os.listdir(ckpts_dir):
-         if ".ckpt" in ckpt:
-             model = inference.load_ckpt(model_type, os.path.join(ckpts_dir, ckpt), **kwargs)
-             valid = Validator(file=valid_file, pca_dir=pca_dir, **kwargs)
-             ckpt_name = ckpt.replace(".ckpt", "")
-             new_dir = os.path.join(save_dir, ckpt_name)
-             if not os.path.isdir(new_dir):
-                os.mkdir(new_dir)
-             check_all(valid, model, new_dir, n_components=kwargs['num_channels'])
-             valid.confusion_matrix.to_csv(os.path.join(save_dir, ckpt_name + "conf_matrix.csv"))
-    return True
+# def bulk_validation(ckpts_dir, pca_dir, save_dir, valid_file, model_type, **kwargs):
+#     for ckpt in os.listdir(ckpts_dir):
+#          if ".ckpt" in ckpt:
+#              model = inference.load_ckpt(model_type, os.path.join(ckpts_dir, ckpt), **kwargs)
+#              valid = Validator(file=valid_file, pca_dir=pca_dir, **kwargs)
+#              ckpt_name = ckpt.replace(".ckpt", "")
+#              new_dir = os.path.join(save_dir, ckpt_name)
+#              if not os.path.isdir(new_dir):
+#                 os.mkdir(new_dir)
+#              check_all(valid, model, new_dir, n_components=kwargs['num_channels'])
+#              valid.confusion_matrix.to_csv(os.path.join(save_dir, ckpt_name + "conf_matrix.csv"))
+#     return True
 
 def side_by_side_bar(df, plot_name):
     fig, ax = plt.subplots(1, 2)
@@ -888,21 +895,21 @@ def ward_cluster_plots(plot_dir, save_dir):
             np.save(os.path.join(save_dir, f'cluster_{f}'), clustered)
             plt.imsave(os.path.join(save_dir, 'viz',  f"{f.split('.')[0]}.png"),clustered)
 
-def plot_inference(validator, save_dir, model):
-    for key, f in validator.valid_files.items():
-        clustered = inference.swav_inference_big(model, f)
-        plt.bar(*np.unique(clustered, return_counts=True))
-        plot_id = f.split("_")[2]+ " "+ f.split("_")[3]
-        plt.title(plot_id)
-        plt.xlabel('Classification')
-        plt.ylabel('Pixel Count')
-        #plt.xlim(0, 10)
+# def plot_inference(validator, save_dir, model):
+#     for key, f in validator.valid_files.items():
+#         clustered = inference.swav_inference_big(model, f)
+#         plt.bar(*np.unique(clustered, return_counts=True))
+#         plot_id = f.split("_")[2]+ " "+ f.split("_")[3]
+#         plt.title(plot_id)
+#         plt.xlabel('Classification')
+#         plt.ylabel('Pixel Count')
+#         #plt.xlim(0, 10)
 
-        plt.savefig(os.path.join(save_dir, plot_id + ".png"))
-        plt.close()
+#         plt.savefig(os.path.join(save_dir, plot_id + ".png"))
+#         plt.close()
 
 
-        plt.imsave(os.path.join(save_dir, 'viz',  f"{plot_id}.png"),clustered, cmap='tab20')
+#         plt.imsave(os.path.join(save_dir, 'viz',  f"{plot_id}.png"),clustered, cmap='tab20')
 
 
 
@@ -1001,17 +1008,17 @@ def make_valid_df(valid_dict, num_classes):
     df.to_csv('test_kappa.csv')
     return df
 
-#TODO: add stat saving
-#Make models agnostic
-def validate_config(validator, config_list):
-    for config in config_list:
-        model = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
-        try:
-            validator.last_cluster = {}
-            validator.do_plot_inference(config['save_dir'], model)
-        except KeyError as e:
-            print(f'Error: {e}')
-            continue
+# #TODO: add stat saving
+# #Make models agnostic
+# def validate_config(validator, config_list):
+#     for config in config_list:
+#         model = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
+#         try:
+#             validator.last_cluster = {}
+#             validator.do_plot_inference(config['save_dir'], model)
+#         except KeyError as e:
+#             print(f'Error: {e}')
+#             continue
 
 
 
@@ -1021,7 +1028,7 @@ if __name__ == "__main__":
     PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
    
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
-    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct.csv"
+    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct_de_dupe.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
     CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
     AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
@@ -1048,16 +1055,17 @@ if __name__ == "__main__":
                     superpixel=SP_DIR,
                     prefix='D13',
                     chm_mean = 4.015508459469479,
-                    chm_std = 4.809300736115787)
+                    chm_std = 4.809300736115787,
+                    use_sp=False,
+                    scholl_filter=True,
+                    scholl_output=True,
+                    filter_species = 'SALIX')
 
-    #valid.pick_superpixels()
 
-    #validate_config(valid, configs)
-
-    #NEED TO TEST SCHOLL METHOD AGAIN W/O DUPLICATES
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/label_training', 'train', out_size=3)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/label_valid', 'valid', out_size=3)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/label_test', 'test', out_size=3)
-
+    valid.render_valid_data('test', 'train', out_size=3)
+    # valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/hybrid_labels_5_5/label_valid', 'valid', out_size=5)
+    # valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/hybrid_labels_5_5/label_test', 'test', out_size=5)
+    print(valid.taxa)
+    print(valid.class_weights)
 
 
