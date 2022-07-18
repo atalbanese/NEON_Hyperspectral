@@ -1049,6 +1049,7 @@ if __name__ == "__main__":
     RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
     SHADOW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
     SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo_chm'
+    INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo/'
 
     valid = Validator(file=VALID_FILE, 
                     pca_dir=PCA_DIR, 
@@ -1065,18 +1066,19 @@ if __name__ == "__main__":
                     rescale=False, 
                     orig=ORIG_DIR, 
                     superpixel=SP_DIR,
+                    indexes=INDEX_DIR,
                     prefix='D13',
                     chm_mean = 4.015508459469479,
                     chm_std = 4.809300736115787,
-                    use_sp=False,
-                    scholl_filter=True,
+                    use_sp=True,
+                    scholl_filter=False,
                     scholl_output=True,
                     filter_species = 'SALIX')
 
 
-    valid.render_valid_data('test', 'train', out_size=3)
-    # valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/hybrid_labels_5_5/label_valid', 'valid', out_size=5)
-    # valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/hybrid_labels_5_5/label_test', 'test', out_size=5)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_training', 'train', out_size=3)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_valid', 'valid', out_size=3)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_test', 'test', out_size=3)
     print(valid.taxa)
     print(valid.class_weights)
 

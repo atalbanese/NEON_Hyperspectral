@@ -31,7 +31,8 @@ class SwaVModelUnified(pl.LightningModule):
                 pre_training,
                 mode='default', 
                 augment_refine = 'false',
-                scheduler=True):
+                scheduler=True,
+                height_mask=False):
         super().__init__()
         self.save_hyperparameters('lr', 'height_threshold', 'trained_backbone', 'features_dict', 'num_intermediate_classes', 'pre_training', 'class_key', 'chm_mean', 'chm_std', 'class_weights')
         self.features_dict = features_dict
@@ -51,10 +52,10 @@ class SwaVModelUnified(pl.LightningModule):
             self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes)
         if self.mode == 'pixel_patch':
             self.swav = networks.SWaVUnifiedPerPixelPatch(self.num_channels, num_intermediate_classes)
-        self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes//2),
-                                         nn.BatchNorm1d(num_intermediate_classes//2),
+        self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes*2),
+                                         nn.BatchNorm1d(num_intermediate_classes*2),
                                          nn.ReLU(),
-                                         nn.Linear(num_intermediate_classes//2, self.num_output_classes))
+                                         nn.Linear(num_intermediate_classes*2, self.num_output_classes))
         if class_weights is not None:
             self.loss = nn.CrossEntropyLoss(weight=torch.tensor(class_weights), label_smoothing=0.1)
         else:
@@ -143,20 +144,21 @@ class SwaVModelUnified(pl.LightningModule):
         mask = None
         targets = inp['target']
 
-        chm = inp['chm'].unsqueeze(1)
-        height = inp['height']
-        mask = inp['mask']
-        mask = reduce(mask, 'b c h w -> b () h w', 'max')
+        if self.height_mask():
+            chm = inp['chm'].unsqueeze(1)
+            height = inp['height']
+            mask = inp['mask']
+            mask = reduce(mask, 'b c h w -> b () h w', 'max')
 
-        height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
+            height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
 
-        for i, h in enumerate(height):
-            height_test = chm[i]
-            add_mask = height_test < (h - self.height_threshold)
-            height_mask[i] = add_mask
+            for i, h in enumerate(height):
+                height_test = chm[i]
+                add_mask = height_test < (h - self.height_threshold)
+                height_mask[i] = add_mask
 
-        mask += height_mask
-        mask = ~mask
+            mask += height_mask
+            mask = ~mask
         inp = self.prep_data(inp)
 
         vflipped = False

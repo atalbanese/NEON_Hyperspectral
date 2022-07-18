@@ -11,6 +11,7 @@ import torch
 import numpy as np
 import utils
 import h5py
+from sklearn.preprocessing import StandardScaler
 import transforms as tr
 import torch.nn.functional as f
 import torchvision.transforms as tt
@@ -291,9 +292,46 @@ class RenderWholePixDataLoader(Dataset):
 
 class RenderedDataLoader(Dataset):
     def __init__(self,
-                file_folder):
+                file_folder,
+                features,
+                input_size = 3,
+                stats_loc=''):
         self.base_dir = file_folder
-        self.files = os.listdir(file_folder)
+        self.files = filter(os.path.isfile, os.listdir(file_folder))
+        self.calc_stats = True
+        if os.path.exists(os.path.join(self.base_dir, 'stats/stats.npy')):
+            self.stats = torch.load(os.path.join(self.base_dir, 'stats/stats.npy'))
+            self.calc_stats = False
+        elif os.path.exists(stats_loc):
+            self.stats = torch.load(stats_loc)
+            self.calc_stats = False
+        self.scale_dict = {}
+        self.features = features
+        for feature in features.keys():
+            self.scale_dict[feature] = StandardScaler()
+            if not self.calc_stats:
+                cur_stats = self.stats[feature]
+                self.scale_dict[feature].scale_ = cur_stats['scale']
+                self.scale_dict[feature].mean_ = cur_stats['mean']
+                self.scale_dict[feature].var_ = cur_stats['var']
+        
+        self.ra_1 = Rearrange('c h w -> (h w) c')
+        self.ra_2 = Rearrange('(h w) c -> c h w', h=input_size, w=input_size)
+
+        self.flat_1 = Rearrange('h w -> (h w) ()')
+        self.flat_2 = Rearrange('(h w) () -> h w', h=input_size, w=input_size)
+
+    
+    def save_stats(self):
+        to_save = {}
+        for key, value in self.scale_dict.items():
+            to_save[key] = {'scale': value.scale_, 'mean': value.mean_, 'var': value.var_}
+
+        save_loc = os.path.join(self.base_dir, 'stats/stats.npy')
+        with open(save_loc, 'wb') as f:
+            torch.save(to_save, save_loc)
+        
+
 
     def __len__(self):
         return len(self.files)
@@ -304,13 +342,41 @@ class RenderedDataLoader(Dataset):
         
         try:
             to_return = torch.load(os.path.join(self.base_dir, to_open))
+
+
+        
+            for key in to_return.keys():
+                if key in self.features.keys():
+                    scaler = self.scale_dict[key]
+                    to_scale = to_return[key]
+                    three_d = False
+                    if len(to_scale.shape) > 2:
+                        three_d = True
+                        to_scale = self.ra_1(to_scale)
+                    else:
+                        to_scale = self.flat_1(to_scale)
+                    if self.calc_stats:
+                        scaler.partial_fit(to_scale)
+                    to_scale = torch.from_numpy(scaler.transform(to_scale)).float()
+                    if three_d:
+                        to_scale = self.ra_2(to_scale)
+                    else:
+                        to_scale = self.flat_2(to_scale)
+                    to_return[key] = to_scale
+
+            
+
+            to_return['pca'][to_return['pca'] != to_return['pca']] = 0
+            to_return['ica'][to_return['ica'] != to_return['ica']] = 0
+            to_return['indexes'][to_return['indexes'] != to_return['indexes']] = 0
+            to_return['indexes'][to_return['indexes'] == np.inf] = 0
+            to_return['indexes'][to_return['indexes'] == -np.inf] = 0
+        
+
+            return to_return
+        
         except:
             print(to_open)
-        to_return['pca'][to_return['pca'] != to_return['pca']] = 0
-        to_return['ica'][to_return['ica'] != to_return['ica']] = 0
-
-
-        return to_return
 
 
 class RenderDataLoader(Dataset):
@@ -484,7 +550,7 @@ class RenderDataLoader(Dataset):
                 shadow_crop[shadow_crop != shadow_crop] = 0
 
                 indexes_crop = indexes[crops[0]:crops[1], crops[2]:crops[3]] * sp_crop[...,np.newaxis]
-                indexes_crop[indexes_crop != indexes_crop] = 0
+                #indexes_crop[indexes_crop != indexes_crop] = 0
 
                 pca_center = self.grab_center(pca_crop, self.patch_size)
                 if (pca_center.shape == (self.patch_size, self.patch_size, 10)) and (pca_center.sum() != 0):
@@ -496,6 +562,8 @@ class RenderDataLoader(Dataset):
                     ica_center = ra(ica_center)
 
                     index_center = self.grab_center(indexes_crop, self.patch_size)
+                    if np.isnan(index_center).sum() > 0:
+                        continue
                     index_center = torch.from_numpy(index_center)
                     index_center = ra(index_center)
 
@@ -560,30 +628,35 @@ if __name__ == "__main__":
     CHM_MEAN = 4.015508459469479
     CHM_STD =  4.809300736115787
 
-    valid = Validator(file=VALID_FILE, 
-                    pca_dir=PCA_DIR, 
-                    ica_dir=ICA_DIR,
-                    raw_bands=RAW_DIR,
-                    shadow=SHADOW_DIR,
-                    site_name='NIWO', 
-                    num_classes=NUM_CLASSES, 
-                    plot_file=PLOT_FILE, 
-                    struct=True, 
-                    azm=AZM_DIR, 
-                    chm=CHM_DIR, 
-                    curated=CURATED_FILE, 
-                    rescale=False, 
-                    orig=ORIG_DIR, 
-                    superpixel=SP_DIR,
-                    indexes=INDEX_DIR,
-                    prefix='D13',
-                    chm_mean = 4.015508459469479,
-                    chm_std = 4.809300736115787,
-                    )
+    # valid = Validator(file=VALID_FILE, 
+    #                 pca_dir=PCA_DIR, 
+    #                 ica_dir=ICA_DIR,
+    #                 raw_bands=RAW_DIR,
+    #                 shadow=SHADOW_DIR,
+    #                 site_name='NIWO', 
+    #                 num_classes=NUM_CLASSES, 
+    #                 plot_file=PLOT_FILE, 
+    #                 struct=True, 
+    #                 azm=AZM_DIR, 
+    #                 chm=CHM_DIR, 
+    #                 curated=CURATED_FILE, 
+    #                 rescale=False, 
+    #                 orig=ORIG_DIR, 
+    #                 superpixel=SP_DIR,
+    #                 indexes=INDEX_DIR,
+    #                 prefix='D13',
+    #                 chm_mean = 4.015508459469479,
+    #                 chm_std = 4.809300736115787,
+    #                 )
 
-    render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, INDEX_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid, patch_size=3)
-    train_loader = DataLoader(render, batch_size=1, num_workers=8)
+    # render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, INDEX_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid, patch_size=3)
+    # train_loader = DataLoader(render, batch_size=1, num_workers=8)
     # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
 
-    for ix in tqdm(train_loader):
-        print(ix)
+    # for ix in tqdm(train_loader):
+    #     print(ix)
+
+    rendered = RenderedDataLoader(SAVE_DIR, {'pca':10, 'ica':10, 'raw_bands':15, 'azm':1, 'chm':1, 'shadow':1, 'indexes':26})
+    for ix in tqdm(rendered):
+        1+1
+    rendered.save_stats()

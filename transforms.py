@@ -126,11 +126,7 @@ class Blit(torch.nn.Module):
     
     def forward(self, arr):
         if torch.rand(1) < self.p:
-            #middle = arr.shape[-1]//2
-            #mask = self.rng.integers(2, size=arr.shape)
             mask = torch.randint_like(arr, 2)
-            #mask[:,middle] = 1
-            #mask = mask.astype(np.float32)
             arr = arr * mask
         return arr
 
@@ -142,13 +138,11 @@ class Block(torch.nn.Module):
     
     def forward(self, arr):
         if torch.rand(1) < self.p:
-            #middle = arr.shape[-1]//2
             upper = arr.shape[-1]
-            #bounds = self.rng.integers(upper, size=2)
             bounds = torch.randint(upper, (2,))
             mask = torch.ones_like(arr)
             mask[bounds.min():bounds.max()] = 0
-           # mask[middle] = 1
+
             arr = arr * mask
         return arr
 

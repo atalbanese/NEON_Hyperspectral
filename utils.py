@@ -15,7 +15,7 @@ import torchvision as tv
 from multiprocessing import Pool
 from pebble import ProcessPool
 from concurrent.futures import TimeoutError
-from einops import rearrange
+from einops import rearrange, reduce
 from skimage.color import rgb2hsv
 from skimage import exposure
 import numpy.ma as ma
@@ -546,14 +546,30 @@ def select_extra_bands(args):
             np.save(os.path.join(out_dir, out_file), bands)
 
 def get_all_indexes(args):
-    file, in_dir, out_dir = args
+    file, in_dir, out_dir, mask_dir = args
     if ".h5" in file:
         out_file = file.split('.')[0] + '_indexbands.npy'
+        mask_file = file.split(".")[0] + '_pca.npy'
+        #
+
         if not os.path.exists(os.path.join(out_dir, out_file)):
+            mask = np.load(os.path.join(mask_dir, mask_file))
+            mask = mask == mask
+            mask = reduce(mask, 'h w c -> h w ()', 'max').squeeze()
             img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=ixs.BANDS)['bands']
+            masked_img={}
+            for key, band in img.items():
+                band[~mask] =np.nan
+                band[band == 0] = np.nan
+                masked_img[key] = band
             to_stack = []
             for ix_fn in ixs.INDEX_FNS:
-                to_stack.append(ix_fn(img))
+                to_append = ix_fn(masked_img)
+                to_append[to_append == np.inf] = np.nan
+                to_append[to_append == -np.inf] = np.nan
+
+
+                to_stack.append(to_append)
             
             out = np.stack(to_stack)
             np.save(os.path.join(out_dir, out_file), out)
@@ -658,7 +674,7 @@ if __name__ == '__main__':
     FILE = 'NEON_D13_NIWO_DP3_445000_4432000_reflectance.h5'
     OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo/'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
-    PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_masked_10'
+    PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
     FN = get_extra_bands_all
 
     chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
@@ -687,7 +703,7 @@ if __name__ == '__main__':
     
 
     with ProcessPool(4) as pool:
-        bulk_process(pool, [IN_DIR, OUT_DIR], get_all_indexes)
+        bulk_process(pool, [IN_DIR, OUT_DIR, PCA_DIR], get_all_indexes)
 
     # # # with ProcessPool(4) as pool:
     # # #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
