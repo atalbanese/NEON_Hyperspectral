@@ -1,5 +1,6 @@
-from sre_constants import IN
-from tkinter import N
+# from sre_constants import IN
+# from tkinter import N
+
 import h5_helper as hp
 import numpy as np
 import matplotlib.pyplot as plt
@@ -23,6 +24,7 @@ import random
 import rasterio as rs
 
 import indexes as ixs
+import validator as vd
 
 
 def get_features(inp, feature_band=2):
@@ -586,6 +588,7 @@ def build_inc_pca(args):
         #mask = masked.mask[:, 0:30]
         to_pca = ma.compress_rows(masked)
         pca_solver.partial_fit(to_pca)
+        print('here')
 
 
     return pca_solver
@@ -679,6 +682,59 @@ if __name__ == '__main__':
 
     chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
 
+
+    VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
+    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct_de_dupe.csv"
+    PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
+    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
+    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
+    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
+    ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
+    RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
+    SHADOW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
+    SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo_chm'
+    INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo/'
+    NUM_CLASSES=12
+
+    valid = vd.Validator(file=VALID_FILE, 
+                    pca_dir=PCA_DIR, 
+                    ica_dir=ICA_DIR,
+                    raw_bands=RAW_DIR,
+                    shadow=SHADOW_DIR,
+                    site_name='NIWO', 
+                    num_classes=NUM_CLASSES, 
+                    plot_file=PLOT_FILE, 
+                    struct=True, 
+                    azm=AZM_DIR, 
+                    chm=CHM_DIR, 
+                    curated=CURATED_FILE, 
+                    rescale=False, 
+                    orig=ORIG_DIR, 
+                    superpixel=SP_DIR,
+                    indexes=INDEX_DIR,
+                    prefix='D13',
+                    chm_mean = 4.015508459469479,
+                    chm_std = 4.809300736115787,
+                    use_sp=True,
+                    scholl_filter=False,
+                    scholl_output=True,
+                    filter_species = 'SALIX')
+
+    train_keys = set(valid.orig_dict.keys()) - set(valid.valid_files.keys())
+
+    
+
+    train_list = [valid.orig_dict[k] for k in train_keys]
+
+    PCA_SOLVER = IncrementalPCA(n_components=30)
+
+    for f in tqdm(random.sample(train_list, len(train_list)//10)):
+        PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
+
+    with ProcessPool(4) as pool:
+        bulk_process(pool, [IN_DIR, OUT_DIR, PCA_SOLVER], do_inc_pca)
+    print('here')
+
     #make_superpixels_chm((FILE, chm_fold, OUT_DIR, IN_DIR))
 
     # test = hp.pre_processing(os.path.join(IN_DIR, FILE), get_all=True)['bands']
@@ -702,11 +758,11 @@ if __name__ == '__main__':
     #get_all_indexes((FILE, IN_DIR, OUT_DIR))
     
 
-    with ProcessPool(4) as pool:
-        bulk_process(pool, [IN_DIR, OUT_DIR, PCA_DIR], get_all_indexes)
+    # with ProcessPool(4) as pool:
+    #     bulk_process(pool, [IN_DIR, OUT_DIR, PCA_DIR], get_all_indexes)
 
-    # # # with ProcessPool(4) as pool:
-    # # #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
+    # with ProcessPool(1) as pool:
+    #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
 
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, PCA_DIR, MASK_DIR], masked_pca)
@@ -723,13 +779,7 @@ if __name__ == '__main__':
 
 
 
-    # PCA_SOLVER = IncrementalPCA(n_components=10)
-
-    # for f in tqdm(random.sample(os.listdir(IN_DIR), 40)):
-    #     PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
-
-    # with ProcessPool(4) as pool:
-    #     bulk_process(pool, [IN_DIR, OUT_DIR, PCA_SOLVER], do_inc_pca)
+    
 
     # img_stats(OUT_DIR, os.path.join(OUT_DIR, 'stats'), num_channels=10)
 

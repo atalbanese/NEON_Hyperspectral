@@ -297,7 +297,10 @@ class RenderedDataLoader(Dataset):
                 input_size = 3,
                 stats_loc=''):
         self.base_dir = file_folder
-        self.files = filter(os.path.isfile, os.listdir(file_folder))
+        self.files = os.listdir(file_folder)
+        for ix, f in enumerate(self.files):
+            if os.path.isdir(os.path.join(self.base_dir, f)):
+                del self.files[ix]
         self.calc_stats = True
         if os.path.exists(os.path.join(self.base_dir, 'stats/stats.npy')):
             self.stats = torch.load(os.path.join(self.base_dir, 'stats/stats.npy'))

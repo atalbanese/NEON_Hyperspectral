@@ -32,7 +32,8 @@ class SwaVModelUnified(pl.LightningModule):
                 mode='default', 
                 augment_refine = 'false',
                 scheduler=True,
-                height_mask=False):
+                height_mask=False,
+                positions=False):
         super().__init__()
         self.save_hyperparameters('lr', 'height_threshold', 'trained_backbone', 'features_dict', 'num_intermediate_classes', 'pre_training', 'class_key', 'chm_mean', 'chm_std', 'class_weights')
         self.features_dict = features_dict
@@ -41,13 +42,14 @@ class SwaVModelUnified(pl.LightningModule):
         self.chm_mean = chm_mean
         self.chm_std = chm_std
         self.lr = lr
+        self.height_mask = height_mask
         self.height_threshold = height_threshold
         self.trained_backbone = trained_backbone
         self.augment_refine = augment_refine
         self.mode = mode
         self.scheduler = scheduler
         if self.mode == 'default':
-            self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes, n_head=16, n_layers=12)
+            self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes, n_head=16, n_layers=12, positions=positions)
         if self.mode == 'patch':
             self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes)
         if self.mode == 'pixel_patch':
@@ -115,10 +117,6 @@ class SwaVModelUnified(pl.LightningModule):
             cur = inp[key]
             if len(cur.shape) != 4:
                 cur = cur.unsqueeze(1)
-            
-            
-            if key == "chm":
-                cur = (cur - self.chm_mean)/self.chm_std
             if cur.shape[1] != value:
                 cur = cur[:,:value,...]
             to_cat.append(cur)
@@ -143,11 +141,13 @@ class SwaVModelUnified(pl.LightningModule):
         chm = None
         mask = None
         targets = inp['target']
+        
 
-        if self.height_mask():
+        if self.height_mask:
+            mask = inp['mask']
             chm = inp['chm'].unsqueeze(1)
             height = inp['height']
-            mask = inp['mask']
+            
             mask = reduce(mask, 'b c h w -> b () h w', 'max')
 
             height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
@@ -203,7 +203,7 @@ class SwaVModelUnified(pl.LightningModule):
             loss = self.loss(inp, targets)
             self.log('valid_loss', loss)
             self.update_results(inp, targets)
-            return None
+            return loss
 
 
 
@@ -271,7 +271,7 @@ class SwaVModelUnified(pl.LightningModule):
 
             #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
             scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=40)
-            to_return['scheduler'] = scheduler
+            to_return['lr_scheduler'] = scheduler
         return to_return
     
     

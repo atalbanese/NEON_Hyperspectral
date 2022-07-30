@@ -257,7 +257,8 @@ class SWaVUnified(nn.Module):
                 emb_size=128, 
                 temp=0.1, 
                 epsilon=0.05,  
-                sinkhorn_iters=3):
+                sinkhorn_iters=3,
+                positions=False):
         super(SWaVUnified, self).__init__()
         
         self.transforms_main = tt.Compose([
@@ -267,6 +268,10 @@ class SWaVUnified(nn.Module):
 
 
         self.embed = nn.Linear(in_channels, emb_size)
+        self.use_positions = positions
+
+        if positions:
+            self.positions = nn.Parameter(torch.randn((9, emb_size)))
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=n_head, dim_feedforward=emb_size*2, batch_first=True)
         self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
@@ -321,9 +326,8 @@ class SWaVUnified(nn.Module):
         x_s = self.transforms_main(x)
 
         x = self.embed(x)
-        
         x_s = self.embed(x_s)
-
+        
 
         inp = torch.cat((x, x_s))
         inp = self.encoder(inp)
@@ -362,6 +366,9 @@ class SWaVUnified(nn.Module):
     def forward(self, inp):
        
         inp = self.embed(inp)
+        if self.use_positions:
+            inp = inp + self.positions
+
 
         inp = self.encoder(inp)
         inp = self.projector(inp)

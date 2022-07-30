@@ -140,7 +140,6 @@ class Validator():
         if split == 'test':
             data = self.test
 
-
         loaded_key = None
         for ix, row in data.iterrows():
             key = row['file_coords']
@@ -184,6 +183,7 @@ class Validator():
             rad = out_size//2 
             if self.use_sp:
                 super_pix_num = row['sp']
+
                 sp_mask = sp == super_pix_num
                 masked_chm = chm * sp_mask
                 max_height = masked_chm.max()
@@ -504,13 +504,9 @@ class Validator():
         c_max = chm.max()
         chm_scale = chm/c_max
 
-        # boundaries = mark_boundaries(chm_scale, sp)
-
-        #rgb = rgb[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
-        # plt.imshow(boundaries)
 
         trees_df = df.loc[(df['tree_x'] == df['tree_x'])]
-        trees_df['sp'], trees_df['sp_height_dif'] = trees_df.apply(lambda row: vd._select_superpixel(row, sp, chm), axis=1).str
+        trees_df['sp'], trees_df['sp_height_dif'], trees_df['sp_east'], trees_df['sp_north'] = trees_df.apply(lambda row: vd._select_superpixel(row, sp, chm), axis=1).str
         trees_df = trees_df.loc[trees_df['sp'] != -1]
 
         if trees_df['sp'].duplicated().sum() != 0:
@@ -537,17 +533,22 @@ class Validator():
 
                     trees_df = trees_df.drop(to_dedupe)
 
-        if trees_df['sp'].duplicated().sum() != 0:
-            print('here')
+
+        #Check for intersections
+        check_inters =  gpd.GeoDataFrame(trees_df, geometry=gpd.points_from_xy(trees_df.sp_east, trees_df.sp_north), crs='EPSG:32618')
+        crowns = check_inters.buffer(2)
+
+        to_remove = set()
+        for ix, row in crowns.iteritems():
+            working_copy = crowns.loc[(crowns.index != ix)]
+            intersect = working_copy.intersects(row)
+            if intersect.sum() > 0:
+                to_remove.add(ix)
+        if len(to_remove)>0:
+            trees_df =  trees_df.drop(list(to_remove))
+
 
         return trees_df
-        # for ix, row in trees_df.iterrows():
-            # ax.plot(row['tree_x'], row['tree_y'], marker="o")
-            # ax.annotate(f'{row["height"]/c_max:.2f}', (row['tree_x'], row['tree_y']), textcoords='offset points', xytext= (0, 5), ha='center', color='red', fontsize='xx-large')
-        # fig.tight_layout()
-        # plt.show()
-        # plt.savefig(os.path.join(save_dir, f'{row["plotID"]}_{coords}_trees.png'))
-        # plt.close()
 
     @staticmethod
     def _select_superpixel(row, sp, chm, select_buffer=5, upper_height_bound=5):
@@ -561,7 +562,7 @@ class Validator():
         unique_sp= np.unique(sp_crop)
 
         if unique_sp.sum() == 0:
-            return -1, -1
+            return -1, -1, -1, -1
 
         candidates = {}
         for pix_num in unique_sp:
@@ -582,10 +583,23 @@ class Validator():
             if v < min_dif:
                 min_dif = v
                 top_candidate = k
+
         if top_candidate is not None:
-            return top_candidate, min_dif
+            #get coordinates of top candidate
+            sp_mask = sp == top_candidate
+            masked_chm = chm * sp_mask
+            max_height = masked_chm.max()
+            height_pix = masked_chm == max_height
+            h_col = np.all(~height_pix, axis=0).argmin()
+            h_row = np.all(~height_pix, axis=1).argmin()
+
+            h_col = int(row['file_west_bound']) + h_col
+            h_row = (int(row['file_south_bound']) + 1000) - h_row
+
+
+            return top_candidate, min_dif, h_col, h_row
         else:
-            return -1, -1
+            return -1, -1, -1, -1
 
 
     def pick_superpixels(self):
@@ -599,45 +613,7 @@ class Validator():
         self.save_valid_df(save_dir)
 
 
-    # @staticmethod
-    # def _plot_inference(df, validator, save_dir, model, get_stats=True):
-    #     if len(df)>0:
-    #         row = df.iloc[0]
-    #         file_key = row['file_coords']
-    #         if file_key in validator.valid_files:
-    #             plot_id = row['plotID']
-    #             if file_key not in validator.last_cluster:
-    #                 f = validator.valid_files[file_key]
-    #                 if not validator.struct:
-    #                     clustered = inference.swav_inference_big(model, f)
-    #                 else:
-    #                     c = validator.chm_dict[file_key]
-    #                     a = validator.azm_dict[file_key]
-    #                     clustered = inference.swav_inference_big_struct_4(model, f, c, a, validator.chm_mean, validator.chm_std, rescale=validator.rescale)
-    #                     if get_stats:
-    #                         validator.validate_from_gdf(file_key, clustered)
 
-    #                 validator.last_cluster[file_key] = clustered
-    #             else:
-    #                 clustered = validator.last_cluster[file_key]
-    #             plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
-    #             np.save(os.path.join(save_dir, f'{plot_id}_clustered.npy'), clustered)
-            
-    #             clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
-    #             plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
-    #             plt.bar(*np.unique(clustered, return_counts=True))
-                
-    #             plt.title(plot_id)
-    #             plt.xlabel('Classification')
-    #             plt.ylabel('Pixel Count')
-    #             #plt.xlim(0, 10)
-
-    #             plt.savefig(os.path.join(save_dir, plot_id + "_hist.png"))
-    #             plt.close()
-    #     return df
-
-
-        #plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
 
     
     def map_plots(self, save_dir):
@@ -707,13 +683,7 @@ class Validator():
                 im = ax.imshow(y, alpha=.2)
                 slider = self._make_slider(fig, im)
         data = self.valid_data.loc[self.valid_data['file_coords'] == coord]
-        # for ix, row in data.iterrows():
-        #     # x = [row['x_min'], row['x_max'], row['x_max'], row['x_min'], row['x_min']]
-        #     # y = [row['y_max'], row['y_max'], row['y_min'], row['y_min'], row['y_max']]
-        #     x= (row['x_min'] + row['x_max'])//2
-        #     y= (row['y_min'] + row['y_max'])//2
-        #     ax.plot(x, y, marker="o")
-        #     ax.annotate(row['taxonID'], (x, y), textcoords='offset points', xytext= (0, 5), ha='center')
+
         plt.show()
     
     @staticmethod
@@ -786,40 +756,13 @@ class Validator():
         
 
         return mat
-        # df = pd.DataFrame.from_dict(self.cluster_dict, orient='index', dtype=int)
-        # df["sum"] = df.sum(axis=1)
-        # sum_row = pd.DataFrame(df.sum(axis=0)).transpose()
-        # sum_row = sum_row.rename(index={0:'sum'})
-        # df = pd.concat([df, sum_row])
-        # return df
+
 
     def kappa(self):
         return None
     
 
-# def check_predictions(validator: Validator, model, coords, h5_file, save_dir, **kwargs):
-#     y = inference.do_inference(model, h5_file, True, True, **kwargs)
-#     np.save(os.path.join(save_dir,coords+".npy"), y)
-#     validator.validate(coords, y)
-#     return None
 
-# def check_all(validator: Validator, model, save_dir, **kwargs):
-#     for coord, file in validator.valid_files.items():
-#         check_predictions(validator, model, coord, file, save_dir, **kwargs)
-#     return None
-
-# def bulk_validation(ckpts_dir, pca_dir, save_dir, valid_file, model_type, **kwargs):
-#     for ckpt in os.listdir(ckpts_dir):
-#          if ".ckpt" in ckpt:
-#              model = inference.load_ckpt(model_type, os.path.join(ckpts_dir, ckpt), **kwargs)
-#              valid = Validator(file=valid_file, pca_dir=pca_dir, **kwargs)
-#              ckpt_name = ckpt.replace(".ckpt", "")
-#              new_dir = os.path.join(save_dir, ckpt_name)
-#              if not os.path.isdir(new_dir):
-#                 os.mkdir(new_dir)
-#              check_all(valid, model, new_dir, n_components=kwargs['num_channels'])
-#              valid.confusion_matrix.to_csv(os.path.join(save_dir, ckpt_name + "conf_matrix.csv"))
-#     return True
 
 def side_by_side_bar(df, plot_name):
     fig, ax = plt.subplots(1, 2)
@@ -906,24 +849,6 @@ def ward_cluster_plots(plot_dir, save_dir):
             clustered = rearrange(clustered, '(h w) -> h w', h=40, w=40)
             np.save(os.path.join(save_dir, f'cluster_{f}'), clustered)
             plt.imsave(os.path.join(save_dir, 'viz',  f"{f.split('.')[0]}.png"),clustered)
-
-# def plot_inference(validator, save_dir, model):
-#     for key, f in validator.valid_files.items():
-#         clustered = inference.swav_inference_big(model, f)
-#         plt.bar(*np.unique(clustered, return_counts=True))
-#         plot_id = f.split("_")[2]+ " "+ f.split("_")[3]
-#         plt.title(plot_id)
-#         plt.xlabel('Classification')
-#         plt.ylabel('Pixel Count')
-#         #plt.xlim(0, 10)
-
-#         plt.savefig(os.path.join(save_dir, plot_id + ".png"))
-#         plt.close()
-
-
-#         plt.imsave(os.path.join(save_dir, 'viz',  f"{plot_id}.png"),clustered, cmap='tab20')
-
-
 
 def pca_norm_cluster_plots(plot_dir, save_dir):
     mean = np.load(os.path.join(plot_dir, 'stats/mean.npy')).astype(np.float32)
@@ -1070,15 +995,15 @@ if __name__ == "__main__":
                     prefix='D13',
                     chm_mean = 4.015508459469479,
                     chm_std = 4.809300736115787,
-                    use_sp=True,
-                    scholl_filter=False,
+                    use_sp=False,
+                    scholl_filter=True,
                     scholl_output=True,
                     filter_species = 'SALIX')
 
 
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_training', 'train', out_size=3)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_valid', 'valid', out_size=3)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/our_labels_3_3/label_test', 'test', out_size=3)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_training', 'train', out_size=3)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_valid', 'valid', out_size=3)
+    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_test', 'test', out_size=3)
     print(valid.taxa)
     print(valid.class_weights)
 
