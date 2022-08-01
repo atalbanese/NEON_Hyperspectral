@@ -26,8 +26,62 @@ from numpy.random import default_rng
 import numpy.ma as ma
 import pickle
 from einops.layers.torch import Rearrange, Reduce
+from attrs import define, field
 #from torch_geometric.data import Data
 
+
+class RenderBlocks(Dataset):
+    def __init__(self,
+                block_size: int,
+                nmf_dir: str,
+                save_dir: str,
+                validator: Validator):
+        self.block_size = block_size
+        self.nmf_dir = nmf_dir
+        self.save_dir = save_dir
+        self.validator = validator
+        
+        self.nmf_files = [os.path.join(self.nmf_dir, f) for f in os.listdir(self.nmf_dir) if ".npy" in f]
+
+        def make_dict(file_list, param_1, param_2):
+            return {f"{f.split('_')[param_1]}_{f.split('_')[param_2]}": f for f in file_list}
+
+        self.nmf_dict = make_dict(self.nmf_files, -4, -3)
+        self.all_files = list(set(self.nmf_dict.keys()) - set(self.validator.valid_files.keys()))
+
+    def __len__(self):
+        return len(self.all_files)
+
+    def __getitem__(self, ix):
+        key = self.all_files[ix]
+
+        img = np.load(self.nmf_dict[key]).astype(np.float32)
+
+        img = rearrange(img, '(h b1) (w b2) c -> (b1 b2) h w c', h = self.block_size, w=self.block_size)
+
+        
+        #it = np.nditer(img, flags=['f_index'])
+        for index, x in enumerate(img):
+            nan_sum = (x != x).sum()
+            if nan_sum == 0:
+                save_name = f'{key}_{index}.pt'
+                nmf_tensor = torch.from_numpy(x)
+                to_save = {'nmf': nmf_tensor}
+                save_loc = os.path.join(self.save_dir, save_name)
+                with open(save_loc, 'wb') as f:
+                    torch.save(to_save, save_loc)
+        
+        return 1
+
+
+
+
+
+
+
+
+
+    
 
 
 class MixingDataLoader(Dataset):
@@ -624,42 +678,47 @@ if __name__ == "__main__":
     SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
     ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/raw_training_indexes'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/raw_training'
     INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo'
 
+    NMF_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_mnf/'
 
     CHM_MEAN = 4.015508459469479
     CHM_STD =  4.809300736115787
 
-    # valid = Validator(file=VALID_FILE, 
-    #                 pca_dir=PCA_DIR, 
-    #                 ica_dir=ICA_DIR,
-    #                 raw_bands=RAW_DIR,
-    #                 shadow=SHADOW_DIR,
-    #                 site_name='NIWO', 
-    #                 num_classes=NUM_CLASSES, 
-    #                 plot_file=PLOT_FILE, 
-    #                 struct=True, 
-    #                 azm=AZM_DIR, 
-    #                 chm=CHM_DIR, 
-    #                 curated=CURATED_FILE, 
-    #                 rescale=False, 
-    #                 orig=ORIG_DIR, 
-    #                 superpixel=SP_DIR,
-    #                 indexes=INDEX_DIR,
-    #                 prefix='D13',
-    #                 chm_mean = 4.015508459469479,
-    #                 chm_std = 4.809300736115787,
-    #                 )
+    valid = Validator(file=VALID_FILE, 
+                    pca_dir=PCA_DIR, 
+                    ica_dir=ICA_DIR,
+                    raw_bands=RAW_DIR,
+                    shadow=SHADOW_DIR,
+                    site_name='NIWO', 
+                    num_classes=NUM_CLASSES, 
+                    plot_file=PLOT_FILE, 
+                    struct=True, 
+                    azm=AZM_DIR, 
+                    chm=CHM_DIR, 
+                    curated=CURATED_FILE, 
+                    rescale=False, 
+                    orig=ORIG_DIR, 
+                    superpixel=SP_DIR,
+                    indexes=INDEX_DIR,
+                    prefix='D13',
+                    chm_mean = 4.015508459469479,
+                    chm_std = 4.809300736115787,
+                    use_sp=True,
+                    scholl_filter=False,
+                    scholl_output=False,
+                    filter_species = 'SALIX')
 
-    # render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, INDEX_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid, patch_size=3)
-    # train_loader = DataLoader(render, batch_size=1, num_workers=8)
-    # test = MaskedDenseVitDataset(pca_fold, 8, eval=True)
+    #render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, INDEX_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid, patch_size=9)
+    render = RenderBlocks(20, NMF_DIR, SAVE_DIR, valid)
+    #
+    train_loader = DataLoader(render, batch_size=1, num_workers=8)
 
-    # for ix in tqdm(train_loader):
-    #     print(ix)
-
-    rendered = RenderedDataLoader(SAVE_DIR, {'pca':10, 'ica':10, 'raw_bands':15, 'azm':1, 'chm':1, 'shadow':1, 'indexes':26})
-    for ix in tqdm(rendered):
+    for ix in tqdm(train_loader):
         1+1
-    rendered.save_stats()
+
+    # rendered = RenderedDataLoader(SAVE_DIR, {'pca':10, 'ica':10, 'raw_bands':15, 'azm':1, 'chm':1, 'shadow':1, 'indexes':26})
+    # for ix in tqdm(rendered):
+    #     1+1
+    # rendered.save_stats()

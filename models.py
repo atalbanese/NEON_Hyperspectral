@@ -2,17 +2,93 @@ from requests import patch
 import networks
 import net_gen
 import torch
-from torch import layer_norm, nn
+from torch import layer_norm, nn, einsum
 import torch.nn.functional as f
 import torchvision.transforms.functional as TF
 import pytorch_lightning as pl
 import torchvision as tv
 import transforms as tr
+
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 #import cv2 as cv
 import numpy.ma as ma
 import numpy as np
+from attrs import define, field
+from dall_e import Encoder, Decoder
+
+@define
+class dVAE(pl.LightningModule):
+    n_in: int
+    vocab: int
+    lr: float
+    requires_grad: bool = field(default=True)
+    temperature: float = field(default=0.9)
+    kl_div_loss_weight: float = field(default=0.)
+    
+
+    def __attrs_post_init__(self):
+	
+        super().__init__()
+        self.save_hyperparameters()
+
+        self.loss = f.mse_loss
+        self.codebook = nn.Embedding(self.vocab, 512)
+        self.encoder = Encoder(input_channels = self.n_in,
+                                vocab_size = self.vocab,
+                                requires_grad = self.requires_grad)
+        self.decoder = Decoder(output_channels = self.n_in,
+                                vocab_size = self.vocab,
+                                requires_grad = self.requires_grad)
+
+    def forward(self, 
+                inp,
+                return_logits = False):
+        logits = self.encoder(inp)
+        if return_logits:
+            return logits
+
+        soft_one_hot = f.gumbel_softmax(logits, tau=self.temperature, dim=1)
+        sampled = einsum('b n h w, n d -> b d h w', soft_one_hot, self.codebook.weight)
+        out = self.decoder(sampled)
+
+        recon_loss = self.loss_fn(inp, out)
+
+        # kl divergence
+
+        logits = rearrange(logits, 'b n h w -> b (h w) n')
+        log_qy = f.log_softmax(logits, dim = -1)
+        log_uniform = torch.log(torch.tensor([1. / self.vocab]))
+        kl_div = f.kl_div(log_uniform, log_qy, None, None, 'batchmean', log_target = True)
+
+        loss = recon_loss + (kl_div * self.kl_div_loss_weight)
+
+        return loss, out
+
+    @torch.no_grad()
+    def get_codebook_indices(self, images):
+        logits = self(images, return_logits = True)
+        codebook_indices = logits.argmax(dim = 1).flatten(1)
+        return codebook_indices
+
+    def training_step(self, inp):
+        loss, _ = self.forward(inp)
+        self.log('loss', loss)
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.9,0.999), eps=10e-8, weight_decay=10e-4)
+       
+        
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=40)
+        to_return = {"optimizer": optimizer, "monitor": "train_loss", 'lr_scheduler': scheduler}
+        return to_return
+        
+
+
+
+
+    
 
 
 

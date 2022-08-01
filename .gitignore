@@ -15,3 +15,4 @@ lightning_logs/*
 exp_logs/*
 ckpts/unified_trainingniwo_pre_train_ica_10_pca_10_chm_1_{epoch}
 ckpts/unified_trainingniwo_pre_train_ica_10_pca_10_indexes_{epoch}
+*.pk

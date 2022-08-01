@@ -163,6 +163,10 @@ def unified_training(class_key,
     refiner.fit(refine_model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     refiner.save_checkpoint(f'ckpts/unified_trainingniwo_pre_train_{feature_labels}{extra_labels}'+'{epoch}.ckpt')
     refiner.test(refine_model, dataloaders=test_loader)
+
+
+def vae_training():
+    return None
     
 
 if __name__ == "__main__":
