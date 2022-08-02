@@ -1,3 +1,4 @@
+from msilib.schema import Error
 from select import select
 import h5_helper as hp
 import warnings
@@ -433,8 +434,8 @@ class RenderedDataLoader(Dataset):
 
             return to_return
         
-        except:
-            print(to_open)
+        except BaseException as e:
+            print(e)
 
 
 class RenderDataLoader(Dataset):

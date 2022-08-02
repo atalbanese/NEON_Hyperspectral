@@ -139,7 +139,7 @@ class PatchBlock(torch.nn.Module):
     def forward(self, arr):
         if torch.rand(1) < self.p:
             b, s, _ = arr.shape
-            mask = torch.rand((b, s), dtype=torch.float32)
+            mask = torch.rand((b, s), dtype=torch.float32, device=arr.device)
             mask = mask >= 0.4
             mask = mask.unsqueeze(2)
 

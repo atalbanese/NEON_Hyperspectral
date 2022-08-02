@@ -7,6 +7,7 @@ import rasterio as rs
 from rasterio.transform import from_origin
 import rasterio.features as rf
 from rasterio.crs import CRS
+import torchvision.transforms.functional as TF
 import torch
 import pickle
 import matplotlib.pyplot as plt
@@ -94,7 +95,7 @@ class Validator():
         self.cluster_groups = set()
 
         self.last_cluster = {}
-
+        self.rng = np.random.default_rng(42)
         
         if use_sp:
             self.data_gdf = self.pick_superpixels()
@@ -258,6 +259,74 @@ class Validator():
                     'target': label,
                     'height': height,
                     'indexes': index_crop
+                }
+
+                f_name = f'{key}_{row["taxonID"]}_{row["individualID"]}.pt'
+                with open(os.path.join(save_dir, f_name), 'wb') as f:
+                    torch.save(to_save, f)
+            
+        return None
+
+    def render_valid_patch(self, save_dir, split, out_size=20, target_size=3):
+        if split == 'train':
+            data = self.train
+        if split == 'valid':
+            data = self.valid
+        if split == 'test':
+            data = self.test
+
+        loaded_key = None
+        for ix, row in data.iterrows():
+            key = row['file_coords']
+            if key != loaded_key:
+                pca = np.load(self.pca_dict[key]).astype(np.float32)
+
+            taxa = row['taxonID']
+            
+            height = float(row['height'])
+
+
+            rad = 1
+
+            t_col = int(row['tree_x'])
+            t_row = int(row['tree_y'])
+
+            target_bounds = (t_row - rad, t_row+rad+1, t_col-rad, t_col+rad+1)
+            neg_x_pad = self.rng.integers(0, out_size-target_size)
+            pos_x_pad = (out_size-target_size) - neg_x_pad
+            neg_y_pad = self.rng.integers(0, out_size-target_size)
+            pos_y_pad = (out_size-target_size) - neg_y_pad
+
+            x_min = target_bounds[2] - neg_x_pad
+            x_max = target_bounds[3] + pos_x_pad
+
+            y_min = target_bounds[0] - neg_y_pad
+            y_max = target_bounds[1] + pos_y_pad
+
+            pca_crop = pca[y_min:y_max, x_min:x_max,:]
+
+            crop_coords = (neg_y_pad, neg_x_pad, 3, 3)
+            #pca_crop = np.pad(pca_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
+
+            
+            
+
+            if pca_crop.shape == (out_size, out_size, 16):
+                pca_crop = torch.tensor(pca_crop)
+                pca_crop = rearrange(pca_crop, 'h w c -> c h w')
+                mask = pca_crop != pca_crop
+                pca_crop[mask] = 0
+                
+
+                label = torch.zeros((len(self.taxa.keys()),target_size, target_size), dtype=torch.float32).clone()
+                label[self.taxa[taxa]] = 1.0
+
+                to_save = {
+                    'pca': pca_crop,
+                    'mask': mask,
+                    'target': label,
+                    'height': height,
+                    'crop_coords': crop_coords
                 }
 
                 f_name = f'{key}_{row["taxonID"]}_{row["individualID"]}.pt'
@@ -962,7 +1031,7 @@ def make_valid_df(valid_dict, num_classes):
 if __name__ == "__main__":
     NUM_CLASSES = 12
     NUM_CHANNELS = 10
-    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked'
    
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
     CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct_de_dupe.csv"
@@ -1001,9 +1070,9 @@ if __name__ == "__main__":
                     filter_species = 'SALIX')
 
 
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_training', 'train', out_size=3)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_valid', 'valid', out_size=3)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_test', 'test', out_size=3)
+    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train', 'train', out_size=20)
+    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_valid', 'valid', out_size=20)
+    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_test', 'test', out_size=20)
     print(valid.taxa)
     print(valid.class_weights)
 

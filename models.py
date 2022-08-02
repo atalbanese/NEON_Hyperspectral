@@ -18,87 +18,6 @@ from attrs import define, field
 from dall_e import Encoder, Decoder
 
 
-class dVAE(pl.LightningModule):
-    def __init__(self,
-                n_in: int,
-                vocab: int,
-                lr: float,
-                requires_grad: bool = True,
-                temperature: float = 0.9,
-                kl_div_loss_weight: float = 3.0):
-        super().__init__()
-        self.save_hyperparameters()
-
-        self.n_in = n_in
-        self.vocab = vocab
-        self.lr = lr
-        self.requires_grad = requires_grad
-        self.temperature = temperature
-        self.kl_div_loss_weight = kl_div_loss_weight
-
-        self.loss_fn = f.mse_loss
-        self.codebook = nn.Embedding(self.vocab, 512)
-        self.encoder = Encoder(input_channels = self.n_in,
-                                vocab_size = self.vocab,
-                                requires_grad = self.requires_grad,
-                                use_mixed_precision=False)
-        self.decoder = Decoder(output_channels = self.n_in,
-                                vocab_size = self.vocab,
-                                requires_grad = self.requires_grad,
-                                use_mixed_precision=False)
-
-    def forward(self, 
-                inp,
-                return_logits = False):
-        inp = inp['pca']
-        logits = self.encoder(inp)
-        if return_logits:
-            return logits
-
-        soft_one_hot = f.gumbel_softmax(logits, tau=self.temperature, dim=1)
-        sampled = einsum('b n h w, n d -> b d h w', soft_one_hot, self.codebook.weight)
-        out = self.decoder(sampled)
-
-        recon_loss = self.loss_fn(inp, out)
-
-        # kl divergence
-
-        logits = rearrange(logits, 'b n h w -> b (h w) n')
-        log_qy = f.log_softmax(logits, dim = -1)
-        log_uniform = torch.log(torch.tensor([1. / self.vocab])).cuda()
-        kl_div = f.kl_div(log_uniform, log_qy, None, None, 'batchmean', log_target = True)
-
-        loss = recon_loss + (kl_div * self.kl_div_loss_weight)
-
-        return loss, out
-
-    @torch.no_grad()
-    def get_codebook_indices(self, images):
-        logits = self(images, return_logits = True)
-        codebook_indices = logits.argmax(dim = 1).flatten(1)
-        return codebook_indices
-
-    def training_step(self, inp):
-        loss, _ = self.forward(inp)
-        self.log('loss', loss)
-        return loss
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, betas=(0.9,0.999), eps=10e-8, weight_decay=10e-4)
-       
-        
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=40)
-        to_return = {"optimizer": optimizer, "monitor": "train_loss", 'lr_scheduler': scheduler}
-        return to_return
-        
-
-
-
-
-    
-
-
-
 #TODO: test out additional augmentations for labelled training
 class SwaVModelUnified(pl.LightningModule):
     def __init__(self, 
@@ -132,15 +51,18 @@ class SwaVModelUnified(pl.LightningModule):
         self.mode = mode
         self.scheduler = scheduler
         if self.mode == 'default':
-            self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes, n_head=16, n_layers=12, positions=positions)
+            self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes, n_head=8, n_layers=8, positions=positions)
         if self.mode == 'patch':
-            self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes)
+            self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes, n_head=8, n_layers=8, patch_size=4)
         if self.mode == 'pixel_patch':
             self.swav = networks.SWaVUnifiedPerPixelPatch(self.num_channels, num_intermediate_classes)
-        self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes*2),
+        if self.mode == 'default':
+            self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes*2),
                                          nn.BatchNorm1d(num_intermediate_classes*2),
                                          nn.ReLU(),
                                          nn.Linear(num_intermediate_classes*2, self.num_output_classes))
+        else:
+            self.predict = networks.UpsamplePredictor(num_intermediate_classes, self.num_output_classes)
         if class_weights is not None:
             self.loss = nn.CrossEntropyLoss(weight=torch.tensor(class_weights), label_smoothing=0.1)
         else:
@@ -224,7 +146,9 @@ class SwaVModelUnified(pl.LightningModule):
         chm = None
         mask = None
         targets = inp['target']
-        
+        crop_coords = None
+        if 'crop_coords' in inp.keys():
+            crop_coords = inp['crop_coords']
 
         if self.height_mask:
             mask = inp['mask']
@@ -254,29 +178,35 @@ class SwaVModelUnified(pl.LightningModule):
             inp = TF.hflip(inp)
             hflipped = True
 
-        if self.mode != 'pixel_patch':
+        if self.mode == 'default':
             inp = self.ra(inp)
         if self.augment_refine:
             inp = self.swav.transforms_main(inp)
             
         inp = self.swav.forward(inp)
-        inp = rearrange(inp, 'b s f -> (b s) f')
-        inp = self.predict(inp)
+        if self.mode == 'default':
+            inp = rearrange(inp, 'b s f -> (b s) f')
+            inp = self.predict(inp)
+        else:
+            inp = rearrange(inp, 'b (h w) f -> b f h w', h=5, w=5)
+            inp = self.predict(inp)
+            inp = TF.crop(inp, *crop_coords)
 
         inp = torch.softmax(inp, dim=1)
-        
-        targets= rearrange(targets, 'b c h w -> (b h w) c')
+        if self.mode == 'default':
+            targets= rearrange(targets, 'b c h w -> (b h w) c')
+
         targets=torch.argmax(targets, dim=1)
         
 
-        if mask is not None:
-            if vflipped:
-                mask = TF.vflip(mask)
-            if hflipped:
-                mask = TF.hflip(mask)
-            mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
-            inp = inp[mask, :]
-            targets = targets[mask]
+        # if mask is not None:
+        #     if vflipped:
+        #         mask = TF.vflip(mask)
+        #     if hflipped:
+        #         mask = TF.hflip(mask)
+        #     mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
+        #     inp = inp[mask, :]
+        #     targets = targets[mask]
 
         if not validating: 
             loss = self.loss(inp, targets)

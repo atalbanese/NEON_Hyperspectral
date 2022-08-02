@@ -10,6 +10,34 @@ import numpy as np
 import torchvision.transforms as tt
 import transforms as tr
 
+class UpsamplePredictor(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(UpsamplePredictor, self).__init__()
+        self.up1 = nn.Sequential(nn.ConvTranspose2d(in_channels, in_channels, kernel_size=2, stride=2),
+                                nn.BatchNorm2d(in_channels),
+                                nn.ReLU())
+        self.up2 = nn.Sequential(nn.ConvTranspose2d(in_channels, in_channels, kernel_size=2, stride=2),
+                                nn.BatchNorm2d(in_channels),
+                                nn.ReLU())
+        self.max = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv1 = nn.Sequential(nn.Conv2d(in_channels, in_channels//2, kernel_size=3, padding=1),
+                                nn.BatchNorm2d(in_channels//2),
+                                nn.ReLU())
+        self.conv2 = nn.Sequential(nn.Conv2d(in_channels//2, in_channels//4, kernel_size=3, padding=1),
+                                nn.BatchNorm2d(in_channels//4),
+                                nn.ReLU())
+        self.up3 = nn.Upsample(scale_factor =2, mode='bilinear')
+        self.classify = nn.Conv2d(in_channels//4, out_channels, kernel_size=1)
+    
+    def forward(self, x):
+        x = self.up1(x)
+        x = self.up2(x)
+        x = self.max(x)
+        x = self.conv1(x)
+        x= self.conv2(x)
+        x = self.up3(x)
+        x = self.classify(x)
+        return x
 
 
 class SWaVUnifiedPerPixelPatch(nn.Module):
@@ -149,7 +177,7 @@ class SWaVUnifiedPerPatch(nn.Module):
                 epsilon=0.05,  
                 sinkhorn_iters=3,
                 patch_size=4):
-        super(SWaVUnified, self).__init__()
+        super(SWaVUnifiedPerPatch, self).__init__()
         
         self.transforms_main = tt.Compose([
                                         tr.Blit(p=0.5),
@@ -252,7 +280,7 @@ class SWaVUnifiedPerPatch(nn.Module):
 
         loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
 
-        return loss/b
+        return loss
     
     def forward(self, inp):
 
@@ -1640,8 +1668,8 @@ class C_Dec(nn.Module):
 
 
 if __name__ == "__main__":
-    s = ChainedPool()
-    p = torch.ones(1, 256, 64, 64)
+    s = UpsamplePredictor(256, 4)
+    p = torch.ones(1, 256, 5, 5)
     q = s(p)
     print(q.shape)
 
