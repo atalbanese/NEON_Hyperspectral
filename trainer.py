@@ -38,7 +38,6 @@ def unified_training(class_key,
                     refine_lr,
                     height_threshold,
                     class_weights,
-                    trained_backbone,
                     features_dict,
                     num_intermediate_classes,
                     pre_train_folder,
@@ -95,7 +94,6 @@ def unified_training(class_key,
                                     base_lr,
                                     height_threshold,
                                     class_weights,
-                                    trained_backbone,
                                     features_dict,
                                     num_intermediate_classes,
                                     pre_training=True,
@@ -122,7 +120,7 @@ def unified_training(class_key,
     tb_logger = pl_loggers.TensorBoardLogger(save_dir=log_dir)
 
     if pre_training:
-        pre_trainer = pl.Trainer(accelerator="gpu", max_epochs=pre_training_epochs, callbacks=[pre_train_callback], logger=tb_logger, deterministic=True)
+        pre_trainer = pl.Trainer(accelerator="gpu", max_epochs=pre_training_epochs, callbacks=[pre_train_callback], logger=tb_logger)
         
         pre_trainer.fit(pre_model, pre_train_loader)
 
@@ -136,7 +134,7 @@ def unified_training(class_key,
 
     
 
-    refiner = pl.Trainer(accelerator="gpu", max_epochs=refine_epochs, callbacks=refine_callbacks, logger=tb_logger, log_every_n_steps=1, deterministic=True)
+    refiner = pl.Trainer(accelerator="gpu", max_epochs=refine_epochs, callbacks=refine_callbacks, logger=tb_logger, log_every_n_steps=1)
 
     if pre_training_epochs > 0:
         refine_model = models.SwaVModelUnified.load_from_checkpoint(pre_train_ckpt, 
@@ -153,7 +151,6 @@ def unified_training(class_key,
                                     refine_lr,
                                     height_threshold,
                                     class_weights,
-                                    trained_backbone,
                                     features_dict,
                                     num_intermediate_classes,
                                     pre_training=False,
@@ -183,7 +180,6 @@ if __name__ == "__main__":
                     refine_lr=5e-5,
                     height_threshold=5,
                     class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
-                    trained_backbone=False,
                     features_dict={
                         'pca': 16
                     },
@@ -199,7 +195,7 @@ if __name__ == "__main__":
                     pre_train_workers = 4,
                     refine_workers = 1,
                     log_dir='exp_logs/',
-                    pre_training=True,
+                    pre_training=False,
                     extra_labels='patch_test',
                     swa=None,
                     mode='patch',

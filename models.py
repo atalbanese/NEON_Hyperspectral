@@ -27,7 +27,6 @@ class SwaVModelUnified(pl.LightningModule):
                 lr, 
                 height_threshold, 
                 class_weights, 
-                trained_backbone, 
                 features_dict, 
                 num_intermediate_classes,
                 pre_training,
@@ -37,7 +36,7 @@ class SwaVModelUnified(pl.LightningModule):
                 height_mask=False,
                 positions=False):
         super().__init__()
-        self.save_hyperparameters('lr', 'height_threshold', 'trained_backbone', 'features_dict', 'num_intermediate_classes', 'pre_training', 'class_key', 'chm_mean', 'chm_std', 'class_weights')
+        self.save_hyperparameters('lr', 'height_threshold', 'features_dict', 'num_intermediate_classes', 'pre_training', 'class_key', 'chm_mean', 'chm_std', 'class_weights')
         self.features_dict = features_dict
         self.num_channels = self.calc_num_channels()
         self.num_output_classes = len(class_key.keys())
@@ -46,7 +45,6 @@ class SwaVModelUnified(pl.LightningModule):
         self.lr = lr
         self.height_mask = height_mask
         self.height_threshold = height_threshold
-        self.trained_backbone = trained_backbone
         self.augment_refine = augment_refine
         self.mode = mode
         self.scheduler = scheduler
@@ -85,7 +83,7 @@ class SwaVModelUnified(pl.LightningModule):
         return out
 
     def update_results(self, inp, target):
-        inp = torch.argmax(inp, dim=1)
+        
         #target = torch.argmax(target, dim=1)
         pred = list(inp)
         targets = list(target)
@@ -190,13 +188,22 @@ class SwaVModelUnified(pl.LightningModule):
         else:
             inp = rearrange(inp, 'b (h w) f -> b f h w', h=5, w=5)
             inp = self.predict(inp)
-            inp = TF.crop(inp, *crop_coords)
+            to_cat = []
+            for ix, im in enumerate(inp):
+                to_append = im[...,crop_coords[0][ix]:crop_coords[0][ix]+ crop_coords[2][ix], crop_coords[1][ix]: crop_coords[1][ix] + crop_coords[3][ix]]
+                to_cat.append(to_append.unsqueeze(0))
+            inp = torch.cat(to_cat, dim=0)
+            #inp = TF.crop(inp, *crop_coords)
 
         inp = torch.softmax(inp, dim=1)
         if self.mode == 'default':
             targets= rearrange(targets, 'b c h w -> (b h w) c')
 
         targets=torch.argmax(targets, dim=1)
+        loss = self.loss(inp, targets)
+
+        inp = torch.argmax(inp, dim=1)
+
         
 
         # if mask is not None:
@@ -209,12 +216,13 @@ class SwaVModelUnified(pl.LightningModule):
         #     targets = targets[mask]
 
         if not validating: 
-            loss = self.loss(inp, targets)
             self.log('train_loss', loss)
             return loss
         else:
-            loss = self.loss(inp, targets)
             self.log('valid_loss', loss)
+            if self.mode == 'patch':
+                inp = inp.flatten()
+                targets = targets.flatten()
             self.update_results(inp, targets)
             return loss
 
