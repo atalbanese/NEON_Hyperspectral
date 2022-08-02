@@ -144,19 +144,22 @@ class SWaVUnifiedPerPatch(nn.Module):
                 num_classes, 
                 n_head = 8,
                 n_layers = 8,
-                emb_size=128, 
+                emb_size=256, 
                 temp=0.1, 
                 epsilon=0.05,  
-                sinkhorn_iters=3):
+                sinkhorn_iters=3,
+                patch_size=4):
         super(SWaVUnified, self).__init__()
         
         self.transforms_main = tt.Compose([
                                         tr.Blit(p=0.5),
-                                        tr.Block(p=0.5)
+                                        tr.PatchBlock(p=0.5)
                                        ])
 
+        self.patches = Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size)
 
-        self.embed = nn.Linear(in_channels, emb_size)
+
+        self.embed = nn.Linear(in_channels * patch_size**2, emb_size)
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=n_head, dim_feedforward=emb_size*2, batch_first=True)
         self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
@@ -208,6 +211,9 @@ class SWaVUnifiedPerPatch(nn.Module):
     def forward_train(self, x):
 
         b = x.shape[0]
+
+        x = self.patches(x)
+
         x_s = self.transforms_main(x)
 
         x = self.embed(x)
@@ -247,6 +253,19 @@ class SWaVUnifiedPerPatch(nn.Module):
         loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
 
         return loss/b
+    
+    def forward(self, inp):
+
+        inp = self.patches(inp)
+       
+        inp = self.embed(inp)
+
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+        return scores
 
 
 class SWaVUnified(nn.Module):

@@ -17,33 +17,40 @@ import numpy as np
 from attrs import define, field
 from dall_e import Encoder, Decoder
 
-@define
-class dVAE(pl.LightningModule):
-    n_in: int
-    vocab: int
-    lr: float
-    requires_grad: bool = field(default=True)
-    temperature: float = field(default=0.9)
-    kl_div_loss_weight: float = field(default=0.)
-    
 
-    def __attrs_post_init__(self):
-	
+class dVAE(pl.LightningModule):
+    def __init__(self,
+                n_in: int,
+                vocab: int,
+                lr: float,
+                requires_grad: bool = True,
+                temperature: float = 0.9,
+                kl_div_loss_weight: float = 3.0):
         super().__init__()
         self.save_hyperparameters()
 
-        self.loss = f.mse_loss
+        self.n_in = n_in
+        self.vocab = vocab
+        self.lr = lr
+        self.requires_grad = requires_grad
+        self.temperature = temperature
+        self.kl_div_loss_weight = kl_div_loss_weight
+
+        self.loss_fn = f.mse_loss
         self.codebook = nn.Embedding(self.vocab, 512)
         self.encoder = Encoder(input_channels = self.n_in,
                                 vocab_size = self.vocab,
-                                requires_grad = self.requires_grad)
+                                requires_grad = self.requires_grad,
+                                use_mixed_precision=False)
         self.decoder = Decoder(output_channels = self.n_in,
                                 vocab_size = self.vocab,
-                                requires_grad = self.requires_grad)
+                                requires_grad = self.requires_grad,
+                                use_mixed_precision=False)
 
     def forward(self, 
                 inp,
                 return_logits = False):
+        inp = inp['pca']
         logits = self.encoder(inp)
         if return_logits:
             return logits
@@ -58,7 +65,7 @@ class dVAE(pl.LightningModule):
 
         logits = rearrange(logits, 'b n h w -> b (h w) n')
         log_qy = f.log_softmax(logits, dim = -1)
-        log_uniform = torch.log(torch.tensor([1. / self.vocab]))
+        log_uniform = torch.log(torch.tensor([1. / self.vocab])).cuda()
         kl_div = f.kl_div(log_uniform, log_qy, None, None, 'batchmean', log_target = True)
 
         loss = recon_loss + (kl_div * self.kl_div_loss_weight)
@@ -206,7 +213,7 @@ class SwaVModelUnified(pl.LightningModule):
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
 
-        if self.mode != 'pixel_patch':
+        if self.mode == 'default':
             inp = self.ra(inp)
 
         loss = self.swav.forward_train(inp)

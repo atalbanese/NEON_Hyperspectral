@@ -7,6 +7,8 @@ import inference
 import warnings
 import os
 from pytorch_lightning import loggers as pl_loggers
+from einops import rearrange
+import matplotlib.pyplot as plt
 
 class FeatureExtractorFreezeUnfreeze(BaseFinetuning):
      def __init__(self, unfreeze_at_epoch=100):
@@ -165,47 +167,96 @@ def unified_training(class_key,
     refiner.test(refine_model, dataloaders=test_loader)
 
 
-def vae_training():
+def token_training(n_in: int,
+                    n_tokens: int,
+                    data_dir: str,
+                    lr: float,
+                    epochs: int,
+                    features: dict,
+                    batch_size: int):
+    pl.seed_everything(42)
+    train_set = RenderedDataLoader(data_dir, features, input_size=20)
+    model = models.dVAE(n_in,n_tokens,lr)
+   
+    train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=8, pin_memory=True)
+
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=epochs, deterministic=True)
+    trainer.fit(model, train_dataloaders=train_loader)
+    trainer.save_checkpoint(f'ckpts/beit_training/vae_pca_{epochs}_{n_tokens}.ckpt')
+    
+
+
+
     return None
     
+def token_test(ckpt:str,
+                data_dir:str,
+                features:dict):
+    model = models.dVAE.load_from_checkpoint(ckpt)
+
+    train_set = RenderedDataLoader(data_dir, features, input_size=20)
+
+    test = train_set.__getitem__(500)['pca'].unsqueeze(0)
+
+    after = model(test)[1]
+
+    before = test.squeeze(0).detach().numpy()
+    before = rearrange(before, 'c h w -> h w c')
+
+    after = after.squeeze(0).detach().numpy()
+    after = rearrange(after, 'c h w -> h w c')
+
+    plt.imshow(before[...,3:6])
+    plt.show()
+
+    plt.imshow(after[...,3:6])
+    plt.show()
 
 if __name__ == "__main__":
 
 #TODO: Bugfix - SWA and freezing weights dont work together
 #WERE THESE DIFFERENT BECAUSE ICA AND PCA WERE IN DIFFERENT ORDER??
 
-    unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-                    chm_mean=4.015508459469479,
-                    chm_std=4.809300736115787,
-                    base_lr=5e-5,
-                    refine_lr=5e-5,
-                    height_threshold=5,
-                    class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
-                    trained_backbone=False,
-                    features_dict={
-                        'pca': 10,
-                        'ica': 10
-                    },
-                    num_intermediate_classes = 256,
-                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/raw_training_indexes/',
-                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_training',
-                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_valid',
-                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_test',
-                    pre_training_epochs = 0,
-                    refine_epochs = 400,
-                    pre_train_batch_size = 2048,
-                    refine_batch_size = 64,
-                    pre_train_workers = 8,
-                    refine_workers = 1,
-                    log_dir='exp_logs/',
-                    pre_training=False,
-                    extra_labels='positions',
-                    swa=None,
-                    mode='default',
-                    scheduler=True,
-                    initial_freeze=None,
-                    height_mask=False,
-                    positions=True)
+    token_training(n_in=16,
+                   n_tokens=512,
+                   data_dir='C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+                   lr=5e-5,
+                   epochs=25,
+                   features={'pca': 16},
+                   batch_size=512)
+
+    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+    #                 chm_mean=4.015508459469479,
+    #                 chm_std=4.809300736115787,
+    #                 base_lr=5e-5,
+    #                 refine_lr=5e-5,
+    #                 height_threshold=5,
+    #                 class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
+    #                 trained_backbone=False,
+    #                 features_dict={
+    #                     'pca': 10,
+    #                     'ica': 10
+    #                 },
+    #                 num_intermediate_classes = 256,
+    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/raw_training_indexes/',
+    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_training',
+    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_valid',
+    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_test',
+    #                 pre_training_epochs = 0,
+    #                 refine_epochs = 400,
+    #                 pre_train_batch_size = 2048,
+    #                 refine_batch_size = 64,
+    #                 pre_train_workers = 8,
+    #                 refine_workers = 1,
+    #                 log_dir='exp_logs/',
+    #                 pre_training=False,
+    #                 extra_labels='positions',
+    #                 swa=None,
+    #                 mode='default',
+    #                 scheduler=True,
+    #                 initial_freeze=None,
+    #                 height_mask=False,
+    #                 positions=True)
 
     # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},
     #                 chm_mean=4.015508459469479,

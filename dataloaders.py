@@ -35,11 +35,13 @@ class RenderBlocks(Dataset):
                 block_size: int,
                 nmf_dir: str,
                 save_dir: str,
-                validator: Validator):
+                validator: Validator,
+                key: str):
         self.block_size = block_size
         self.nmf_dir = nmf_dir
         self.save_dir = save_dir
         self.validator = validator
+        self.key = key
         
         self.nmf_files = [os.path.join(self.nmf_dir, f) for f in os.listdir(self.nmf_dir) if ".npy" in f]
 
@@ -57,7 +59,7 @@ class RenderBlocks(Dataset):
 
         img = np.load(self.nmf_dict[key]).astype(np.float32)
 
-        img = rearrange(img, '(h b1) (w b2) c -> (b1 b2) h w c', h = self.block_size, w=self.block_size)
+        img = rearrange(img, '(h b1) (w b2) c -> (b1 b2) c h w', h = self.block_size, w=self.block_size)
 
         
         #it = np.nditer(img, flags=['f_index'])
@@ -66,7 +68,7 @@ class RenderBlocks(Dataset):
             if nan_sum == 0:
                 save_name = f'{key}_{index}.pt'
                 nmf_tensor = torch.from_numpy(x)
-                to_save = {'nmf': nmf_tensor}
+                to_save = {self.key: nmf_tensor}
                 save_loc = os.path.join(self.save_dir, save_name)
                 with open(save_loc, 'wb') as f:
                     torch.save(to_save, save_loc)
@@ -406,9 +408,8 @@ class RenderedDataLoader(Dataset):
                 if key in self.features.keys():
                     scaler = self.scale_dict[key]
                     to_scale = to_return[key]
-                    three_d = False
-                    if len(to_scale.shape) > 2:
-                        three_d = True
+                    three_d = len(to_scale.shape) > 2
+                    if three_d:
                         to_scale = self.ra_1(to_scale)
                     else:
                         to_scale = self.flat_1(to_scale)
@@ -423,11 +424,11 @@ class RenderedDataLoader(Dataset):
 
             
 
-            to_return['pca'][to_return['pca'] != to_return['pca']] = 0
-            to_return['ica'][to_return['ica'] != to_return['ica']] = 0
-            to_return['indexes'][to_return['indexes'] != to_return['indexes']] = 0
-            to_return['indexes'][to_return['indexes'] == np.inf] = 0
-            to_return['indexes'][to_return['indexes'] == -np.inf] = 0
+            # to_return['pca'][to_return['pca'] != to_return['pca']] = 0
+            # to_return['ica'][to_return['ica'] != to_return['ica']] = 0
+            # to_return['indexes'][to_return['indexes'] != to_return['indexes']] = 0
+            # to_return['indexes'][to_return['indexes'] == np.inf] = 0
+            # to_return['indexes'][to_return['indexes'] == -np.inf] = 0
         
 
             return to_return
@@ -678,10 +679,10 @@ if __name__ == "__main__":
     SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
     ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/raw_training'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training'
     INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo'
 
-    NMF_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_mnf/'
+    NMF_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked/'
 
     CHM_MEAN = 4.015508459469479
     CHM_STD =  4.809300736115787
@@ -711,14 +712,14 @@ if __name__ == "__main__":
                     filter_species = 'SALIX')
 
     #render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, INDEX_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid, patch_size=9)
-    render = RenderBlocks(20, NMF_DIR, SAVE_DIR, valid)
+    render = RenderBlocks(20, NMF_DIR, SAVE_DIR, valid, 'pca')
     #
     train_loader = DataLoader(render, batch_size=1, num_workers=8)
 
     for ix in tqdm(train_loader):
         1+1
 
-    # rendered = RenderedDataLoader(SAVE_DIR, {'pca':10, 'ica':10, 'raw_bands':15, 'azm':1, 'chm':1, 'shadow':1, 'indexes':26})
-    # for ix in tqdm(rendered):
-    #     1+1
-    # rendered.save_stats()
+    rendered = RenderedDataLoader(SAVE_DIR, {'pca': 16}, input_size=20)
+    for ix in tqdm(rendered):
+        1+1
+    rendered.save_stats()

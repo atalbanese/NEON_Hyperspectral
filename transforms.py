@@ -130,6 +130,24 @@ class Blit(torch.nn.Module):
             arr = arr * mask
         return arr
 
+class PatchBlock(torch.nn.Module):
+    def __init__(self, p=0.5):
+        super().__init__()
+        self.p = p
+        #self.rng = np.random.default_rng()
+    
+    def forward(self, arr):
+        if torch.rand(1) < self.p:
+            b, s, _ = arr.shape
+            mask = torch.rand((b, s), dtype=torch.float32)
+            mask = mask >= 0.4
+            mask = mask.unsqueeze(2)
+
+            arr = arr * mask
+        return arr
+
+
+
 class Block(torch.nn.Module):
     def __init__(self, p=.5):
         super().__init__()
@@ -147,16 +165,15 @@ class Block(torch.nn.Module):
         return arr
 
 if __name__ == '__main__':
-    flip = Flip(p=1)
-    blit = Blit(p=1)
-    block = Block(p=1)
+    block = PatchBlock(1)
 
-    test = np.array([[1, 2, 3, 4, 5], [5, 6, 7, 8, 9]], dtype=np.float32)
+    test = torch.randint(0, 10, (2, 5, 5), dtype=torch.float32)
+    out = block(test)
 
-    norm = np.array([1, 2, 1, 2, 5])
 
     print(test)
-    print(test/norm)
+    print(out)
+
 
 
             
