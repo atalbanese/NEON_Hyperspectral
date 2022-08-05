@@ -3,7 +3,7 @@ from dataloaders import RenderedDataLoader
 from torch.utils.data import DataLoader
 import os
 import torch
-from einops import rearrange
+from einops import rearrange, reduce
 
 def handle_inputs(inp, features_dict):
     to_cat = []
@@ -31,6 +31,11 @@ def get_rf_inputs(inp, features_dict):
     targets = inp['target']
     targets = torch.argmax(targets, dim=1).numpy()
     targets = rearrange(targets, 'b h w -> (b h w)')
+    mask = data != data
+    mask = reduce(mask, 'f c -> f', 'max')
+
+    data = data[~mask]
+    targets = targets[~mask]
     return data, targets
 
 def rf_training(train_folder,
@@ -73,6 +78,5 @@ if __name__ == '__main__':
         test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_test',
         features_dict={
             'pca': 10,
-            'raw_bands': 15
         }
     )

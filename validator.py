@@ -42,6 +42,7 @@ class Validator():
         self.struct = struct
         self.curated = kwargs['curated']
         self.site_prefix = kwargs['prefix']
+
         
         self.num_classes = kwargs["num_classes"]
         self.site_name = kwargs["site_name"]
@@ -267,7 +268,7 @@ class Validator():
             
         return None
 
-    def render_valid_patch(self, save_dir, split, out_size=20, target_size=3):
+    def render_valid_patch(self, save_dir, split, out_size=20, target_size=3, multi_crop=1, num_channels=16, key_label='pca'):
         if split == 'train':
             data = self.train
         if split == 'valid':
@@ -292,46 +293,48 @@ class Validator():
             t_row = int(row['tree_y'])
 
             target_bounds = (t_row - rad, t_row+rad+1, t_col-rad, t_col+rad+1)
-            neg_x_pad = self.rng.integers(0, out_size-target_size)
-            pos_x_pad = (out_size-target_size) - neg_x_pad
-            neg_y_pad = self.rng.integers(0, out_size-target_size)
-            pos_y_pad = (out_size-target_size) - neg_y_pad
 
-            x_min = target_bounds[2] - neg_x_pad
-            x_max = target_bounds[3] + pos_x_pad
+            for ix in range(multi_crop):
+                neg_x_pad = self.rng.integers(0, out_size-target_size)
+                pos_x_pad = (out_size-target_size) - neg_x_pad
+                neg_y_pad = self.rng.integers(0, out_size-target_size)
+                pos_y_pad = (out_size-target_size) - neg_y_pad
 
-            y_min = target_bounds[0] - neg_y_pad
-            y_max = target_bounds[1] + pos_y_pad
+                x_min = target_bounds[2] - neg_x_pad
+                x_max = target_bounds[3] + pos_x_pad
 
-            pca_crop = pca[y_min:y_max, x_min:x_max,:]
+                y_min = target_bounds[0] - neg_y_pad
+                y_max = target_bounds[1] + pos_y_pad
 
-            crop_coords = (neg_y_pad, neg_x_pad, 3, 3)
-            #pca_crop = np.pad(pca_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
+                pca_crop = pca[y_min:y_max, x_min:x_max,:]
 
-            
-            
+                crop_coords = (neg_y_pad, neg_x_pad, 3, 3)
+                #pca_crop = np.pad(pca_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
 
-            if pca_crop.shape == (out_size, out_size, 16):
-                pca_crop = torch.tensor(pca_crop)
-                pca_crop = rearrange(pca_crop, 'h w c -> c h w')
-                mask = pca_crop != pca_crop
-                pca_crop[mask] = 0
+                
                 
 
-                label = torch.zeros((len(self.taxa.keys()),target_size, target_size), dtype=torch.float32).clone()
-                label[self.taxa[taxa]] = 1.0
+                if pca_crop.shape == (out_size, out_size, num_channels):
+                    pca_crop = torch.tensor(pca_crop)
+                    pca_crop = rearrange(pca_crop, 'h w c -> c h w')
+                    mask = pca_crop != pca_crop
+                    pca_crop[mask] = 0
+                    
 
-                to_save = {
-                    'pca': pca_crop,
-                    'mask': mask,
-                    'target': label,
-                    'height': height,
-                    'crop_coords': crop_coords
-                }
+                    label = torch.zeros((len(self.taxa.keys()),target_size, target_size), dtype=torch.float32).clone()
+                    label[self.taxa[taxa]] = 1.0
 
-                f_name = f'{key}_{row["taxonID"]}_{row["individualID"]}.pt'
-                with open(os.path.join(save_dir, f_name), 'wb') as f:
-                    torch.save(to_save, f)
+                    to_save = {
+                        key_label: pca_crop,
+                        'mask': mask,
+                        'target': label,
+                        'height': height,
+                        'crop_coords': crop_coords
+                    }
+
+                    f_name = f'{key}_{row["taxonID"]}_{row["individualID"]}_multi_crop_{ix}.pt'
+                    with open(os.path.join(save_dir, f_name), 'wb') as f:
+                        torch.save(to_save, f)
             
         return None
 
@@ -1070,9 +1073,9 @@ if __name__ == "__main__":
                     filter_species = 'SALIX')
 
 
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train', 'train', out_size=20)
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_valid', 'valid', out_size=20)
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_test', 'test', out_size=20)
+    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train_mc', 'train', out_size=20, multi_crop=10)
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_valid', 'valid', out_size=20)
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_test', 'test', out_size=20)
     print(valid.taxa)
     print(valid.class_weights)
 

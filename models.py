@@ -51,7 +51,7 @@ class SwaVModelUnified(pl.LightningModule):
         if self.mode == 'default':
             self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes, n_head=8, n_layers=8, positions=positions)
         if self.mode == 'patch':
-            self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes, n_head=8, n_layers=8, patch_size=4)
+            self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes, n_head=8, n_layers=8, patch_size=4, positions=positions)
         if self.mode == 'pixel_patch':
             self.swav = networks.SWaVUnifiedPerPixelPatch(self.num_channels, num_intermediate_classes)
         if self.mode == 'default':
@@ -195,6 +195,7 @@ class SwaVModelUnified(pl.LightningModule):
             inp = torch.cat(to_cat, dim=0)
             #inp = TF.crop(inp, *crop_coords)
 
+        #Make sure to flip targets if doing multiple targets
         inp = torch.softmax(inp, dim=1)
         if self.mode == 'default':
             targets= rearrange(targets, 'b c h w -> (b h w) c')

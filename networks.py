@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from torchvision import models
 import torch.nn.functional as f
+from transformers import PerceiverForImageClassificationConvProcessing
 import net_gen
 from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange, Reduce
@@ -176,15 +177,19 @@ class SWaVUnifiedPerPatch(nn.Module):
                 temp=0.1, 
                 epsilon=0.05,  
                 sinkhorn_iters=3,
-                patch_size=4):
+                patch_size=4,
+                positions=False):
         super(SWaVUnifiedPerPatch, self).__init__()
         
         self.transforms_main = tt.Compose([
-                                        tr.Blit(p=0.5),
-                                        tr.PatchBlock(p=0.5)
+                                        #tr.Blit(p=0.5),
+                                        tr.PatchBlock(p=1)
                                        ])
 
         self.patches = Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size)
+        self.use_positions = positions
+
+        self.positions = nn.Parameter(torch.randn((25, emb_size)))
 
 
         self.embed = nn.Linear(in_channels * patch_size**2, emb_size)
@@ -245,8 +250,12 @@ class SWaVUnifiedPerPatch(nn.Module):
         x_s = self.transforms_main(x)
 
         x = self.embed(x)
+
         
         x_s = self.embed(x_s)
+        if self.use_positions:
+            x = x + self.positions
+            x_s = x_s + self.positions
 
 
         inp = torch.cat((x, x_s))
@@ -287,6 +296,8 @@ class SWaVUnifiedPerPatch(nn.Module):
         inp = self.patches(inp)
        
         inp = self.embed(inp)
+        if self.use_positions:
+            inp = inp + self.positions
 
         inp = self.encoder(inp)
         inp = self.projector(inp)
