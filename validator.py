@@ -102,6 +102,8 @@ class Validator():
             self.data_gdf = self.pick_superpixels()
         self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
 
+        self.train_plots, self.valid_plots, self.test_plots = self.split_plots().values()
+
         self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
         self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=self.train['taxonID'])
         print('here')
@@ -511,6 +513,113 @@ class Validator():
         rgb = exposure.adjust_gamma(rgb, 0.5)
         rgb = rgb[first_row['y_min']:first_row['y_max'], first_row['x_min']:first_row['x_max'], :]
         plt.imsave(os.path.join(save_dir, f'{plot}.png'), rgb)
+
+    @staticmethod
+    def solve_split(df, prop, buffer):
+
+        tracking = {k:False for k in df.columns}
+        solved = False
+
+        working_copy = df.iloc[:0].copy()
+
+        while not solved:
+            if len(df) < 1:
+                break
+            for k, v in tracking.items():
+                if len(df) < 1:
+                    break
+                if v == False:
+                    df = df.sort_values(k, ascending=False)
+                    row = pd.DataFrame(df.iloc[0]).T
+                    good_row = True
+                    for j, i in tracking.items():
+                        if row[j].item() + working_copy[j].sum() > buffer + prop:
+                            good_row = False
+                    df = df.drop(df.iloc[0].name)
+
+                    if good_row:
+                        working_copy = pd.concat((working_copy, row), axis=0)
+
+                m_sum = 0
+                for l, m in tracking.items():
+
+                    if not m:
+                        if working_copy[l].sum() > (prop - buffer):
+                            tracking[l] = True
+                            continue
+                    else:
+                        m_sum += m
+                        if m_sum == len(tracking.values()):
+                            solved = True
+        distance = 0
+        for k in tracking.keys():
+            distance += abs(working_copy[k].sum() - prop)**2
+        
+        return {'solution':working_copy, 'dist':distance}
+
+    
+    def split_plots(self, splits={'train': 0.6, 'valid':0.2, 'test':0.2}):
+        plot_counts={}
+        grouped_files = self.data_gdf.groupby(['plotID'])
+        grouped_files.apply(self._split_plot, plot_counts)
+        counts = pd.DataFrame.from_dict(plot_counts).T
+        for col in counts.columns:
+            counts[col] = counts[col]/counts[col].sum()
+
+        solved = {}
+        for k, v in splits.items():
+            cur_solutions = {}
+            
+
+            for buffer in range(1, 50):
+                buffer /= 100
+                cur_solutions[buffer] = self.solve_split(counts, v, buffer) 
+
+            best_distance = 1000
+            
+            for buffer, solution in cur_solutions.items():
+                if solution['dist'] < best_distance:
+                    best_distance = solution['dist']
+                    best_solution = solution['solution']
+
+            solved[k] = best_solution
+            counts = counts.drop(best_solution.index)
+
+
+        return solved
+
+
+        # train = counts[counts>(test_p + valid_p)].dropna(how='all')
+        # counts = counts.drop(train.index)
+
+        # while not solved:
+        #     for taxa in tracking.keys():
+        #         if train[taxa].sum() > (train_p - buffer):
+        #             tracking[taxa] = True
+
+
+
+        #     test = True
+        #     for v in tracking.values():
+        #         if v == False:
+        #             test = False
+        #     solved = test
+
+        
+        
+        
+
+
+
+        print('here')
+    
+    @staticmethod
+    def _split_plot(df: pd.DataFrame, pc: dict):
+        if len(df) > 0:
+            counts = df.groupby(['taxonID']).size()
+            pc[df.iloc[0]['plotID']] = counts
+
+
 
     def extract_plots(self, save_dir):
         grouped_files = self.valid_data.groupby(['plotID'])
@@ -1073,7 +1182,7 @@ if __name__ == "__main__":
                     filter_species = 'SALIX')
 
 
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train_mc', 'train', out_size=20, multi_crop=10)
+    #valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train_mc', 'train', out_size=20, multi_crop=10)
     # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_valid', 'valid', out_size=20)
     # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_test', 'test', out_size=20)
     print(valid.taxa)
