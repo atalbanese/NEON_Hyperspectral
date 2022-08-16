@@ -134,6 +134,7 @@ class PatchBlock(torch.nn.Module):
     def __init__(self, p=0.5):
         super().__init__()
         self.p = p
+        self.missing = torch.nn.Parameter(torch.randn(1))
         #self.rng = np.random.default_rng()
     
     def forward(self, arr):
@@ -141,9 +142,10 @@ class PatchBlock(torch.nn.Module):
             b, s, _ = arr.shape
             mask = torch.rand((b, s), dtype=torch.float32, device=arr.device)
             mask = mask >= 0.4
-            mask = mask.unsqueeze(2)
+            #mask = mask.unsqueeze(2)
 
-            arr = arr * mask
+           # arr = arr * mask
+            arr[~mask] = self.missing
         return arr
 
 

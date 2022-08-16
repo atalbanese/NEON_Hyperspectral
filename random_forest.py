@@ -22,13 +22,22 @@ def handle_inputs(inp, features_dict):
         to_cat.append(cur)
     combined = torch.cat(to_cat, dim=1)
 
-    return combined.numpy()
+    return combined
 
 
 def get_rf_inputs(inp, features_dict):
     data = handle_inputs(inp, features_dict)
+    crop_coords = inp['crop_coords']
+
+    to_cat = []
+    for ix, im in enumerate(data):
+        to_append = im[...,crop_coords[0][ix]:crop_coords[0][ix]+ crop_coords[2][ix], crop_coords[1][ix]: crop_coords[1][ix] + crop_coords[3][ix]]
+        to_cat.append(to_append.unsqueeze(0))
+    data = torch.cat(to_cat, dim=0)
+    data = data.numpy()
     data = rearrange(data, 'b c h w -> (b h w) c')
-    targets = inp['target']
+
+    targets = inp['targets']
     targets = torch.argmax(targets, dim=1).numpy()
     targets = rearrange(targets, 'b h w -> (b h w)')
     mask = data != data
@@ -72,11 +81,11 @@ def rf_training(train_folder,
 
 if __name__ == '__main__':
     rf_training(
-        pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/raw_training_indexes/',
-        train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_training',
-        valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_valid',
-        test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/scholl_labels_3_3/label_test',
+        pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+        train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_train',
+        valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_valid',
+        test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_test',
         features_dict={
-            'pca': 10,
+            'pca': 16,
         }
     )

@@ -60,7 +60,13 @@ def unified_training(class_key,
                     initial_freeze=None,
                     height_mask=False,
                     positions=False,
-                    input_size=20):
+                    input_size=40,
+                    full_plots=True,
+                    acc_grad=1,
+                    emb_size=256,
+                    scaling=True,
+                    augment_bright=False,
+                    filters=[]):
 
     pl.seed_everything(42)
     feature_labels = ""
@@ -68,17 +74,17 @@ def unified_training(class_key,
         feature_labels = feature_labels + f"{key}_{value}_"
 
     refine_callback = ModelCheckpoint(
-        dirpath='ckpts/unified_training', 
+        dirpath='ckpts/', 
         filename=f'niwo_refine_{feature_labels}{extra_labels}'+'{ova:.2f}_{epoch}',
         #every_n_epochs=log_every,
-        monitor='valid_loss',
+        monitor='ova',
         save_on_train_epoch_end=True,
-        mode='min',
+        mode='max',
         save_top_k = 3
         )
 
     pre_train_callback = ModelCheckpoint(
-        dirpath='ckpts/unified_training', 
+        dirpath='ckpts/', 
         filename=f'niwo_pre_train_{feature_labels}{extra_labels}'+'{epoch}',
         every_n_epochs=pre_training_epochs,
         save_on_train_epoch_end=True,
@@ -86,7 +92,7 @@ def unified_training(class_key,
         )
     
     
-    pre_train_ckpt = f'ckpts/unified_training/niwo_pre_train_{feature_labels}{extra_labels}epoch={pre_training_epochs-1}.ckpt'
+    pre_train_ckpt = f'ckpts/niwo_pre_train_{feature_labels}{extra_labels}epoch={pre_training_epochs-1}.ckpt'
 
     pre_model = models.SwaVModelUnified(class_key,
                                     chm_mean,
@@ -100,7 +106,9 @@ def unified_training(class_key,
                                     mode=mode,
                                     augment_refine=augment_refine,
                                     scheduler=scheduler,
-                                    positions=positions
+                                    positions=positions,
+                                    emb_size=emb_size,
+                                    filters=filters
                                    )
 
 
@@ -108,13 +116,13 @@ def unified_training(class_key,
         pre_train_data = RenderedDataLoader(pre_train_folder, features_dict, input_size=input_size)
         pre_train_loader = DataLoader(pre_train_data, batch_size=pre_train_batch_size, num_workers=pre_train_workers, pin_memory=True)
 
-    train_dataset = RenderedDataLoader(train_folder, features_dict, stats_loc=os.path.join(pre_train_folder, 'stats/stats.npy'), input_size=input_size)
+    train_dataset = RenderedDataLoader(train_folder, features_dict, stats_loc=os.path.join(pre_train_folder, 'stats/stats.npy'), input_size=input_size, full_plots=full_plots, scaling=scaling)
     train_loader = DataLoader(train_dataset, batch_size=refine_batch_size, num_workers=refine_workers)
 
-    valid_dataset = RenderedDataLoader(valid_folder, features_dict, stats_loc=os.path.join(pre_train_folder, 'stats/stats.npy'), input_size=input_size)
+    valid_dataset = RenderedDataLoader(valid_folder, features_dict, stats_loc=os.path.join(pre_train_folder, 'stats/stats.npy'), input_size=input_size, full_plots=full_plots, scaling=scaling)
     valid_loader = DataLoader(valid_dataset, batch_size=1, num_workers=refine_workers)
 
-    test_dataset = RenderedDataLoader(test_folder, features_dict, stats_loc=os.path.join(pre_train_folder, 'stats/stats.npy'), input_size=input_size)
+    test_dataset = RenderedDataLoader(test_folder, features_dict, stats_loc=os.path.join(pre_train_folder, 'stats/stats.npy'), input_size=input_size, full_plots=full_plots, scaling=scaling)
     test_loader = DataLoader(test_dataset, batch_size=1, num_workers=refine_workers)
 
     tb_logger = pl_loggers.TensorBoardLogger(save_dir=log_dir)
@@ -134,7 +142,7 @@ def unified_training(class_key,
 
     
 
-    refiner = pl.Trainer(accelerator="gpu", max_epochs=refine_epochs, callbacks=refine_callbacks, logger=tb_logger, log_every_n_steps=1)
+    refiner = pl.Trainer(accelerator="gpu", max_epochs=refine_epochs, callbacks=refine_callbacks, logger=tb_logger, log_every_n_steps=1, accumulate_grad_batches=acc_grad)
 
     if pre_training_epochs > 0:
         refine_model = models.SwaVModelUnified.load_from_checkpoint(pre_train_ckpt, 
@@ -143,7 +151,8 @@ def unified_training(class_key,
                                                                     lr=refine_lr,
                                                                     augment_refine=augment_refine,
                                                                     scheduler=scheduler,
-                                                                    height_mask=height_mask)
+                                                                    height_mask=height_mask,
+                                                                    emb_size=emb_size)
     else:
          refine_model = models.SwaVModelUnified(class_key,
                                     chm_mean,
@@ -158,10 +167,13 @@ def unified_training(class_key,
                                     augment_refine=augment_refine,
                                     scheduler=scheduler,
                                     height_mask=height_mask,
-                                    positions=positions
+                                    positions=positions,
+                                    emb_size=emb_size,
+                                    augment_bright=augment_bright,
+                                    filters=filters
                                    )
     refiner.fit(refine_model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
-    refiner.save_checkpoint(f'ckpts/unified_trainingniwo_pre_train_{feature_labels}{extra_labels}'+'{epoch}.ckpt')
+    refiner.save_checkpoint(f'ckpts/niwo_{feature_labels}{extra_labels}_{refine_epochs}'+'.ckpt')
     refiner.test(refine_model, dataloaders=test_loader, ckpt_path='best')
 
 
@@ -169,181 +181,169 @@ def unified_training(class_key,
 
 if __name__ == "__main__":
 
-#TODO: Bugfix - SWA and freezing weights dont work together
-#WERE THESE DIFFERENT BECAUSE ICA AND PCA WERE IN DIFFERENT ORDER??
+    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},
+    #                 chm_mean=4.015508459469479,
+    #                 chm_std=4.809300736115787,
+    #                 base_lr=5e-5,
+    #                 refine_lr=5e-5,
+    #                 height_threshold=5,
+    #                 #class_weights=[0.65697674, 0.72435897, 1.4125,     2.56818182],
+    #                 class_weights=None,
+    #                 features_dict={
+    #                     'hs': 416
+    #                 },
+    #                 num_intermediate_classes = 256,
+    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_train_hs',
+    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_valid_hs',
+    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_test_hs',
+    #                 pre_training_epochs = 0,
+    #                 refine_epochs = 200,
+    #                 pre_train_batch_size = 64,
+    #                 refine_batch_size = 64,
+    #                 pre_train_workers = 4,
+    #                 refine_workers = 1,
+    #                 log_dir='exp_logs/',
+    #                 pre_training=False,
+    #                 extra_labels='hs_sp_filter',
+    #                 swa=150,
+    #                 mode='patch',
+    #                 scheduler=True,
+    #                 initial_freeze=None,
+    #                 height_mask=False,
+    #                 positions=True,
+    #                 emb_size=512,
+    #                 scaling=False,
+    #                 augment_bright=False,
+    #                 filters=['ndvi', 'shadow'])
 
  
-    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},
     #                 chm_mean=4.015508459469479,
     #                 chm_std=4.809300736115787,
     #                 base_lr=5e-5,
     #                 refine_lr=5e-5,
     #                 height_threshold=5,
-    #                 class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
-    #                 features_dict={
-    #                     'nmf': 20
-    #                 },
-    #                 num_intermediate_classes = 256,
-    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/raw_training/',
-    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_train',
-    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_valid',
-    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_test',
-    #                 pre_training_epochs = 15,
-    #                 refine_epochs = 400,
-    #                 pre_train_batch_size = 512,
-    #                 refine_batch_size = 64,
-    #                 pre_train_workers = 4,
-    #                 refine_workers = 1,
-    #                 log_dir='exp_logs/',
-    #                 pre_training=True,
-    #                 extra_labels='block_patch_positions',
-    #                 swa=None,
-    #                 mode='patch',
-    #                 scheduler=True,
-    #                 initial_freeze=None,
-    #                 height_mask=False,
-    #                 positions=True)
-
-    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-    #                 chm_mean=4.015508459469479,
-    #                 chm_std=4.809300736115787,
-    #                 base_lr=5e-5,
-    #                 refine_lr=5e-5,
-    #                 height_threshold=5,
-    #                 class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
-    #                 features_dict={
-    #                     'nmf': 20
-    #                 },
-    #                 num_intermediate_classes = 256,
-    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/raw_training/',
-    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_train_mc',
-    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_valid',
-    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_test',
-    #                 pre_training_epochs = 15,
-    #                 refine_epochs = 400,
-    #                 pre_train_batch_size = 512,
-    #                 refine_batch_size = 64,
-    #                 pre_train_workers = 4,
-    #                 refine_workers = 1,
-    #                 log_dir='exp_logs/',
-    #                 pre_training=False,
-    #                 extra_labels='block_patch_positions',
-    #                 swa=None,
-    #                 mode='patch',
-    #                 scheduler=True,
-    #                 initial_freeze=None,
-    #                 height_mask=False,
-    #                 positions=True)
-    
-    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-    #                 chm_mean=4.015508459469479,
-    #                 chm_std=4.809300736115787,
-    #                 base_lr=5e-5,
-    #                 refine_lr=5e-5,
-    #                 height_threshold=5,
-    #                 class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
-    #                 features_dict={
-    #                     'nmf': 20
-    #                 },
-    #                 num_intermediate_classes = 256,
-    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/raw_training/',
-    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_train',
-    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_valid',
-    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_test',
-    #                 pre_training_epochs = 0,
-    #                 refine_epochs = 400,
-    #                 pre_train_batch_size = 512,
-    #                 refine_batch_size = 64,
-    #                 pre_train_workers = 4,
-    #                 refine_workers = 1,
-    #                 log_dir='exp_logs/',
-    #                 pre_training=False,
-    #                 extra_labels='block_patch_positions_no_pre',
-    #                 swa=None,
-    #                 mode='patch',
-    #                 scheduler=True,
-    #                 initial_freeze=None,
-    #                 height_mask=False,
-    #                 positions=True)
-
-    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-    #                 chm_mean=4.015508459469479,
-    #                 chm_std=4.809300736115787,
-    #                 base_lr=5e-5,
-    #                 refine_lr=5e-5,
-    #                 height_threshold=5,
-    #                 class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
-    #                 features_dict={
-    #                     'nmf': 20
-    #                 },
-    #                 num_intermediate_classes = 256,
-    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/raw_training/',
-    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_train_mc',
-    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_valid',
-    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_nmf_blocks/scholl_test',
-    #                 pre_training_epochs = 0,
-    #                 refine_epochs = 400,
-    #                 pre_train_batch_size = 512,
-    #                 refine_batch_size = 64,
-    #                 pre_train_workers = 4,
-    #                 refine_workers = 1,
-    #                 log_dir='exp_logs/',
-    #                 pre_training=False,
-    #                 extra_labels='block_patch_positions_no_pre',
-    #                 swa=None,
-    #                 mode='patch',
-    #                 scheduler=True,
-    #                 initial_freeze=None,
-    #                 height_mask=False,
-    #                 positions=True)
-    
-    #255
-    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-    #                 chm_mean=4.015508459469479,
-    #                 chm_std=4.809300736115787,
-    #                 base_lr=5e-5,
-    #                 refine_lr=5e-5,
-    #                 height_threshold=5,
-    #                 class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
-    #                 features_dict={
-    #                     'pca': 16
-    #                 },
-    #                 num_intermediate_classes = 256,
-    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training/',
-    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train',
-    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_valid',
-    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_test',
-    #                 pre_training_epochs = 15,
-    #                 refine_epochs = 200,
-    #                 pre_train_batch_size = 512,
-    #                 refine_batch_size = 64,
-    #                 pre_train_workers = 4,
-    #                 refine_workers = 1,
-    #                 log_dir='exp_logs/',
-    #                 pre_training=False,
-    #                 extra_labels='block_patch_positions',
-    #                 swa=None,
-    #                 mode='patch',
-    #                 scheduler=True,
-    #                 initial_freeze=None,
-    #                 height_mask=False,
-    #                 positions=True)
-    # #256
-    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-    #                 chm_mean=4.015508459469479,
-    #                 chm_std=4.809300736115787,
-    #                 base_lr=5e-5,
-    #                 refine_lr=5e-5,
-    #                 height_threshold=5,
+    #                 #class_weights=[0.65697674, 0.72435897, 1.4125,     2.56818182],
     #                 class_weights=None,
     #                 features_dict={
     #                     'pca': 16
     #                 },
     #                 num_intermediate_classes = 256,
-    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training/',
+    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_train',
+    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_valid',
+    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_test',
+    #                 pre_training_epochs = 0,
+    #                 refine_epochs = 200,
+    #                 pre_train_batch_size = 64,
+    #                 refine_batch_size = 64,
+    #                 pre_train_workers = 4,
+    #                 refine_workers = 1,
+    #                 log_dir='exp_logs/',
+    #                 pre_training=False,
+    #                 extra_labels='pca_sp_filter',
+    #                 swa=150,
+    #                 mode='patch',
+    #                 scheduler=True,
+    #                 initial_freeze=None,
+    #                 height_mask=False,
+    #                 positions=True,
+    #                 emb_size=512,
+    #                 scaling=True,
+    #                 augment_bright=False,
+    #                 filters=['ndvi', 'shadow'])
+
+    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+    #                 chm_mean=4.015508459469479,
+    #                 chm_std=4.809300736115787,
+    #                 base_lr=5e-5,
+    #                 refine_lr=5e-5,
+    #                 height_threshold=5,
+    #                 #class_weights=[0.58529412, 0.77734375, 4.52272727, 1.27564103],
+    #                 class_weights=None,
+    #                 features_dict={
+    #                     'pca': 16
+    #                 },
+    #                 num_intermediate_classes = 256,
+    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
     #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train',
     #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_valid',
     #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_test',
+    #                 pre_training_epochs = 0,
+    #                 refine_epochs = 200,
+    #                 pre_train_batch_size = 64,
+    #                 refine_batch_size = 64,
+    #                 pre_train_workers = 4,
+    #                 refine_workers = 1,
+    #                 log_dir='exp_logs/',
+    #                 pre_training=False,
+    #                 extra_labels='pca_scholl_filter',
+    #                 swa=150,
+    #                 mode='patch',
+    #                 scheduler=True,
+    #                 initial_freeze=None,
+    #                 height_mask=False,
+    #                 positions=True,
+    #                 emb_size=512,
+    #                 scaling=True,
+    #                 augment_bright=False,
+    #                 filters=['ndvi', 'shadow'])
+
+
+    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},
+    #                 chm_mean=4.015508459469479,
+    #                 chm_std=4.809300736115787,
+    #                 base_lr=5e-5,
+    #                 refine_lr=5e-5,
+    #                 height_threshold=5,
+    #                 #class_weights=[0.65697674, 0.72435897, 1.4125,     2.56818182],
+    #                 class_weights=None,
+    #                 features_dict={
+    #                     'hs': 416
+    #                 },
+    #                 num_intermediate_classes = 256,
+    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_train_hs',
+    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_train_hs',
+    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_valid_hs',
+    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_test_hs',
+    #                 pre_training_epochs = 200,
+    #                 refine_epochs = 200,
+    #                 pre_train_batch_size = 64,
+    #                 refine_batch_size = 64,
+    #                 pre_train_workers = 4,
+    #                 refine_workers = 1,
+    #                 log_dir='exp_logs/',
+    #                 pre_training=True,
+    #                 extra_labels='hs_sp_filter_pre',
+    #                 swa=150,
+    #                 mode='patch',
+    #                 scheduler=True,
+    #                 initial_freeze=None,
+    #                 height_mask=False,
+    #                 positions=True,
+    #                 emb_size=512,
+    #                 scaling=False,
+    #                 augment_bright=False,
+    #                 filters=['ndvi', 'shadow'])
+
+ 
+    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},
+    #                 chm_mean=4.015508459469479,
+    #                 chm_std=4.809300736115787,
+    #                 base_lr=5e-5,
+    #                 refine_lr=5e-5,
+    #                 height_threshold=5,
+    #                 #class_weights=[0.65697674, 0.72435897, 1.4125,     2.56818182],
+    #                 class_weights=None,
+    #                 features_dict={
+    #                     'pca': 16
+    #                 },
+    #                 num_intermediate_classes = 256,
+    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_train',
+    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_valid',
+    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/sp_test',
     #                 pre_training_epochs = 15,
     #                 refine_epochs = 200,
     #                 pre_train_batch_size = 512,
@@ -352,107 +352,53 @@ if __name__ == "__main__":
     #                 refine_workers = 1,
     #                 log_dir='exp_logs/',
     #                 pre_training=False,
-    #                 extra_labels='block_patch_positions',
+    #                 extra_labels='pca_sp_filter_pre',
     #                 swa=None,
     #                 mode='patch',
     #                 scheduler=True,
     #                 initial_freeze=None,
     #                 height_mask=False,
-    #                 positions=True)
+    #                 positions=True,
+    #                 emb_size=512,
+    #                 scaling=True,
+    #                 augment_bright=False,
+    #                 filters=['ndvi', 'shadow'])
 
-    # #257
-    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-    #                 chm_mean=4.015508459469479,
-    #                 chm_std=4.809300736115787,
-    #                 base_lr=5e-5,
-    #                 refine_lr=5e-5,
-    #                 height_threshold=5,
-    #                 class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
-    #                 features_dict={
-    #                     'pca': 16
-    #                 },
-    #                 num_intermediate_classes = 256,
-    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training/',
-    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train',
-    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_valid',
-    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_test',
-    #                 pre_training_epochs = 0,
-    #                 refine_epochs = 200,
-    #                 pre_train_batch_size = 512,
-    #                 refine_batch_size = 64,
-    #                 pre_train_workers = 4,
-    #                 refine_workers = 1,
-    #                 log_dir='exp_logs/',
-    #                 pre_training=False,
-    #                 extra_labels='block_patch_positions_no_pre',
-    #                 swa=None,
-    #                 mode='patch',
-    #                 scheduler=True,
-    #                 initial_freeze=None,
-    #                 height_mask=False,
-    #                 positions=True)
-    #259
-    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-    #                 chm_mean=4.015508459469479,
-    #                 chm_std=4.809300736115787,
-    #                 base_lr=5e-5,
-    #                 refine_lr=5e-5,
-    #                 height_threshold=5,
-    #                 class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
-    #                 features_dict={
-    #                     'pca': 16
-    #                 },
-    #                 num_intermediate_classes = 256,
-    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training/',
-    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train_mc',
-    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_valid',
-    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_test',
-    #                 pre_training_epochs = 0,
-    #                 refine_epochs = 200,
-    #                 pre_train_batch_size = 512,
-    #                 refine_batch_size = 512,
-    #                 pre_train_workers = 4,
-    #                 refine_workers = 1,
-    #                 log_dir='exp_logs/',
-    #                 pre_training=False,
-    #                 extra_labels='block_patch_positions_no_pre_big_batch',
-    #                 swa=None,
-    #                 mode='patch',
-    #                 scheduler=True,
-    #                 initial_freeze=None,
-    #                 height_mask=False,
-    #                 positions=True)
-    #260
     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
                     chm_mean=4.015508459469479,
                     chm_std=4.809300736115787,
                     base_lr=5e-5,
                     refine_lr=5e-5,
                     height_threshold=5,
-                    class_weights=[0.58430233, 0.76136364, 3.86538462, 1.39583333],
+                    #class_weights=[0.58529412, 0.77734375, 4.52272727, 1.27564103],
+                    class_weights=None,
                     features_dict={
                         'pca': 16
                     },
                     num_intermediate_classes = 256,
-                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training/',
-                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train_mc',
+                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train',
                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_valid',
                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_test',
                     pre_training_epochs = 15,
-                    refine_epochs = 200,
+                    refine_epochs = 400,
                     pre_train_batch_size = 512,
-                    refine_batch_size = 512,
+                    refine_batch_size = 64,
                     pre_train_workers = 4,
                     refine_workers = 1,
                     log_dir='exp_logs/',
                     pre_training=False,
-                    extra_labels='block_patch_positions',
-                    swa=None,
+                    extra_labels='pca_scholl_filter_pre',
+                    swa=150,
                     mode='patch',
                     scheduler=True,
                     initial_freeze=None,
                     height_mask=False,
-                    positions=True)
+                    positions=True,
+                    emb_size=512,
+                    scaling=True,
+                    augment_bright=False,
+                    filters=['ndvi', 'shadow'])
                     
 
     # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PICOL': 2, 'PIFL2': 3},

@@ -15,17 +15,17 @@ class UpsamplePredictor(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(UpsamplePredictor, self).__init__()
         self.up1 = nn.Sequential(nn.ConvTranspose2d(in_channels, in_channels, kernel_size=2, stride=2),
-                                nn.BatchNorm2d(in_channels),
+                                nn.InstanceNorm2d(in_channels),
                                 nn.ReLU())
         self.up2 = nn.Sequential(nn.ConvTranspose2d(in_channels, in_channels, kernel_size=2, stride=2),
-                                nn.BatchNorm2d(in_channels),
+                                nn.InstanceNorm2d(in_channels),
                                 nn.ReLU())
         self.max = nn.MaxPool2d(kernel_size=2, stride=2)
         self.conv1 = nn.Sequential(nn.Conv2d(in_channels, in_channels//2, kernel_size=3, padding=1),
-                                nn.BatchNorm2d(in_channels//2),
+                                nn.InstanceNorm2d(in_channels//2),
                                 nn.ReLU())
         self.conv2 = nn.Sequential(nn.Conv2d(in_channels//2, in_channels//4, kernel_size=3, padding=1),
-                                nn.BatchNorm2d(in_channels//4),
+                                nn.InstanceNorm2d(in_channels//4),
                                 nn.ReLU())
         self.up3 = nn.Upsample(scale_factor =2, mode='bilinear')
         self.classify = nn.Conv2d(in_channels//4, out_channels, kernel_size=1)
@@ -181,10 +181,8 @@ class SWaVUnifiedPerPatch(nn.Module):
                 positions=False):
         super(SWaVUnifiedPerPatch, self).__init__()
         
-        self.transforms_main = tt.Compose([
-                                        #tr.Blit(p=0.5),
-                                        tr.PatchBlock(p=1)
-                                       ])
+        self.transforms_main = tr.PatchBlock(p=1)
+
 
         self.patches = Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size)
         self.use_positions = positions
