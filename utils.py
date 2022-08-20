@@ -584,6 +584,9 @@ def build_inc_pca(args):
     file, in_dir, pca_solver = args
     if ".h5" in file:
         img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"][:,:,5:-5]
+        ndvi = hp.pre_processing(os.path.join(in_dir,file), get_bareness_bands())['bands']
+        ndvi = get_ndvi(ndvi)
+        ndvi_mask = ndvi < 0.5
 
 
         bad_mask = np.zeros((1000,1000), dtype=bool)
@@ -592,7 +595,7 @@ def build_inc_pca(args):
                 y = z>1
                 bad_mask += y
         img[bad_mask] = np.nan
-
+        img[ndvi_mask] = np.nan
         img = rearrange(img, 'h w c -> (h w) c')
         masked = ma.masked_invalid(img)
         #mask = masked.mask[:, 0:30]
@@ -691,9 +694,9 @@ if __name__ == '__main__':
     
 
     FILE = 'NEON_D13_NIWO_DP3_445000_4432000_reflectance.h5'
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_mnf/'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_pca_filtered_ndvi'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
-    PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
+    PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked'
     FN = get_extra_bands_all
 
     chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
@@ -712,10 +715,10 @@ if __name__ == '__main__':
     INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo/'
     NUM_CLASSES=12
 
-    for f in os.listdir(OUT_DIR):
-        img = np.load(os.path.join(OUT_DIR, f))
-        plt.imshow(img[...,3:6]*10)
-        plt.show()
+    # for f in os.listdir(OUT_DIR):
+    #     img = np.load(os.path.join(OUT_DIR, f))
+    #     plt.imshow(img[...,3:6]*10)
+    #     plt.show()
 
     valid = vd.Validator(file=VALID_FILE, 
                     pca_dir=PCA_DIR, 
@@ -747,19 +750,20 @@ if __name__ == '__main__':
 
     train_list = [valid.orig_dict[k] for k in train_keys]
 
-    PCA_SOLVER = MiniBatchNMF(n_components=20, beta_loss='kullback-leibler', forget_factor=1)
+    # PCA_SOLVER = IncrementalPCA(n_components=16)
 
-    for f in tqdm(random.sample(train_list, len(train_list)//5)):
-        PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
+    # for f in tqdm(random.sample(train_list, len(train_list)//5)):
+    #     PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
         
-    with open('inc_nmf.pk', 'wb') as f:
-            pickle.dump(PCA_SOLVER, f)
+    with open('inc_pca.pk', 'rb') as f:
+            #pickle.dump(PCA_SOLVER, f)
+            PCA_SOLVER = pickle.load(f)
 
     # with open('inc_nmf.pk', 'rb') as f:
     #         PCA_SOLVER = pickle.load(f)
 
 
-    with ProcessPool(2) as pool:
+    with ProcessPool(3) as pool:
         bulk_process(pool, [IN_DIR, OUT_DIR, PCA_SOLVER], do_inc_pca)
 
     #make_superpixels_chm((FILE, chm_fold, OUT_DIR, IN_DIR))
