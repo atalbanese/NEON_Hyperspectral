@@ -1,4 +1,5 @@
 from select import select
+import tempfile
 from typing_extensions import Self
 from imageio import save
 from matplotlib.widgets import Slider
@@ -25,20 +26,41 @@ from sklearn.decomposition import PCA, IncrementalPCA
 import torchvision.transforms as tt
 import sklearn.model_selection as ms
 import sklearn.utils.class_weight as cw
+from shapely.geometry import Polygon
 import math
+from rasterio.transform import from_origin
+from rasterio.mask import mask as msk 
+import rasterio.features as rf
 
 
 #TODO: Clean this mess up
 #Switch plots to plotly? Good for overlays
 class Validator():
-    def __init__(self, train_split=0.6, valid_split=0.2, test_split=0.2, use_tt=True, scholl_filter=False, scholl_output=False, filter_species=None, object_split=False, tree_tops_dir="", data_gdf=None, **kwargs):
+    def __init__(self, 
+                train_split=0.6, 
+                valid_split=0.2, 
+                test_split=0.2, 
+                use_tt=True, 
+                scholl_filter=False, 
+                scholl_output=False, 
+                filter_species=None, 
+                object_split=False, 
+                tree_tops_dir="", 
+                data_gdf=None, 
+                ttops_search_buffer=5, 
+                crown_diameter_mult = 0.9,
+                constant_diameter = 2,
+                ndvi_filter=None,
+                **kwargs):
         self.file = kwargs["file"]
         self.pca_dir = kwargs["pca_dir"]
         self.tree_tops_dir = tree_tops_dir
         self.curated = kwargs['curated']
         self.site_prefix = kwargs['prefix']
+        self.crown_diameter_mult = crown_diameter_mult
+        self.constant_diameter = constant_diameter
 
-        
+        self.ndvi_filter=ndvi_filter
         self.num_classes = kwargs["num_classes"]
         self.site_name = kwargs["site_name"]
         self.plot_file = kwargs['plot_file']
@@ -47,13 +69,17 @@ class Validator():
         self.scholl_filter = scholl_filter
         self.scholl_output = scholl_output
         self.filter_species = filter_species
+        self.ttops_search_buffer = ttops_search_buffer
 
         self.data_gdf = self.get_plot_data()
 
         self.valid_files = self.get_valid_files()
 
         self.valid_dict = self.make_valid_dict()
-        
+        self.species_lookup = {'PICOL': 'Lodgepole Pine',
+                                'PIFL2': 'Limber Pine',
+                                'ABLAL': 'Subalpine Fir',
+                                'PIEN': 'Engelmann Spruce'}
         
 
         self.orig_files = [os.path.join(kwargs['orig'], file) for file in os.listdir(kwargs['orig']) if ".h5" in file]
@@ -72,9 +98,9 @@ class Validator():
         self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
         
         if use_tt:
-            if data_gdf is None:
+            if not os.path.exists(data_gdf):
                 self.data_gdf = self.pick_ttops()
-                with open('test_gdf.pkl', 'wb') as f:
+                with open(data_gdf, 'wb') as f:
                     pickle.dump(self.data_gdf, f)
             else:
                 with open(data_gdf, 'rb') as f:
@@ -84,15 +110,168 @@ class Validator():
         # self.data_gdf = gpd.GeoDataFrame(self.data_gdf, geometry=gpd.points_from_xy(self.data_gdf.easting_tree, self.data_gdf.northing_tree), crs='EPSG:32613')
         # self.data_gdf.geometry = self.data_gdf.buffer(self.data_gdf['maxCrownDiameter']*0.9/2)
 
-        self.valid_plots, self.train_plots, self.test_plots = self.split_plots().values()
+       
 
         if object_split:
             self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
         else:
+            self.train_plots, self.valid_plots, self.test_plots = self.split_plots().values()
             self.train = self.data_gdf.loc[self.data_gdf.plotID.isin(list(self.train_plots.index))]
             self.valid = self.data_gdf.loc[self.data_gdf.plotID.isin(list(self.valid_plots.index))]
             self.test = self.data_gdf.loc[self.data_gdf.plotID.isin(list(self.test_plots.index))]
         self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=self.train['taxonID'])
+
+    def make_spectrographs(self, title, gdf_type):
+        taxa = self.taxa.keys()
+        stored_stats = {t: [np.zeros((416,), dtype=np.float32), 0] for t in taxa}
+        for k, v in self.valid_files.items():
+           
+            scene = hp.pre_processing(self.orig_dict[k], get_all=True)
+            bands = scene['meta']['spectral_bands'][5:-5]
+            scene = scene["bands"][:,:,5:-5]
+            if self.ndvi_filter is not None:
+                ndvi = hp.pre_processing(os.path.join(self.orig_dict[k]), utils.get_bareness_bands())["bands"]
+                ndvi = utils.get_ndvi(ndvi)
+                ndvi_mask = ndvi > self.ndvi_filter
+
+            west = int(k.split('_')[0])
+            north = int(k.split('_')[1]) + 1000
+            affine = from_origin(west, north, 1, 1)
+
+            for taxon in taxa:
+                if gdf_type == 'all':
+                    tmp_gdf = self.data_gdf.loc[(self.data_gdf['taxonID'] == taxon) & (self.data_gdf['file_coords'] == k)]
+                if gdf_type == 'train':
+                    tmp_gdf = self.train.loc[(self.data_gdf['taxonID'] == taxon) & (self.data_gdf['file_coords'] == k)]
+                if len(tmp_gdf) > 0:
+                    
+                    mask = rf.geometry_mask(tmp_gdf.geometry, (1000,1000), affine, invert=True)
+                    if self.ndvi_filter is not None:
+                        mask = mask + ndvi_mask
+                    selected_data = scene[mask]
+                    to_add = np.nansum(selected_data, axis=0)
+                    stored_stats[taxon][0] += to_add
+                    stored_stats[taxon][1] += selected_data.shape[0]
+                    #print('here')
+        calced_stats = {}
+        for k, v in stored_stats.items():
+            sums = v[0]
+            count = v[1]
+
+            mean = sums/count
+            calced_stats[k] = mean
+            plt.plot(bands, mean, label=self.species_lookup[k])
+            #plt.title(k)
+        class_weights_list = []
+        for k, v in stored_stats.items():
+            to_add = [k] * v[1]
+            class_weights_list = class_weights_list + to_add
+        self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=class_weights_list)
+        print(self.class_weights)
+        plt.legend()
+        plt.title(title)
+        plt.xlabel('Wavelength (nm)', fontsize='large')
+        plt.ylabel('Mean Reflectance', fontsize='large')
+        plt.show()
+        # print('here')
+
+
+    def save_orig_to_geotiff(self, key, save_loc, thresh=None, mode='rgb'):
+        img = self.orig_dict[key]
+
+        if mode == 'rgb':
+            rgb = hp.pre_processing(img, wavelength_ranges=utils.get_viz_bands())
+            rgb = hp.make_rgb(rgb["bands"])
+            rgb = exposure.adjust_gamma(rgb, 0.5)
+            scene = rearrange(rgb, 'h w c -> c h w')
+
+        if mode == 'mpsi':
+            mpsi = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_shadow_bands())["bands"]
+            mpsi = utils.han_2018(mpsi)
+            if thresh is not None:
+                thresh_mask = mpsi>thresh
+                mpsi[thresh_mask] = 1
+                mpsi[~thresh_mask] = 0
+            scene = mpsi[np.newaxis, ...]
+
+        if mode == 'ndvi':
+            ndvi = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_bareness_bands())["bands"]
+                            
+            ndvi = utils.get_ndvi(ndvi)
+            if thresh is not None:
+                thresh_mask = ndvi>thresh
+                ndvi[thresh_mask] = 1
+                ndvi[~thresh_mask] = 0
+            scene = ndvi[np.newaxis, ...]
+
+        west = int(key.split('_')[0])
+        north = int(key.split('_')[1]) + 1000
+        affine = from_origin(west, north, 1, 1)
+
+        new_img = rs.open(
+            save_loc,
+            'w',
+            driver="GTiff",
+            height=1000,
+            width=1000,
+            count=1,
+            dtype=scene.dtype,
+            crs='+proj=utm +zone=13 +datum=WGS84 +units=m +no_defs +type=crs',
+            transform=affine
+        )
+
+        new_img.write(scene)
+        new_img.close()
+
+    def save_pca_to_geotiff(self, key, save_loc):
+        img = self.pca_dict[key]
+        pca = np.load(img).astype(np.float32)
+        pca = rearrange(pca, 'h w c -> c h w')
+
+        west = int(key.split('_')[0])
+        north = int(key.split('_')[1]) + 1000
+        affine = from_origin(west, north, 1, 1)
+
+        new_img = rs.open(
+            save_loc,
+            'w',
+            driver="GTiff",
+            height=1000,
+            width=1000,
+            count=20,
+            dtype=pca.dtype,
+            crs='+proj=utm +zone=13 +datum=WGS84 +units=m +no_defs +type=crs',
+            transform=affine
+        )
+
+        pca[pca!=pca] = 0
+        new_img.write(pca)
+        new_img.close()
+    
+    def save_plot_outlines(self, save_loc, df):
+        grouped_files = df.groupby(['plotID'])
+        to_save = grouped_files.apply(self._make_plot_outlines)
+        to_save = to_save.reset_index()
+        to_save = to_save.rename(mapper={0: 'geometry'}, axis=1)
+        to_save = to_save.set_crs(crs='EPSG:32613')
+        to_save.to_file(save_loc)
+    
+    @staticmethod
+    def _make_plot_outlines(df):
+        row = df.iloc[0]
+        x_min = row['easting_plot'] - (row['plotSize']**(1/2)/2)
+        x_max = row['easting_plot'] + (row['plotSize']**(1/2)/2)
+
+        y_min = row['northing_plot'] - (row['plotSize']**(1/2)/2)
+        y_max = row['northing_plot'] + (row['plotSize']**(1/2)/2)
+        x = [x_min, x_max, x_max, x_min, x_min]
+        y = [y_max, y_max, y_min, y_min, y_max]
+        points = list(zip(x, y))
+        s = gpd.GeoSeries([Polygon(points)], crs='EPSG:32613')
+        to_return = gpd.GeoDataFrame(s)
+        return to_return
+
+        
 
     def save_splits(self, save_dir):
         to_save = {'train': self.train,
@@ -245,11 +424,14 @@ class Validator():
         return None
 
 
-
     def get_splits(self, train_prop, valid_prop, test_prop):
-        train, t_v = ms.train_test_split(self.data_gdf, test_size=(valid_prop+test_prop), train_size=train_prop, random_state=42, stratify=self.data_gdf['taxonID'])
-        test, valid = ms.train_test_split(t_v, test_size=valid_prop/(valid_prop+test_prop), train_size=test_prop/(valid_prop+test_prop), random_state=42, stratify=t_v['taxonID'])
-        return train, valid, test
+        if valid_prop != 0:
+            train, t_v = ms.train_test_split(self.data_gdf, test_size=(valid_prop+test_prop), train_size=train_prop, random_state=42, stratify=self.data_gdf['taxonID'])
+            test, valid = ms.train_test_split(t_v, test_size=valid_prop/(valid_prop+test_prop), train_size=test_prop/(valid_prop+test_prop), random_state=42, stratify=t_v['taxonID'])
+            return train, valid, test
+        else:
+            train, test = ms.train_test_split(self.data_gdf, test_size=test_prop, train_size=train_prop, random_state=42, stratify=self.data_gdf['taxonID'])
+            return train, None, test
 
     def render_valid_patch(self, save_dir, split, out_size=20, multi_crop=1, num_channels=16, key_label='pca', filters=[]):
         if split == 'train':
@@ -258,12 +440,17 @@ class Validator():
             data = self.valid
         if split == 'test':
             data = self.test
+        if split == 'all':
+            data = self.data_gdf
 
         loaded_key = None
+        ndvi_key = None
+        shadow_key = None
+        data = data.sort_values('file_coords')
         for ix, row in data.iterrows():
             key = row['file_coords']
             if key != loaded_key:
-                if key_label == 'pca':
+                if key_label != 'hs':
                     pca = np.load(self.pca_dict[key]).astype(np.float32)
                 if key_label == 'hs':
                     pca = hp.pre_processing(os.path.join(self.orig_dict[key]), get_all=True)["bands"][:,:,5:-5]
@@ -273,10 +460,16 @@ class Validator():
                         y = z>1
                         bad_mask += y
                     pca[bad_mask] = np.nan
+                loaded_key = key
+
+            west = int(key.split('_')[0])
+            north = int(key.split('_')[1]) + 1000
+            affine = from_origin(west, north, 1, 1)
             
             
-            rad = int(row['maxCrownDiameter']//2)
-            target_size = rad*2 + 1
+            #rad = row['maxCrownDiameter']*self.crown_diameter_mult/2
+            rad=3
+            target_size = 7
 
             taxa = row['taxonID']
             
@@ -308,33 +501,40 @@ class Validator():
 
                 pca_crop = pca[y_min:y_max, x_min:x_max,:]
 
-                #crop_coords = (neg_y_pad, neg_x_pad, 3, 3)
                        
                 if pca_crop.shape == (out_size, out_size, num_channels):
                     pca_crop = torch.tensor(pca_crop)
                     pca_crop = rearrange(pca_crop, 'h w c -> c h w')
                     masks = {}
                     if 'ndvi' in filters:
-                        ndvi = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_bareness_bands())["bands"]
-                        
-                        ndvi = utils.get_ndvi(ndvi)
-                        ndvi = ndvi[y_min:y_max, x_min:x_max]
-                        ndvi_mask = ndvi < 0.5
-                        masks['ndvi'] = ndvi_mask
+                        if key != ndvi_key:
+                            ndvi = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_bareness_bands())["bands"]
+                            
+                            ndvi = utils.get_ndvi(ndvi)
+                            ndvi_key = key
+                        ndvi_clip = ndvi[y_min:y_max, x_min:x_max]
+                        #ndvi_mask = ndvi < self.ndvi_filter
+                        masks['ndvi'] = ndvi_clip
                     if 'shadow' in filters:
-                        shadow = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_shadow_bands())["bands"]
-                        
-                        shadow = utils.han_2018(shadow)
-                        shadow = shadow[y_min:y_max, x_min:x_max]
-                        shadow_mask = shadow < 0.03
-                        masks['shadow'] = shadow_mask
+                        if key != shadow_key:
+                            shadow = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_shadow_bands())["bands"]
+                            
+                            shadow = utils.han_2018(shadow)
+                            shadow_key = key
+                        shadow_clip = shadow[y_min:y_max, x_min:x_max]
+                        #shadow_mask = shadow < 0.03
+                        masks['shadow'] = shadow_clip
                     #pca_crop[mask] = 0
                     
 
-                    label = torch.zeros((out_size, out_size), dtype=torch.float32).clone()
+                    label = torch.zeros((1000, 1000), dtype=torch.float32)
                     #label[self.taxa[taxa]] = 1.0
                     label = label - 1
-                    label[neg_y_pad:neg_y_pad+target_size+1, neg_x_pad:neg_x_pad+target_size+1] = self.taxa[taxa]
+                    target_mask = rf.geometry_mask([row.geometry], (1000,1000), affine, invert=True, all_touched=True)
+                    label[target_mask] = self.taxa[taxa]
+                    label = label[y_min:y_max, x_min:x_max]
+
+                    #label[neg_y_pad:neg_y_pad+target_size+1, neg_x_pad:neg_x_pad+target_size+1] = self.taxa[taxa]
 
                     to_save = {
                         key_label: pca_crop,
@@ -360,9 +560,6 @@ class Validator():
         return valid_dict
 
 
-
-        
-
     def get_plot_data(self):
        
         curated = pd.read_csv(self.curated)
@@ -374,6 +571,11 @@ class Validator():
         data_gdf = data_gdf.loc[data_gdf['taxonID'] != self.filter_species]
         data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['maxCrownDiameter']/2)
         data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
+        if self.crown_diameter_mult is not None:
+           data_gdf.geometry = data_gdf.buffer(data_gdf['maxCrownDiameter']*self.crown_diameter_mult/2)
+        else:
+            data_gdf.geometry = data_gdf.buffer(self.constant_diameter)
+        
 
         #TODO: Test with and without this
 
@@ -519,7 +721,7 @@ class Validator():
         return {'solution':working_copy, 'dist':distance}
 
     
-    def split_plots(self, splits={'valid':0.2,  'train': 0.6, 'test':0.2}):
+    def split_plots(self, splits={'train': 0.7, 'valid':0.0, 'test':0.3}):
         plot_counts={}
         grouped_files = self.data_gdf.groupby(['plotID'])
         grouped_files.apply(self._split_plot, plot_counts)
@@ -620,7 +822,7 @@ class Validator():
         coords = top_row['file_coords']
         open_ttops = gpd.read_file(vd.tree_tops_dict[coords])
 
-        df['cur_buffer'] = df.buffer(5)
+        df['cur_buffer'] = df.buffer(vd.ttops_search_buffer)
 
         clip = open_ttops.clip(df.cur_buffer)
 
@@ -628,7 +830,7 @@ class Validator():
 
         def find_match(row, clip):
             distances = clip.distance(row.geometry)
-            distances = distances.loc[distances<5]
+            distances = distances.loc[distances<vd.ttops_search_buffer]
             if len(distances) > 0:
                 distances = distances.sort_values()
                 return distances.index[0], distances.iloc[0]
@@ -664,7 +866,10 @@ class Validator():
         select.index = df.index
         df.geometry = select.geometry
 
-        df.geometry = df.buffer(df['maxCrownDiameter']*0.9/2)
+        if vd.crown_diameter_mult is not None:
+            df.geometry = df.buffer(df['maxCrownDiameter']*vd.crown_diameter_mult/2)
+        else:
+            df.geometry = df.buffer(vd.constant_diameter)
         if len(df) >0:
             df['taxa_key'] = df.apply(lambda x: vd.taxa[x.taxonID], axis=1)
             # fig, ax = plt.subplots(1,1)
@@ -681,14 +886,17 @@ class Validator():
                     inter = working.clip(clipper)
                     if len(inter)> 0:
                         all = pd.concat((inter, clipper))
-                        #Only remove intersections when species doesn't match
-                        if len(all.taxonID.unique())> 1:
-                            all = all.sort_values('height', ascending=False)
-                            top_taxon = all.iloc[0].taxonID
-                            to_remove = all.loc[all.taxonID != top_taxon]
-                            to_de_intersect = to_de_intersect + list(to_remove.index)
+
+                        all = all.sort_values('height', ascending=False)
+                        top_taxon = all.iloc[0].taxonID
+                        to_remove = all.iloc[1:]
+                        to_de_intersect = to_de_intersect + list(to_remove.index)
 
             df = df.drop(to_de_intersect)
+
+            # fig, ax = plt.subplots(1,1)
+            # df.plot(column='taxa_key', ax=ax, legend=True)
+            # plt.show()
 
 
         return df
@@ -739,67 +947,66 @@ if __name__ == "__main__":
 
     valid = Validator(file=VALID_FILE, 
                     pca_dir=PCA_DIR, 
-                    site_name='NIWO', 
+                    site_name='NIWO',
+                    train_split=0.7,
+                    test_split=0.3, 
+                    valid_split=0,
                     num_classes=NUM_CLASSES, 
                     plot_file=PLOT_FILE, 
                     tree_tops_dir=TREE_TOPS_DIR,
                     curated=CURATED_FILE, 
                     orig=ORIG_DIR, 
                     prefix='D13',
-                    use_tt=True,
-                    scholl_filter=False,
+                    use_tt=False,
+                    scholl_filter=True,
                     scholl_output=False,
                     filter_species = 'SALIX',
-                    object_split=False,
-                    data_gdf='test_gdf.pkl')
-    valid.save_splits('C:/Users/tonyt/Documents/Research/split_jsons/ttops_plot_split')
-    #print(valid.valid_files.keys())
+                    object_split=True,
+                    data_gdf='3m_search_buf_50_per_crown.pkl',
+                    crown_diameter_mult=0.5,
+                    constant_diameter=1.5,
+                    ttops_search_buffer=3,
+                    ndvi_filter=0.5)
+
+    valid.save_orig_to_geotiff('451000_4432000', 'C:/Users/tonyt/Documents/Research/rendered_imgs/451000_4432000_mpsi_threshed_0.03.tif', thresh=0.03, mode='mpsi')
+
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_all', 'all', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
+
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_object_split/test', 'test', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_object_split/train', 'train', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
 
 
-   
-    # valid.render_plots('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/full_plot_train', 'train', filetype='pca')
-    # valid.render_plots('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/full_plot_test', 'test', filetype='pca')
-    # valid.render_plots('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/full_plot_valid', 'valid', filetype='pca')
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/tt_train_hs', 'train', out_size=20, key_label='hs', num_channels=416, filters=['ndvi', 'shadow'])
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/tt_valid_hs', 'valid', out_size=20, key_label='hs', num_channels=416, filters=['ndvi', 'shadow'])
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/tt_test_hs', 'test', out_size=20, key_label='hs', num_channels=416, filters=['ndvi', 'shadow'])
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/tt_train', 'train', out_size=20, key_label='pca', num_channels=16, filters=['ndvi', 'shadow'])
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/tt_valid', 'valid', out_size=20, key_label='pca', num_channels=16, filters=['ndvi', 'shadow'])
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/tt_test', 'test', out_size=20, key_label='pca', num_channels=16, filters=['ndvi', 'shadow'])
 
-    # valid_2 = Validator(file=VALID_FILE, 
-    #             pca_dir=PCA_DIR, 
-    #             ica_dir=ICA_DIR,
-    #             raw_bands=RAW_DIR,
-    #             shadow=SHADOW_DIR,
-    #             site_name='NIWO', 
-    #             num_classes=NUM_CLASSES, 
-    #             plot_file=PLOT_FILE, 
-    #             struct=True, 
-    #             azm=AZM_DIR, 
-    #             chm=CHM_DIR, 
-    #             curated=CURATED_FILE, 
-    #             rescale=False, 
-    #             orig=ORIG_DIR, 
-    #             superpixel=SP_DIR,
-    #             indexes=INDEX_DIR,
-    #             prefix='D13',
-    #             chm_mean = 4.015508459469479,
-    #             chm_std = 4.809300736115787,
-    #             use_sp=False,
-    #             scholl_filter=True,
-    #             scholl_output=False,
-    #             filter_species = 'SALIX')
+    # valid = Validator(file=VALID_FILE, 
+    #                 pca_dir=PCA_DIR, 
+    #                 site_name='NIWO',
+    #                 train_split=0.7,
+    #                 test_split=0.3, 
+    #                 valid_split=0,
+    #                 num_classes=NUM_CLASSES, 
+    #                 plot_file=PLOT_FILE, 
+    #                 tree_tops_dir=TREE_TOPS_DIR,
+    #                 curated=CURATED_FILE, 
+    #                 orig=ORIG_DIR, 
+    #                 prefix='D13',
+    #                 use_tt=False,
+    #                 scholl_filter=True,
+    #                 scholl_output=False,
+    #                 filter_species = 'SALIX',
+    #                 object_split=False,
+    #                 data_gdf='3m_search_buf_50_per_crown.pkl',
+    #                 crown_diameter_mult=0.5,
+    #                 constant_diameter=1.5,
+    #                 ttops_search_buffer=3,
+    #                 ndvi_filter=0.5)
 
-    # valid_2.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_train', 'train', out_size=20, key_label='pca', num_channels=16, filters=['ndvi', 'shadow'])
-    # valid_2.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_valid', 'valid', out_size=20, key_label='pca', num_channels=16, filters=['ndvi', 'shadow'])
-    # valid_2.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/scholl_test', 'test', out_size=20, key_label='pca', num_channels=16, filters=['ndvi', 'shadow'])
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_plot_split/test', 'test', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_plot_split/train', 'train', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
 
 
     print(valid.taxa)
     print(valid.class_weights)
 
-    # print(valid_2.taxa)
-    # print(valid_2.class_weights)
+
 
 

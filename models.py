@@ -8,7 +8,7 @@ import torchvision.transforms.functional as TF
 import pytorch_lightning as pl
 import torchvision as tv
 import transforms as tr
-
+import torch.hub
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 #import cv2 as cv
@@ -23,10 +23,7 @@ import matplotlib.pyplot as plt
 class SwaVModelUnified(pl.LightningModule):
     def __init__(self, 
                 class_key,
-                chm_mean, 
-                chm_std, 
                 lr, 
-                height_threshold, 
                 class_weights, 
                 features_dict, 
                 num_intermediate_classes,
@@ -34,23 +31,18 @@ class SwaVModelUnified(pl.LightningModule):
                 mode='default', 
                 augment_refine = 'false',
                 scheduler=True,
-                height_mask=False,
                 positions=False,
                 emb_size=256,
                 augment_bright=False,
                 filters=[]):
         super().__init__()
-        self.save_hyperparameters('lr', 'height_threshold', 'features_dict', 'num_intermediate_classes', 'pre_training', 'class_key', 'chm_mean', 'chm_std', 'class_weights', 'emb_size', 'filters')
+        self.save_hyperparameters()
         self.features_dict = features_dict
         self.filters=filters
         self.num_channels = self.calc_num_channels()
         self.num_output_classes = len(class_key.keys())
-        self.chm_mean = chm_mean
         self.missing_data = nn.Parameter(torch.randn((1)))
-        self.chm_std = chm_std
         self.lr = lr
-        self.height_mask = height_mask
-        self.height_threshold = height_threshold
         self.augment_refine = augment_refine
         self.augment_bright = augment_bright
         if self.augment_bright:
@@ -76,6 +68,14 @@ class SwaVModelUnified(pl.LightningModule):
             self.loss = nn.CrossEntropyLoss(weight=torch.tensor(class_weights), label_smoothing=0.2, ignore_index=-1)
         else:
             self.loss = nn.CrossEntropyLoss(label_smoothing=0.2, ignore_index=-1)
+            # self.loss = torch.hub.load(
+            # 'adeelh/pytorch-multi-class-focal-loss',
+            # model='FocalLoss',
+            # gamma=2,
+            # reduction='mean',
+            # force_reload=False,
+            # ignore_index=-1
+            # )
 
         self.class_key = {value:key for key, value in class_key.items()}
         self.results = self.make_results_dict(self.class_key)
@@ -162,7 +162,7 @@ class SwaVModelUnified(pl.LightningModule):
         mask = inp['mask']
         for f in self.filters:
             to_mask = mask[f]
-            to_mask[to_mask != to_mask]
+            #to_mask[to_mask != to_mask]
             targets[to_mask] = -1
         crop_coords = None
         if 'crop_coords' in inp.keys():
@@ -200,12 +200,7 @@ class SwaVModelUnified(pl.LightningModule):
         elif self.mode == 'patch':
             inp = rearrange(inp, 'b (h w) f -> b f h w', h=5, w=5)
             inp = self.predict(inp)
-            # if crop_coords is not None:
-            #     to_cat = []
-            #     for ix, im in enumerate(inp):
-            #         to_append = im[...,crop_coords[0][ix]:crop_coords[0][ix]+ crop_coords[2][ix], crop_coords[1][ix]: crop_coords[1][ix] + crop_coords[3][ix]]
-            #         to_cat.append(to_append.unsqueeze(0))
-            #     inp = torch.cat(to_cat, dim=0)
+
         elif self.mode == 'resnet':
             inp = inp['out']
 

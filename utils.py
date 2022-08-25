@@ -128,7 +128,7 @@ def neighborhood_valley_thresh(image: np.ndarray, neighborhood_length: int):
 
     return best_threshold
 
-#TODO: add dask support for speed up/bulk images
+
 def ward_cluster(inp, n_clusters, mask=None, n_neighbors=4):
     print('getting connectivity graph')
     connectivity = kneighbors_graph(

@@ -298,11 +298,12 @@ class SWaVUnifiedPerPatch(nn.Module):
             inp = inp + self.positions
 
         inp = self.encoder(inp)
-        inp = self.projector(inp)
-        inp = nn.functional.normalize(inp, dim=1, p=2)
+        # inp = self.projector(inp)
+        # inp = nn.functional.normalize(inp, dim=1, p=2)
 
-        scores = self.prototypes(inp)
-        return scores
+        # scores = self.prototypes(inp)
+        # return scores
+        return inp
 
 
 class SWaVUnified(nn.Module):
