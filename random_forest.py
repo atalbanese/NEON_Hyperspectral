@@ -132,43 +132,43 @@ def rf_training(train_folder='',
 
 
 if __name__ == '__main__':
-    rf_training(
-        pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-        train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_all',
-        pixel_split=True,
-        #test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
-        features_dict={
-            'pca': 16,
-        },
-        filters={
-            'shadow': 0.03,
-            'ndvi': 0.2
-        }
-    )
+    # rf_training(
+    #     pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+    #     train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_all',
+    #     pixel_split=True,
+    #     #test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
+    #     features_dict={
+    #         'pca': 16,
+    #     },
+    #     filters={
+    #         'shadow': 0.03,
+    #         'ndvi': 0.2
+    #     }
+    # )
 
+    # rf_training(
+    #     pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+    #     train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_object_split/train',
+    #     pixel_split=False,
+    #     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_object_split/test',
+    #     features_dict={
+    #         'pca': 16,
+    #     },
+    #     filters={
+    #         'shadow': 0.03,
+    #         'ndvi': 0.2
+    #     }
+    # )
     rf_training(
         pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-        train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_object_split/train',
+        train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/train',
         pixel_split=False,
-        test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_object_split/test',
+        test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/test',
         features_dict={
             'pca': 16,
         },
         filters={
             'shadow': 0.03,
-            'ndvi': 0.2
-        }
-    )
-    rf_training(
-        pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-        train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_plot_split/train',
-        pixel_split=False,
-        test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_plot_split/test',
-        features_dict={
-            'pca': 16,
-        },
-        filters={
-            'shadow': 0.03,
-            'ndvi': 0.2
+            'ndvi': 0.1,
         }
     )

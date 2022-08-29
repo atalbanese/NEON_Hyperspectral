@@ -1,3 +1,4 @@
+from sklearn.preprocessing import StandardScaler
 from select import select
 import tempfile
 from typing_extensions import Self
@@ -11,6 +12,7 @@ import rasterio.features as rf
 from rasterio.crs import CRS
 import torchvision.transforms.functional as TF
 import torch
+from itertools import chain
 import pickle
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -46,6 +48,8 @@ class Validator():
                 filter_species=None, 
                 object_split=False, 
                 tree_tops_dir="", 
+                rgb_dir = '',
+                stats_loc = '',
                 data_gdf=None, 
                 ttops_search_buffer=5, 
                 crown_diameter_mult = 0.9,
@@ -55,6 +59,8 @@ class Validator():
         self.file = kwargs["file"]
         self.pca_dir = kwargs["pca_dir"]
         self.tree_tops_dir = tree_tops_dir
+        self.rgb_dir = rgb_dir
+        self.stats_loc = stats_loc
         self.curated = kwargs['curated']
         self.site_prefix = kwargs['prefix']
         self.crown_diameter_mult = crown_diameter_mult
@@ -85,6 +91,7 @@ class Validator():
         self.orig_files = [os.path.join(kwargs['orig'], file) for file in os.listdir(kwargs['orig']) if ".h5" in file]
         self.pca_files = [os.path.join(kwargs['pca_dir'], file) for file in os.listdir(kwargs['pca_dir']) if ".npy" in file]
         self.tree_tops_files = [os.path.join(tree_tops_dir, file) for file in os.listdir(tree_tops_dir) if ".geojson" in file]
+        self.rgb_files = [os.path.join(rgb_dir, file) for file in os.listdir(rgb_dir) if ".tif" in file]
         
         def make_dict(file_list, param_1, param_2):
             return {f"{file.split('_')[param_1]}_{file.split('_')[param_2]}": file for file in file_list}
@@ -92,6 +99,7 @@ class Validator():
         self.orig_dict = make_dict(self.orig_files, -3, -2)
         self.pca_dict = make_dict(self.pca_files, -4, -3)
         self.tree_tops_dict = make_dict(self.tree_tops_files, -3, -2)
+        self.rgb_dict = make_dict(self.rgb_files, -3, -2)
 
         
         self.rng = np.random.default_rng(42)
@@ -446,6 +454,7 @@ class Validator():
         loaded_key = None
         ndvi_key = None
         shadow_key = None
+        rgb_key = None
         data = data.sort_values('file_coords')
         for ix, row in data.iterrows():
             key = row['file_coords']
@@ -524,6 +533,34 @@ class Validator():
                         shadow_clip = shadow[y_min:y_max, x_min:x_max]
                         #shadow_mask = shadow < 0.03
                         masks['shadow'] = shadow_clip
+                    
+                    if 'rgb_z_max' in filters:
+                        if key != rgb_key:
+                            rgb = rs.open(self.rgb_dict[key])
+                            img = rgb.read()
+
+                            
+                            stats = torch.load(self.stats_loc)
+                            
+                            scaler = StandardScaler()
+                            cur_stats = stats['rgb']
+                            scaler.scale_ = cur_stats['scale']
+                            scaler.mean_ = cur_stats['mean']
+                            scaler.var_ = cur_stats['var']
+
+                            img = rearrange(img, 'c h w -> (h w) c')
+                            img = scaler.transform(img)
+                            img = rearrange(img, '(h w) c -> c h w', h=10000, w=10000)
+                            img = torch.from_numpy(img).float()
+                            
+                            #img = tf.center_crop(img, [512,512])
+                            img = torch.nn.functional.interpolate(img.unsqueeze(0), scale_factor=0.1).squeeze()
+
+                            img = torch.argmax(img, dim=0)
+                            rgb_key = key
+                        clip_img = img[y_min:y_max, x_min:x_max]
+                        green_mask = clip_img == 1
+                        masks['rgb_z_max'] = green_mask
                     #pca_crop[mask] = 0
                     
 
@@ -818,13 +855,28 @@ class Validator():
     
     @staticmethod
     def _select_ttops(df, vd):
-        top_row = df.iloc[0]
-        coords = top_row['file_coords']
+        row = df.iloc[0]
+        coords = row['file_coords']
+
+        x_min = row['easting_plot'] - (row['plotSize']**(1/2)/2)
+        x_max = row['easting_plot'] + (row['plotSize']**(1/2)/2)
+
+        y_min = row['northing_plot'] - (row['plotSize']**(1/2)/2)
+        y_max = row['northing_plot'] + (row['plotSize']**(1/2)/2)
+        x = [x_min, x_max, x_max, x_min, x_min]
+        y = [y_max, y_max, y_min, y_min, y_max]
+        points = list(zip(x, y))
+        s = gpd.GeoSeries([Polygon(points)], crs='EPSG:32613')
+
+
         open_ttops = gpd.read_file(vd.tree_tops_dict[coords])
+
+        open_ttops = open_ttops.clip(s)
 
         df['cur_buffer'] = df.buffer(vd.ttops_search_buffer)
 
         clip = open_ttops.clip(df.cur_buffer)
+
 
         #TODO: Switch to spatial index
 
@@ -944,6 +996,7 @@ if __name__ == "__main__":
     SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo_chm'
     INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo/'
     TREE_TOPS_DIR = 'C:/Users/tonyt/Documents/Research/datasets/lidar/niwo_point_cloud/valid_sites_ttops'
+    RGB_DIR = 'C:/Users/tonyt/Documents/Research/datasets/rgb/NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022/'
 
     valid = Validator(file=VALID_FILE, 
                     pca_dir=PCA_DIR, 
@@ -956,52 +1009,24 @@ if __name__ == "__main__":
                     tree_tops_dir=TREE_TOPS_DIR,
                     curated=CURATED_FILE, 
                     orig=ORIG_DIR, 
+                    rgb_dir=RGB_DIR,
+                    stats_loc='C:/Users/tonyt/Documents/Research/datasets/tensors/rgb_blocks/stats/stats.npy',
                     prefix='D13',
-                    use_tt=False,
-                    scholl_filter=True,
+                    use_tt=True,
+                    scholl_filter=False,
                     scholl_output=False,
                     filter_species = 'SALIX',
-                    object_split=True,
-                    data_gdf='3m_search_buf_50_per_crown.pkl',
+                    object_split=False,
+                    data_gdf='3m_search_0.5_crowns_ttops_clipped_to_plot.pkl.pkl',
                     crown_diameter_mult=0.5,
                     constant_diameter=1.5,
                     ttops_search_buffer=3,
                     ndvi_filter=0.5)
 
-    valid.save_orig_to_geotiff('451000_4432000', 'C:/Users/tonyt/Documents/Research/rendered_imgs/451000_4432000_mpsi_threshed_0.03.tif', thresh=0.03, mode='mpsi')
+    #valid.save_orig_to_geotiff('451000_4432000', 'C:/Users/tonyt/Documents/Research/rendered_imgs/451000_4432000_mpsi_threshed_0.03.tif', thresh=0.03, mode='mpsi')
 
-    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_all', 'all', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
-
-    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_object_split/test', 'test', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
-    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_object_split/train', 'train', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
-
-
-
-    # valid = Validator(file=VALID_FILE, 
-    #                 pca_dir=PCA_DIR, 
-    #                 site_name='NIWO',
-    #                 train_split=0.7,
-    #                 test_split=0.3, 
-    #                 valid_split=0,
-    #                 num_classes=NUM_CLASSES, 
-    #                 plot_file=PLOT_FILE, 
-    #                 tree_tops_dir=TREE_TOPS_DIR,
-    #                 curated=CURATED_FILE, 
-    #                 orig=ORIG_DIR, 
-    #                 prefix='D13',
-    #                 use_tt=False,
-    #                 scholl_filter=True,
-    #                 scholl_output=False,
-    #                 filter_species = 'SALIX',
-    #                 object_split=False,
-    #                 data_gdf='3m_search_buf_50_per_crown.pkl',
-    #                 crown_diameter_mult=0.5,
-    #                 constant_diameter=1.5,
-    #                 ttops_search_buffer=3,
-    #                 ndvi_filter=0.5)
-
-    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_plot_split/test', 'test', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
-    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/scholl/pca_plot_split/train', 'train', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
+    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/test', 'test', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow', 'rgb_z_max'])
+    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/train', 'train', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow', 'rgb_z_max'])
 
 
     print(valid.taxa)

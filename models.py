@@ -34,7 +34,8 @@ class SwaVModelUnified(pl.LightningModule):
                 positions=False,
                 emb_size=256,
                 augment_bright=False,
-                filters=[]):
+                filters=[],
+                patch_size=20):
         super().__init__()
         self.save_hyperparameters()
         self.features_dict = features_dict
@@ -52,11 +53,11 @@ class SwaVModelUnified(pl.LightningModule):
         if self.mode == 'default':
             self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes, n_head=8, n_layers=8, positions=positions)
         if self.mode == 'patch':
-            self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes, n_head=8, n_layers=8, patch_size=4, positions=positions, emb_size=emb_size)
+            self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes, n_head=8, n_layers=8, patch_size=patch_size, positions=positions, emb_size=emb_size)
         if self.mode == 'pixel_patch':
             self.swav = networks.SWaVUnifiedPerPixelPatch(self.num_channels, num_intermediate_classes)
         if self.mode== 'resnet':
-            self.swav = tv.models.segmentation.fcn_resnet50(pretrained_backbone=False, num_classes=4)
+            self.swav = networks.SWaVUnifiedResnet(3, num_classes=num_intermediate_classes, emb_size=emb_size)
         if self.mode == 'default':
             self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes*2),
                                          nn.BatchNorm1d(num_intermediate_classes*2),

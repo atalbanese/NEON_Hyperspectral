@@ -38,19 +38,23 @@ class RenderBlocks(Dataset):
                 nmf_dir: str,
                 save_dir: str,
                 validator: Validator,
-                key: str):
+                key: str,
+                filetype='npy'):
         self.block_size = block_size
         self.nmf_dir = nmf_dir
         self.save_dir = save_dir
         self.validator = validator
         self.key = key
+        self.filetype = filetype
         
-        self.nmf_files = [os.path.join(self.nmf_dir, f) for f in os.listdir(self.nmf_dir) if ".npy" in f]
+        self.nmf_files = [os.path.join(self.nmf_dir, f) for f in os.listdir(self.nmf_dir) if f".{filetype}" in f]
 
         def make_dict(file_list, param_1, param_2):
             return {f"{f.split('_')[param_1]}_{f.split('_')[param_2]}": f for f in file_list}
-
-        self.nmf_dict = make_dict(self.nmf_files, -4, -3)
+        if filetype == 'npy':
+            self.nmf_dict = make_dict(self.nmf_files, -4, -3)
+        elif filetype == "tif":
+            self.nmf_dict = make_dict(self.nmf_files, -3, -2)
         self.all_files = list(set(self.nmf_dict.keys()) - set(self.validator.valid_files.keys()))
 
     def __len__(self):
@@ -59,14 +63,28 @@ class RenderBlocks(Dataset):
     def __getitem__(self, ix):
         key = self.all_files[ix]
 
-        img = np.load(self.nmf_dict[key]).astype(np.float32)
+        if self.filetype == 'npy':
+            img = np.load(self.nmf_dict[key]).astype(np.float32)
+            img = rearrange(img, 'h w c -> c h w')
+            img = np.stack(np.split(img, self.block_size, axis=1))
+            img = np.split(img, self.block_size, axis=3)
+            img = np.concatenate(img)
 
-        img = rearrange(img, '(h b1) (w b2) c -> (b1 b2) c h w', h = self.block_size, w=self.block_size)
+           # img = rearrange(img, '(h b1) (w b2) c -> (b1 b2) c h w', h = self.block_size, w=self.block_size)
+        if self.filetype == 'tif':
+            img_reader = rs.open(self.nmf_dict[key])
+            img = img_reader.read()
+            img = np.stack(np.split(img, self.block_size, axis=1))
+            img = np.split(img, self.block_size, axis=3)
+            img = np.concatenate(img)
+            #img = rearrange(img, 'c (h b1) (w b2)  -> (b1 b2) c h w', h = self.block_size, w=self.block_size)
 
         
         #it = np.nditer(img, flags=['f_index'])
         for index, x in enumerate(img):
             nan_sum = (x != x).sum()
+            if key == 'rgb':
+                nan_sum = nan_sum + (x==0).sum()
             if nan_sum == 0:
                 save_name = f'{key}_{index}.pt'
                 nmf_tensor = torch.from_numpy(x)
@@ -85,8 +103,10 @@ class RenderedDataLoader(Dataset):
                 input_size = 20,
                 stats_loc='',
                 full_plots=False,
-                scaling=True):
+                scaling=True,
+                crop_size = 64):
         self.scaling = scaling
+        self.crop_size = crop_size
         self.full_plots = full_plots
         if full_plots:
             self.crop = tt.RandomCrop(input_size)
@@ -164,8 +184,8 @@ class RenderedDataLoader(Dataset):
         else:
             to_scale = to_return[list(self.features.keys())[0]]
         
-        if self.full_plots and to_scale.shape[2] != 20:
-            params = self.crop.get_params(to_scale, (20, 20))
+        if self.full_plots and to_scale.shape[2] != self.crop_size:
+            params = self.crop.get_params(to_scale, (self.crop_size, self.crop_size))
             for k, v in to_return.items():
                 to_return[k] = ttf.crop(v, *params)
 
@@ -184,7 +204,7 @@ if __name__ == "__main__":
 
     NUM_CLASSES = 12
     NUM_CHANNELS = 10
-    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_pca_filtered_ndvi'
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
     SHADOW_DIR ='C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
     RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
@@ -198,13 +218,15 @@ if __name__ == "__main__":
     SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
     ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training_ndvi_filter'
+    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training'
     INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo'
+    RGB_DIR = 'C:/Users/tonyt/Documents/Research/datasets/rgb/NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022'
 
     NMF_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked/'
 
     CHM_MEAN = 4.015508459469479
     CHM_STD =  4.809300736115787
+
 
 
     TREE_TOPS_DIR = 'C:/Users/tonyt/Documents/Research/datasets/lidar/niwo_point_cloud/valid_sites_ttops'
@@ -217,17 +239,18 @@ if __name__ == "__main__":
                     tree_tops_dir=TREE_TOPS_DIR,
                     curated=CURATED_FILE, 
                     orig=ORIG_DIR, 
+                    rgb_dir=RGB_DIR,
                     prefix='D13',
                     use_tt=True,
                     scholl_filter=False,
                     scholl_output=False,
                     filter_species = 'SALIX',
                     object_split=False,
-                    data_gdf='test_gdf.pkl')
+                    data_gdf='3m_search_0.5_crowns_ttops_clipped_to_plot.pkl.pkl')
 
-    #render = RenderDataLoader(PCA_DIR, CHM_DIR, AZM_DIR, SP_DIR, ICA_DIR, RAW_DIR, SHADOW_DIR, INDEX_DIR, 4.015508459469479, 4.809300736115787, 'raw_training', SAVE_DIR, validator=valid, patch_size=9)
-    render = RenderBlocks(20, PCA_DIR, SAVE_DIR, valid, 'pca')
-    # #
+    render = RenderBlocks(50, PCA_DIR, SAVE_DIR, valid, 'pca', filetype='npy')
+
+    # # #
     train_loader = DataLoader(render, batch_size=1, num_workers=8)
 
     for ix in tqdm(train_loader):

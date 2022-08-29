@@ -38,8 +38,8 @@ class RandomRectangleMask(torch.nn.Module):
             height = random.randint(0, upper_bound - j)
 
             arr = F.erase(arr, i, j, height, width, zeros)
-            if arr[:,:,middle, middle].sum() == 0:
-                arr[:,:,middle,middle] = 1
+            # if arr[:,:,middle, middle].sum() == 0:
+            #     arr[:,:,middle,middle] = 1
         return arr
 
 class RandomRectangleMaskEven(torch.nn.Module):
@@ -122,12 +122,13 @@ class Blit(torch.nn.Module):
     def __init__(self, p=.5):
         super().__init__()
         self.p = p
+        self.missing = 0
         #self.rng = np.random.default_rng()
     
     def forward(self, arr):
         if torch.rand(1) < self.p:
             mask = torch.randint_like(arr, 2)
-            arr = arr * mask
+            arr[mask == 0] = self.missing
         return arr
 
 class PatchBlock(torch.nn.Module):

@@ -166,6 +166,139 @@ class SWaVUnifiedPerPixelPatch(nn.Module):
         return scores
 
 
+class SWaVUnifiedResnet(nn.Module):
+    def __init__(self, 
+                in_channels,
+                num_classes, 
+                n_head = 8,
+                n_layers = 8,
+                emb_size=256, 
+                temp=0.1, 
+                epsilon=0.05,  
+                sinkhorn_iters=3,
+                patch_size=4,
+                positions=False):
+        super(SWaVUnifiedResnet, self).__init__()
+        
+        self.transforms_main = tr.Blit(p=1)
+        
+
+        #self.patches = Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size)
+        #self.use_positions = positions
+
+        #self.positions = nn.Parameter(torch.randn((64, emb_size)))
+
+
+        #self.embed = nn.Linear(in_channels * patch_size**2, emb_size)
+
+        #self.encoder = models.segmentation.fcn_resnet50(pretrained=False, num_classes=emb_size)
+        # self.encoder = models.resnet18(pretrained=False, num_classes=emb_size)
+        #self.encoder = net_gen.UnetGenerator(3, emb_size, 3)
+        self.encoder = net_gen.ResnetEncoder(3, 64, padding_type='zero')
+        
+
+        self.projector= nn.Sequential(nn.Conv2d(emb_size, emb_size, kernel_size=1),
+                                    nn.ReLU(),
+                                    nn.Conv2d(emb_size, emb_size, kernel_size=1),
+                                    nn.ReLU(),
+                                    nn.Conv2d(emb_size, emb_size, kernel_size=1),
+                                    nn.ReLU())
+
+        self.prototypes = nn.Conv2d(emb_size, num_classes, bias=False, kernel_size=3, padding=1)
+
+        self.softmax = nn.LogSoftmax(dim=1)
+        self.temp = temp
+        self.epsilon = epsilon
+        self.niters = sinkhorn_iters
+        self.ra = Rearrange('b c h w -> (b h w) c')
+
+
+    @torch.no_grad()
+    def norm_prototypes(self):
+        w = self.prototypes.weight.data.clone()
+        w = f.normalize(w, dim=1, p=2)
+        self.prototypes.weight.copy_(w)
+
+    @torch.no_grad()
+    def sinkhorn(self, scores):
+        Q = torch.exp(scores/self.epsilon).t()
+        B = Q.shape[1] 
+        K = Q.shape[0]
+
+        sum_Q = torch.sum(Q)
+        Q /= sum_Q
+
+        for it in range(self.niters):
+            # normalize each row: total weight per prototype must be 1/K
+            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+            Q /= sum_of_rows
+            Q /= K
+
+            # normalize each column: total weight per sample must be 1/B
+            Q /= torch.sum(Q, dim=0, keepdim=True)
+            Q /= B
+
+        Q *= B # the colomns must sum to 1 so that Q is an assignment
+        return Q.t()
+
+
+    # def forward_train(self, x, chm, azm):
+    def forward_train(self, x):
+
+        b = x.shape[0]
+
+        x_s = self.transforms_main(x)
+
+
+
+        inp = torch.cat((x, x_s))
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+
+
+        scores_t = scores[:b]
+        scores_s = scores[b:]
+
+        t = scores_t.detach()
+        s = scores_s.detach()
+
+        t = self.ra(t)
+        s = self.ra(s)
+
+        scores_t = self.ra(scores_t)
+        scores_s = self.ra(scores_s)
+
+        b = scores_t.shape[0]
+
+
+        q_t = self.sinkhorn(t)
+        q_s = self.sinkhorn(s)
+
+        p_t = self.softmax(scores_t/self.temp)
+        p_s = self.softmax(scores_s/self.temp)
+
+        loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
+
+        return loss
+    
+    def forward(self, inp):
+
+        # inp = self.patches(inp)
+       
+        # inp = self.embed(inp)
+        # if self.use_positions:
+        #     inp = inp + self.positions
+
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+        return scores
+
 
 class SWaVUnifiedPerPatch(nn.Module):
     def __init__(self, 
@@ -187,7 +320,7 @@ class SWaVUnifiedPerPatch(nn.Module):
         self.patches = Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size)
         self.use_positions = positions
 
-        self.positions = nn.Parameter(torch.randn((25, emb_size)))
+        self.positions = nn.Parameter(torch.randn((64, emb_size)))
 
 
         self.embed = nn.Linear(in_channels * patch_size**2, emb_size)
@@ -298,12 +431,12 @@ class SWaVUnifiedPerPatch(nn.Module):
             inp = inp + self.positions
 
         inp = self.encoder(inp)
-        # inp = self.projector(inp)
-        # inp = nn.functional.normalize(inp, dim=1, p=2)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
 
-        # scores = self.prototypes(inp)
-        # return scores
-        return inp
+        scores = self.prototypes(inp)
+        return scores
+
 
 
 class SWaVUnified(nn.Module):
