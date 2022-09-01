@@ -313,8 +313,14 @@ class SWaVUnifiedPerPatch(nn.Module):
                 patch_size=4,
                 positions=False):
         super(SWaVUnifiedPerPatch, self).__init__()
+
+        self.missing = nn.Parameter(torch.randn((1)))
         
-        self.transforms_main = tr.PatchBlock(p=1)
+        self.transforms_main = tt.Compose([
+                                        tr.Blit(self.missing, p=0.5),
+                                        tr.Block(self.missing, p=0.5),
+                                        tr.PatchBlock(self.missing, p=0.5)
+                                       ])
 
 
         self.patches = Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size)
@@ -423,6 +429,7 @@ class SWaVUnifiedPerPatch(nn.Module):
         return loss
     
     def forward(self, inp):
+        inp[inp != inp] = self.missing
 
         inp = self.patches(inp)
        

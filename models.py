@@ -34,8 +34,8 @@ class SwaVModelUnified(pl.LightningModule):
                 positions=False,
                 emb_size=256,
                 augment_bright=False,
-                filters=[],
-                patch_size=20):
+                filters={},
+                patch_size=4):
         super().__init__()
         self.save_hyperparameters()
         self.features_dict = features_dict
@@ -141,7 +141,7 @@ class SwaVModelUnified(pl.LightningModule):
     def pre_training_step(self, inp):
         inp = self.prep_data(inp)
         if self.mode != 'resnet':
-            inp[inp != inp] = self.swav.transforms_main.missing
+            inp[inp != inp] = self.swav.missing
         else:
             inp[inp != inp] = self.missing_data
 
@@ -160,15 +160,24 @@ class SwaVModelUnified(pl.LightningModule):
 
     def refine_step(self, inp, validating=False):
         targets = inp['targets']
-        mask = inp['mask']
-        for f in self.filters:
-            to_mask = mask[f]
-            #to_mask[to_mask != to_mask]
-            targets[to_mask] = -1
+        #mask = inp['mask']
+        filter_masks = []
+        for f, t in self.filters.items():
+            values = inp['mask'][f]
+            mask = values < t
+            filter_masks.append(mask)
+
         crop_coords = None
         if 'crop_coords' in inp.keys():
             crop_coords = inp['crop_coords']
         inp = self.prep_data(inp)
+
+        missing_mask = inp != inp
+        missing_mask = reduce(missing_mask, 'b c h w -> b h w', 'max')
+
+        if len(filter_masks) > 0:
+            for mask in filter_masks:
+                missing_mask = missing_mask + mask
 
 
 
@@ -190,7 +199,7 @@ class SwaVModelUnified(pl.LightningModule):
                 targets=TF.hflip(targets)
         
         if self.mode != 'resnet':
-            inp[inp != inp] = self.swav.transforms_main.missing
+            inp[inp != inp] = self.swav.missing
         else:
             inp[inp != inp] = self.missing_data
             
@@ -210,6 +219,7 @@ class SwaVModelUnified(pl.LightningModule):
         
         if crop_coords is None:
             targets = targets.to(torch.long)
+            targets[missing_mask] = -1
         else:
             targets=torch.argmax(targets, dim=1)
         loss = self.loss(inp, targets)

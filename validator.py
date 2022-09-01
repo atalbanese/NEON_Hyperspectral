@@ -1003,7 +1003,7 @@ if __name__ == "__main__":
                     site_name='NIWO',
                     train_split=0.7,
                     test_split=0.3, 
-                    valid_split=0,
+                    valid_split=0.1,
                     num_classes=NUM_CLASSES, 
                     plot_file=PLOT_FILE, 
                     tree_tops_dir=TREE_TOPS_DIR,
@@ -1025,8 +1025,8 @@ if __name__ == "__main__":
 
     #valid.save_orig_to_geotiff('451000_4432000', 'C:/Users/tonyt/Documents/Research/rendered_imgs/451000_4432000_mpsi_threshed_0.03.tif', thresh=0.03, mode='mpsi')
 
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/test', 'test', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow', 'rgb_z_max'])
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/train', 'train', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow', 'rgb_z_max'])
+    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/test', 'test', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
+    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/train', 'train', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
 
 
     print(valid.taxa)

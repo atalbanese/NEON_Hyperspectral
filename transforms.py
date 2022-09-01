@@ -119,10 +119,10 @@ class BlitDarken(torch.nn.Module):
 
 
 class Blit(torch.nn.Module):
-    def __init__(self, p=.5):
+    def __init__(self, missing, p=.5):
         super().__init__()
         self.p = p
-        self.missing = 0
+        self.missing = missing
         #self.rng = np.random.default_rng()
     
     def forward(self, arr):
@@ -132,10 +132,10 @@ class Blit(torch.nn.Module):
         return arr
 
 class PatchBlock(torch.nn.Module):
-    def __init__(self, p=0.5):
+    def __init__(self,missing, p=0.5):
         super().__init__()
         self.p = p
-        self.missing = torch.nn.Parameter(torch.randn(1))
+        self.missing = missing
         #self.rng = np.random.default_rng()
     
     def forward(self, arr):
@@ -152,9 +152,10 @@ class PatchBlock(torch.nn.Module):
 
 
 class Block(torch.nn.Module):
-    def __init__(self, p=.5):
+    def __init__(self, missing, p=.5):
         super().__init__()
         self.p = p
+        self.missing = missing
         #self.rng = np.random.default_rng()
     
     def forward(self, arr):
@@ -164,7 +165,7 @@ class Block(torch.nn.Module):
             mask = torch.ones_like(arr)
             mask[bounds.min():bounds.max()] = 0
 
-            arr = arr * mask
+            arr[mask == 0] = self.missing
         return arr
 
 if __name__ == '__main__':
