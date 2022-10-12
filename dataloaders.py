@@ -24,6 +24,7 @@ from validator import Validator
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from numpy.random import default_rng
+from PIL import Image
 
 import numpy.ma as ma
 import pickle
@@ -192,6 +193,27 @@ class RenderedDataLoader(Dataset):
         return to_return
     
 
+class SentinelDataLoader(Dataset):
+    def init(self,
+            base_dir):
+        self.base_dir = base_dir
+        self.all_folders = [f for f in os.listdir(base_dir) if '.json' not in f]
+        self.bands = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B09', 'B11', 'B12']
+    
+    def __len__(self):
+        return len(self.all_folders)
+    
+    def __getitem__(self, ix):
+        to_open = self.all_folders[ix]
+        opened = []
+        for b in self.bands:
+            im = Image.open(os.path.join(self.base_dir, to_open, b +'.tif'))
+            im = np.array(im)
+            opened.append(im)
+        
+        base_img = np.stack(opened)
+
+        return {'base_img': base_img}
 
 
 
