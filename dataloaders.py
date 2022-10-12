@@ -104,7 +104,7 @@ class RenderedDataLoader(Dataset):
                 stats_loc='',
                 full_plots=False,
                 scaling=True,
-                crop_size = 64):
+                crop_size = 128):
         self.scaling = scaling
         self.crop_size = crop_size
         self.full_plots = full_plots

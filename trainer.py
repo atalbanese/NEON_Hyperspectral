@@ -176,22 +176,28 @@ def unified_training(class_key,
         refiner.test(refine_model, dataloaders=test_loader, ckpt_path='best')
 
 
-def infer(ckpt, img_loc, stats_loc, block_size=100, patch_size=4):
+def infer(ckpt, img_loc, stats_loc, block_size=128, patch_size=16, stats_key='pca', img_size=8192):
     assert block_size % patch_size == 0, 'Block size must be divisible by patch_size'
-    img = np.load(img_loc).astype(np.float32)
-    img = rearrange(img, 'h w c -> c h w')
+    if ".npy" in img_loc:
+        img = np.load(img_loc).astype(np.float32)
+        img = rearrange(img, 'h w c -> c h w')
+    if ".tif" in img_loc:
+        img_reader = rs.open(img_loc)
+        img = img_reader.read().astype(np.float32)
+        img = img[..., 0:img_size, 0:img_size]
+        #img = torch.from_numpy(img)
 
     stats = torch.load(stats_loc)
     
     scaler = StandardScaler()
-    cur_stats = stats['pca']
+    cur_stats = stats[stats_key]
     scaler.scale_ = cur_stats['scale']
     scaler.mean_ = cur_stats['mean']
     scaler.var_ = cur_stats['var']
 
     img = rearrange(img, 'c h w -> (h w) c')
     img = scaler.transform(img)
-    img = rearrange(img, '(h w) c -> c h w', h=1000, w=1000)
+    img = rearrange(img, '(h w) c -> c h w', h=img_size, w=img_size)
     img = torch.from_numpy(img).float()
     
 
@@ -209,7 +215,7 @@ def infer(ckpt, img_loc, stats_loc, block_size=100, patch_size=4):
 
     out = rearrange(out, 'b (h w) c -> b c h w', h=block_size//patch_size, w=block_size//patch_size)
     # 2500 12 5 5
-    out = torch.split(out, 1000//block_size, dim=0)
+    out = torch.split(out, img_size//block_size, dim=0)
     out = torch.concat(out, dim=3)
     out = torch.split(out, 1, dim=0)
     out = torch.concat(out, dim=2)
@@ -232,296 +238,337 @@ def infer(ckpt, img_loc, stats_loc, block_size=100, patch_size=4):
 
 if __name__ == "__main__":
 
+    infer('ckpts/niwo_pre_train_rgb_3_rgb_swav_test_4epoch=9.ckpt', 
+    'C:/Users/tonyt/Documents/Research/datasets/rgb/NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022/2020_NIWO_4_451000_4432000_image.tif', 
+    'C:/Users/tonyt/Documents/Research/datasets/tensors/rgb_blocks/stats/stats.npy',
+    stats_key='rgb')
+#TODO: Filters causes problems with validation loss
+#8/9/10/11/12/13/14/15
+    # unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+    #                 base_lr=5e-5,
+    #                 refine_lr=5e-5,
+    #                 #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
+    #                 class_weights=None,
+    #                 features_dict={
+    #                     'rgb': 3
+    #                 },
+    #                 num_intermediate_classes = 4,
+    #                 pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rgb_blocks',
+    #                 train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/train',
+    #                 valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
+    #                 test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
+    #                 pre_training_epochs = 10,
+    #                 refine_epochs = 0,
+    #                 pre_train_batch_size = 256,
+    #                 refine_batch_size = 64,
+    #                 pre_train_workers = 4,
+    #                 refine_workers = 1,
+    #                 log_dir='final_logs/',
+    #                 pre_training=True,
+    #                 extra_labels='rgb_swav_test_4',
+    #                 swa=None,
+    #                 mode='patch',
+    #                 scheduler=True,
+    #                 initial_freeze=None,
+    #                 positions=False,
+    #                 emb_size=128,
+    #                 patch_size=16,
+    #                 scaling=True,
+    #                 full_plots=True,
+    #                 augment_bright=False,
+    #                 )
     
 
+# #0
+#     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+#                     base_lr=5e-5,
+#                     refine_lr=5e-5,
+#                     #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
+#                     class_weights=None,
+#                     features_dict={
+#                         'pca': 16
+#                     },
+#                     num_intermediate_classes = 256,
+#                     pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+#                     train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/train',
+#                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
+#                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
+#                     pre_training_epochs = 0,
+#                     refine_epochs = 150,
+#                     pre_train_batch_size = 1024,
+#                     refine_batch_size = 64,
+#                     pre_train_workers = 4,
+#                     refine_workers = 1,
+#                     log_dir='final_logs/',
+#                     pre_training=False,
+#                     extra_labels='refine_test_plot',
+#                     swa=None,
+#                     mode='patch',
+#                     scheduler=True,
+#                     initial_freeze=None,
+#                     positions=False,
+#                     emb_size=128,
+#                     patch_size=4,
+#                     scaling=True,
+#                     full_plots=False,
+#                     augment_bright=False,
+#                     )
 
-    unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-                    base_lr=5e-5,
-                    refine_lr=5e-5,
-                    #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
-                    class_weights=None,
-                    features_dict={
-                        'pca': 16
-                    },
-                    num_intermediate_classes = 256,
-                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/train',
-                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
-                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
-                    pre_training_epochs = 0,
-                    refine_epochs = 150,
-                    pre_train_batch_size = 1024,
-                    refine_batch_size = 64,
-                    pre_train_workers = 4,
-                    refine_workers = 1,
-                    log_dir='final_logs/',
-                    pre_training=False,
-                    extra_labels='refine_test_plot',
-                    swa=None,
-                    mode='patch',
-                    scheduler=True,
-                    initial_freeze=None,
-                    positions=False,
-                    emb_size=128,
-                    patch_size=4,
-                    scaling=True,
-                    full_plots=False,
-                    augment_bright=False,
-                    )
-
-    unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-                    base_lr=5e-5,
-                    refine_lr=5e-5,
-                    #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
-                    class_weights=None,
-                    features_dict={
-                        'pca': 16
-                    },
-                    num_intermediate_classes = 256,
-                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/train',
-                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
-                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
-                    pre_training_epochs = 0,
-                    refine_epochs = 150,
-                    pre_train_batch_size = 1024,
-                    refine_batch_size = 64,
-                    pre_train_workers = 4,
-                    refine_workers = 1,
-                    log_dir='final_logs/',
-                    pre_training=False,
-                    extra_labels='refine_test_object',
-                    swa=None,
-                    mode='patch',
-                    scheduler=True,
-                    initial_freeze=None,
-                    positions=False,
-                    emb_size=128,
-                    patch_size=4,
-                    scaling=True,
-                    full_plots=False,
-                    augment_bright=False,
-                    )
-    unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-                    base_lr=5e-5,
-                    refine_lr=5e-5,
-                    #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
-                    class_weights=None,
-                    features_dict={
-                        'pca': 16
-                    },
-                    num_intermediate_classes = 256,
-                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/train',
-                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
-                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
-                    pre_training_epochs = 0,
-                    refine_epochs = 150,
-                    pre_train_batch_size = 1024,
-                    refine_batch_size = 64,
-                    pre_train_workers = 4,
-                    refine_workers = 1,
-                    log_dir='final_logs/',
-                    pre_training=False,
-                    extra_labels='refine_test_plot_filters',
-                    swa=None,
-                    mode='patch',
-                    scheduler=True,
-                    initial_freeze=None,
-                    positions=False,
-                    emb_size=128,
-                    patch_size=4,
-                    scaling=True,
-                    full_plots=False,
-                    augment_bright=False,
-                    filters={
-            'shadow': 0.03,
-            'ndvi': 0.1,
-        }
-                    )
-
-    unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-                    base_lr=5e-5,
-                    refine_lr=5e-5,
-                    #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
-                    class_weights=None,
-                    features_dict={
-                        'pca': 16
-                    },
-                    num_intermediate_classes = 256,
-                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/train',
-                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
-                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
-                    pre_training_epochs = 0,
-                    refine_epochs = 150,
-                    pre_train_batch_size = 1024,
-                    refine_batch_size = 64,
-                    pre_train_workers = 4,
-                    refine_workers = 1,
-                    log_dir='final_logs/',
-                    pre_training=False,
-                    extra_labels='refine_test_object_filters',
-                    swa=None,
-                    mode='patch',
-                    scheduler=True,
-                    initial_freeze=None,
-                    positions=False,
-                    emb_size=128,
-                    patch_size=4,
-                    scaling=True,
-                    full_plots=False,
-                    augment_bright=False,
-                    filters={
-            'shadow': 0.03,
-            'ndvi': 0.1,
-        }
-                    )
-
-    unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-                    base_lr=5e-5,
-                    refine_lr=5e-5,
-                    #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
-                    class_weights=None,
-                    features_dict={
-                        'pca': 16
-                    },
-                    num_intermediate_classes = 256,
-                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/train',
-                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
-                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
-                    pre_training_epochs =15,
-                    refine_epochs = 150,
-                    pre_train_batch_size = 1024,
-                    refine_batch_size = 64,
-                    pre_train_workers = 4,
-                    refine_workers = 1,
-                    log_dir='final_logs/',
-                    pre_training=True,
-                    extra_labels='refine_test_plot_pre',
-                    swa=None,
-                    mode='patch',
-                    scheduler=True,
-                    initial_freeze=None,
-                    positions=False,
-                    emb_size=128,
-                    patch_size=4,
-                    scaling=True,
-                    full_plots=False,
-                    augment_bright=False,
+#     #1
+#     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+#                     base_lr=5e-5,
+#                     refine_lr=5e-5,
+#                     #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
+#                     class_weights=None,
+#                     features_dict={
+#                         'pca': 16
+#                     },
+#                     num_intermediate_classes = 256,
+#                     pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+#                     train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/train',
+#                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
+#                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
+#                     pre_training_epochs = 0,
+#                     refine_epochs = 150,
+#                     pre_train_batch_size = 1024,
+#                     refine_batch_size = 64,
+#                     pre_train_workers = 4,
+#                     refine_workers = 1,
+#                     log_dir='final_logs/',
+#                     pre_training=False,
+#                     extra_labels='refine_test_object',
+#                     swa=None,
+#                     mode='patch',
+#                     scheduler=True,
+#                     initial_freeze=None,
+#                     positions=False,
+#                     emb_size=128,
+#                     patch_size=4,
+#                     scaling=True,
+#                     full_plots=False,
+#                     augment_bright=False,
+#                     )
+#   #2
+#     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+#                     base_lr=5e-5,
+#                     refine_lr=5e-5,
+#                     #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
+#                     class_weights=None,
+#                     features_dict={
+#                         'pca': 16
+#                     },
+#                     num_intermediate_classes = 256,
+#                     pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+#                     train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/train',
+#                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
+#                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
+#                     pre_training_epochs = 0,
+#                     refine_epochs = 150,
+#                     pre_train_batch_size = 1024,
+#                     refine_batch_size = 64,
+#                     pre_train_workers = 4,
+#                     refine_workers = 1,
+#                     log_dir='final_logs/',
+#                     pre_training=False,
+#                     extra_labels='refine_test_plot_filters',
+#                     swa=None,
+#                     mode='patch',
+#                     scheduler=True,
+#                     initial_freeze=None,
+#                     positions=False,
+#                     emb_size=128,
+#                     patch_size=4,
+#                     scaling=True,
+#                     full_plots=False,
+#                     augment_bright=False,
+#                     filters={
+#             'shadow': 0.03,
+#             'ndvi': 0.1,
+#         }
+#                     )
+# #3
+#     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+#                     base_lr=5e-5,
+#                     refine_lr=5e-5,
+#                     #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
+#                     class_weights=None,
+#                     features_dict={
+#                         'pca': 16
+#                     },
+#                     num_intermediate_classes = 256,
+#                     pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+#                     train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/train',
+#                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
+#                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
+#                     pre_training_epochs = 0,
+#                     refine_epochs = 150,
+#                     pre_train_batch_size = 1024,
+#                     refine_batch_size = 64,
+#                     pre_train_workers = 4,
+#                     refine_workers = 1,
+#                     log_dir='final_logs/',
+#                     pre_training=False,
+#                     extra_labels='refine_test_object_filters',
+#                     swa=None,
+#                     mode='patch',
+#                     scheduler=True,
+#                     initial_freeze=None,
+#                     positions=False,
+#                     emb_size=128,
+#                     patch_size=4,
+#                     scaling=True,
+#                     full_plots=False,
+#                     augment_bright=False,
+#                     filters={
+#             'shadow': 0.03,
+#             'ndvi': 0.1,
+#         }
+#                     )
+# #4
+#     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+#                     base_lr=5e-5,
+#                     refine_lr=5e-5,
+#                     #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
+#                     class_weights=None,
+#                     features_dict={
+#                         'pca': 16
+#                     },
+#                     num_intermediate_classes = 256,
+#                     pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+#                     train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/train',
+#                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
+#                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
+#                     pre_training_epochs =15,
+#                     refine_epochs = 150,
+#                     pre_train_batch_size = 1024,
+#                     refine_batch_size = 64,
+#                     pre_train_workers = 4,
+#                     refine_workers = 1,
+#                     log_dir='final_logs/',
+#                     pre_training=True,
+#                     extra_labels='refine_test_plot_pre',
+#                     swa=None,
+#                     mode='patch',
+#                     scheduler=True,
+#                     initial_freeze=None,
+#                     positions=False,
+#                     emb_size=128,
+#                     patch_size=4,
+#                     scaling=True,
+#                     full_plots=False,
+#                     augment_bright=False,
                     
-                    )
-
-    unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-                    base_lr=5e-5,
-                    refine_lr=5e-5,
-                    #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
-                    class_weights=None,
-                    features_dict={
-                        'pca': 16
-                    },
-                    num_intermediate_classes = 256,
-                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/train',
-                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
-                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
-                    pre_training_epochs = 15,
-                    refine_epochs = 150,
-                    pre_train_batch_size = 1024,
-                    refine_batch_size = 64,
-                    pre_train_workers = 4,
-                    refine_workers = 1,
-                    log_dir='final_logs/',
-                    pre_training=True,
-                    extra_labels='refine_test_object_pre',
-                    swa=None,
-                    mode='patch',
-                    scheduler=True,
-                    initial_freeze=None,
-                    positions=False,
-                    emb_size=128,
-                    patch_size=4,
-                    scaling=True,
-                    full_plots=False,
-                    augment_bright=False,
-                    )
-
-    unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-                    base_lr=5e-5,
-                    refine_lr=5e-5,
-                    #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
-                    class_weights=None,
-                    features_dict={
-                        'pca': 16
-                    },
-                    num_intermediate_classes = 256,
-                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/train',
-                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
-                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
-                    pre_training_epochs =15,
-                    refine_epochs = 150,
-                    pre_train_batch_size = 1024,
-                    refine_batch_size = 64,
-                    pre_train_workers = 4,
-                    refine_workers = 1,
-                    log_dir='final_logs/',
-                    pre_training=True,
-                    extra_labels='refine_test_plot_pre_filters',
-                    swa=None,
-                    mode='patch',
-                    scheduler=True,
-                    initial_freeze=None,
-                    positions=False,
-                    emb_size=128,
-                    patch_size=4,
-                    scaling=True,
-                    full_plots=False,
-                    augment_bright=False,
-                    filters={
-            'shadow': 0.03,
-            'ndvi': 0.1,
-        }
-                    )
-
-    unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
-                    base_lr=5e-5,
-                    refine_lr=5e-5,
-                    #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
-                    class_weights=None,
-                    features_dict={
-                        'pca': 16
-                    },
-                    num_intermediate_classes = 256,
-                    pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
-                    train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/train',
-                    valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
-                    test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
-                    pre_training_epochs = 15,
-                    refine_epochs = 150,
-                    pre_train_batch_size = 1024,
-                    refine_batch_size = 64,
-                    pre_train_workers = 4,
-                    refine_workers = 1,
-                    log_dir='final_logs/',
-                    pre_training=True,
-                    extra_labels='refine_test_object_pre_filters',
-                    swa=None,
-                    mode='patch',
-                    scheduler=True,
-                    initial_freeze=None,
-                    positions=False,
-                    emb_size=128,
-                    patch_size=4,
-                    scaling=True,
-                    full_plots=False,
-                    augment_bright=False,
-                    filters={
-            'shadow': 0.03,
-            'ndvi': 0.1,
-        }
-                    )
+#                     )
+# #5
+#     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+#                     base_lr=5e-5,
+#                     refine_lr=5e-5,
+#                     #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
+#                     class_weights=None,
+#                     features_dict={
+#                         'pca': 16
+#                     },
+#                     num_intermediate_classes = 256,
+#                     pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+#                     train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/train',
+#                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
+#                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
+#                     pre_training_epochs = 15,
+#                     refine_epochs = 150,
+#                     pre_train_batch_size = 1024,
+#                     refine_batch_size = 64,
+#                     pre_train_workers = 4,
+#                     refine_workers = 1,
+#                     log_dir='final_logs/',
+#                     pre_training=True,
+#                     extra_labels='refine_test_object_pre',
+#                     swa=None,
+#                     mode='patch',
+#                     scheduler=True,
+#                     initial_freeze=None,
+#                     positions=False,
+#                     emb_size=128,
+#                     patch_size=4,
+#                     scaling=True,
+#                     full_plots=False,
+#                     augment_bright=False,
+#                     )
+# #6
+#     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+#                     base_lr=5e-5,
+#                     refine_lr=5e-5,
+#                     #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
+#                     class_weights=None,
+#                     features_dict={
+#                         'pca': 16
+#                     },
+#                     num_intermediate_classes = 256,
+#                     pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+#                     train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/train',
+#                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
+#                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_plot_split/test',
+#                     pre_training_epochs =15,
+#                     refine_epochs = 150,
+#                     pre_train_batch_size = 1024,
+#                     refine_batch_size = 64,
+#                     pre_train_workers = 4,
+#                     refine_workers = 1,
+#                     log_dir='final_logs/',
+#                     pre_training=True,
+#                     extra_labels='refine_test_plot_pre_filters',
+#                     swa=None,
+#                     mode='patch',
+#                     scheduler=True,
+#                     initial_freeze=None,
+#                     positions=False,
+#                     emb_size=128,
+#                     patch_size=4,
+#                     scaling=True,
+#                     full_plots=False,
+#                     augment_bright=False,
+#                     filters={
+#             'shadow': 0.03,
+#             'ndvi': 0.1,
+#         }
+#                     )
+# #7
+#     unified_training(class_key={'PIEN': 0, 'ABLAL': 1, 'PIFL2': 2, 'PICOL': 3},
+#                     base_lr=5e-5,
+#                     refine_lr=5e-5,
+#                     #class_weights=[1.61428571, 0.60752688, 0.7739726,  2.26],
+#                     class_weights=None,
+#                     features_dict={
+#                         'pca': 16
+#                     },
+#                     num_intermediate_classes = 256,
+#                     pre_train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training',
+#                     train_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/train',
+#                     valid_folder = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
+#                     test_folder  = 'C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/pca_object_split/test',
+#                     pre_training_epochs = 15,
+#                     refine_epochs = 150,
+#                     pre_train_batch_size = 1024,
+#                     refine_batch_size = 64,
+#                     pre_train_workers = 4,
+#                     refine_workers = 1,
+#                     log_dir='final_logs/',
+#                     pre_training=True,
+#                     extra_labels='refine_test_object_pre_filters',
+#                     swa=None,
+#                     mode='patch',
+#                     scheduler=True,
+#                     initial_freeze=None,
+#                     positions=False,
+#                     emb_size=128,
+#                     patch_size=4,
+#                     scaling=True,
+#                     full_plots=False,
+#                     augment_bright=False,
+#                     filters={
+#             'shadow': 0.03,
+#             'ndvi': 0.1,
+#         }
+#                     )
     
     
 

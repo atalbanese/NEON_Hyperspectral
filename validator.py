@@ -799,8 +799,9 @@ class Validator():
 
             for tx in df.taxonID.unique():
                 cur = df.loc[df.taxonID == tx]
-                area= cur.area.sum()
-                pc[df.iloc[0]['plotID']][tx] = area
+                #area= cur.area.sum()
+                #pc[df.iloc[0]['plotID']][tx] = area
+                pc[df.iloc[0]['plotID']][tx] = len(cur)
 
 
 
@@ -1025,8 +1026,8 @@ if __name__ == "__main__":
 
     #valid.save_orig_to_geotiff('451000_4432000', 'C:/Users/tonyt/Documents/Research/rendered_imgs/451000_4432000_mpsi_threshed_0.03.tif', thresh=0.03, mode='mpsi')
 
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/test', 'test', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
-    valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/train', 'train', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/test', 'test', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/train', 'train', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
 
 
     print(valid.taxa)
