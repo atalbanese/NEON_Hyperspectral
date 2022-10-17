@@ -233,7 +233,38 @@ def infer(ckpt, img_loc, stats_loc, block_size=128, patch_size=16, stats_key='pc
 
 
 
-
+def sentinel_training(class_key,
+                    base_lr,
+                    refine_lr,
+                    class_weights,
+                    features_dict,
+                    num_intermediate_classes,
+                    train_folder,
+                    test_folder,
+                    pre_training_epochs,
+                    refine_epochs,
+                    pre_train_batch_size,
+                    refine_batch_size,
+                    pre_train_workers,
+                    refine_workers,
+                    log_dir,
+                    swa=False,
+                    extra_labels="",
+                    pre_training=True,
+                    mode='default',
+                    augment_refine=False,
+                    scheduler=True, 
+                    initial_freeze=None,
+                    positions=False,
+                    input_size=40,
+                    patch_size=10,
+                    full_plots=False,
+                    acc_grad=1,
+                    emb_size=256,
+                    scaling=True,
+                    augment_bright=False,
+                    filters={}):
+    return None
 
 
 if __name__ == "__main__":

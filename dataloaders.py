@@ -194,9 +194,11 @@ class RenderedDataLoader(Dataset):
     
 
 class SentinelDataLoader(Dataset):
-    def init(self,
-            base_dir):
+    def __init__(self,
+            base_dir,
+            target_dir):
         self.base_dir = base_dir
+        self.target_dir = target_dir
         self.all_folders = [f for f in os.listdir(base_dir) if '.json' not in f]
         self.bands = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B09', 'B11', 'B12']
     
@@ -205,15 +207,25 @@ class SentinelDataLoader(Dataset):
     
     def __getitem__(self, ix):
         to_open = self.all_folders[ix]
+        target_folder = os.path.join(self.target_dir, 'ref_agrifieldnet_competition_v1_labels_train_' + to_open.split('_')[-1])
         opened = []
         for b in self.bands:
             im = Image.open(os.path.join(self.base_dir, to_open, b +'.tif'))
             im = np.array(im)
             opened.append(im)
         
-        base_img = np.stack(opened)
+        base_img = np.stack(opened)/10000
+        base_img = base_img.astype(np.float32)
 
-        return {'base_img': base_img}
+        field_img = Image.open(os.path.join(target_folder, 'field_ids.tif'))
+        field_img = np.array(field_img)
+
+        targets = Image.open(os.path.join(target_folder, 'raster_labels.tif'))
+        targets = np.array(targets)
+
+        return {'base_img': base_img,
+                'field_ids': field_img,
+                'targets': targets}
 
 
 
@@ -222,63 +234,67 @@ class SentinelDataLoader(Dataset):
 if __name__ == "__main__":
 
 
-    
+    BASE_DIR = r'C:\Users\tonyt\Documents\agrifield\ref_agrifieldnet_competition_v1_source'
+    TARGET_DIR = r'C:\Users\tonyt\Documents\agrifield\train\ref_agrifieldnet_competition_v1_labels_train'
 
-    NUM_CLASSES = 12
-    NUM_CHANNELS = 10
-    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked'
-    ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
-    SHADOW_DIR ='C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
-    RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
+    test = SentinelDataLoader(BASE_DIR, TARGET_DIR)
+    print(test.__getitem__(69))
+
+    # NUM_CLASSES = 12
+    # NUM_CHANNELS = 10
+    # PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked'
+    # ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
+    # SHADOW_DIR ='C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
+    # RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
    
-    VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
-    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct.csv"
-    PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
+    # VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
+    # CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct.csv"
+    # PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
 
-    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo/'
-    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
-    SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
+    # CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo/'
+    # AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
+    # SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo'
 
-    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
-    SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training'
-    INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo'
-    RGB_DIR = 'C:/Users/tonyt/Documents/Research/datasets/rgb/NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022'
+    # ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
+    # SAVE_DIR = 'C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_blocks/raw_training'
+    # INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo'
+    # RGB_DIR = 'C:/Users/tonyt/Documents/Research/datasets/rgb/NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022'
 
-    NMF_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked/'
+    # NMF_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked/'
 
-    CHM_MEAN = 4.015508459469479
-    CHM_STD =  4.809300736115787
+    # CHM_MEAN = 4.015508459469479
+    # CHM_STD =  4.809300736115787
 
 
 
-    TREE_TOPS_DIR = 'C:/Users/tonyt/Documents/Research/datasets/lidar/niwo_point_cloud/valid_sites_ttops'
+    # TREE_TOPS_DIR = 'C:/Users/tonyt/Documents/Research/datasets/lidar/niwo_point_cloud/valid_sites_ttops'
 
-    valid = Validator(file=VALID_FILE, 
-                    pca_dir=PCA_DIR, 
-                    site_name='NIWO', 
-                    num_classes=NUM_CLASSES, 
-                    plot_file=PLOT_FILE, 
-                    tree_tops_dir=TREE_TOPS_DIR,
-                    curated=CURATED_FILE, 
-                    orig=ORIG_DIR, 
-                    rgb_dir=RGB_DIR,
-                    prefix='D13',
-                    use_tt=True,
-                    scholl_filter=False,
-                    scholl_output=False,
-                    filter_species = 'SALIX',
-                    object_split=False,
-                    data_gdf='3m_search_0.5_crowns_ttops_clipped_to_plot.pkl.pkl')
+    # valid = Validator(file=VALID_FILE, 
+    #                 pca_dir=PCA_DIR, 
+    #                 site_name='NIWO', 
+    #                 num_classes=NUM_CLASSES, 
+    #                 plot_file=PLOT_FILE, 
+    #                 tree_tops_dir=TREE_TOPS_DIR,
+    #                 curated=CURATED_FILE, 
+    #                 orig=ORIG_DIR, 
+    #                 rgb_dir=RGB_DIR,
+    #                 prefix='D13',
+    #                 use_tt=True,
+    #                 scholl_filter=False,
+    #                 scholl_output=False,
+    #                 filter_species = 'SALIX',
+    #                 object_split=False,
+    #                 data_gdf='3m_search_0.5_crowns_ttops_clipped_to_plot.pkl.pkl')
 
-    render = RenderBlocks(50, PCA_DIR, SAVE_DIR, valid, 'pca', filetype='npy')
+    # render = RenderBlocks(50, PCA_DIR, SAVE_DIR, valid, 'pca', filetype='npy')
 
-    # # #
-    train_loader = DataLoader(render, batch_size=1, num_workers=8)
+    # # # #
+    # train_loader = DataLoader(render, batch_size=1, num_workers=8)
 
-    for ix in tqdm(train_loader):
-        1+1
+    # for ix in tqdm(train_loader):
+    #     1+1
 
-    rendered = RenderedDataLoader(SAVE_DIR, {'pca': 16}, input_size=20)
-    for ix in tqdm(rendered):
-        1+1
-    rendered.save_stats()
+    # rendered = RenderedDataLoader(SAVE_DIR, {'pca': 16}, input_size=20)
+    # for ix in tqdm(rendered):
+    #     1+1
+    # rendered.save_stats()
