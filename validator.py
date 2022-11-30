@@ -1,18 +1,12 @@
 from sklearn.preprocessing import StandardScaler
-from select import select
-import tempfile
-from typing_extensions import Self
-from imageio import save
-from matplotlib.widgets import Slider
+import skimage.segmentation as skseg 
+
 import geopandas as gpd
-from rasterio.plot import show
+
 import rasterio as rs
 from rasterio.transform import from_origin
 import rasterio.features as rf
-from rasterio.crs import CRS
-import torchvision.transforms.functional as TF
 import torch
-from itertools import chain
 import pickle
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -21,18 +15,13 @@ import h5_helper as hp
 import os
 import utils
 from skimage import exposure
-from scipy.stats import linregress
-from skimage.segmentation import mark_boundaries
+
 from einops import rearrange
-from sklearn.decomposition import PCA, IncrementalPCA
-import torchvision.transforms as tt
 import sklearn.model_selection as ms
 import sklearn.utils.class_weight as cw
 from shapely.geometry import Polygon
-import math
 from rasterio.transform import from_origin
-from rasterio.mask import mask as msk 
-import rasterio.features as rf
+
 
 
 #TODO: Clean this mess up
@@ -86,6 +75,10 @@ class Validator():
                                 'PIFL2': 'Limber Pine',
                                 'ABLAL': 'Subalpine Fir',
                                 'PIEN': 'Engelmann Spruce'}
+        self.species_colors = {'PICOL': '#e41a1c',
+                                'PIFL2': '#377eb8',
+                                'ABLAL': '#4daf4a',
+                                'PIEN': '#984ea3'}
         
 
         self.orig_files = [os.path.join(kwargs['orig'], file) for file in os.listdir(kwargs['orig']) if ".h5" in file]
@@ -129,59 +122,216 @@ class Validator():
             self.test = self.data_gdf.loc[self.data_gdf.plotID.isin(list(self.test_plots.index))]
         self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=self.train['taxonID'])
 
-    def make_spectrographs(self, title, gdf_type):
-        taxa = self.taxa.keys()
-        stored_stats = {t: [np.zeros((416,), dtype=np.float32), 0] for t in taxa}
-        for k, v in self.valid_files.items():
-           
-            scene = hp.pre_processing(self.orig_dict[k], get_all=True)
-            bands = scene['meta']['spectral_bands'][5:-5]
-            scene = scene["bands"][:,:,5:-5]
-            if self.ndvi_filter is not None:
-                ndvi = hp.pre_processing(os.path.join(self.orig_dict[k]), utils.get_bareness_bands())["bands"]
-                ndvi = utils.get_ndvi(ndvi)
-                ndvi_mask = ndvi > self.ndvi_filter
 
-            west = int(k.split('_')[0])
-            north = int(k.split('_')[1]) + 1000
-            affine = from_origin(west, north, 1, 1)
+    def make_spectrographs(self, filters={}, scale='Tree', save_dir=None):
+        grouped_files = self.data_gdf.groupby(['plotID'])
+        grouped_files.apply(self._per_plot_spectro, self, filters, scale, save_dir)
 
-            for taxon in taxa:
-                if gdf_type == 'all':
-                    tmp_gdf = self.data_gdf.loc[(self.data_gdf['taxonID'] == taxon) & (self.data_gdf['file_coords'] == k)]
-                if gdf_type == 'train':
-                    tmp_gdf = self.train.loc[(self.data_gdf['taxonID'] == taxon) & (self.data_gdf['file_coords'] == k)]
-                if len(tmp_gdf) > 0:
+    @staticmethod
+    def _per_plot_spectro(df, vd, filters, scale, save_dir):
+
+        # Takes a dataframe with a single plot id and plots the spectra of all contained trees
+
+        #Holders for legend handles and labels, lets us make a cleaner legend
+        handles = []
+        labels = []
+        
+        key = df.iloc[0]['file_coords']
+
+        west = int(key.split('_')[0])
+        north = int(key.split('_')[1]) + 1000
+        meter_affine = from_origin(west, north, 1, 1)
+        decimeter_affine = from_origin(west, north, .1, .1)
+
+        scene = hp.pre_processing(os.path.join(vd.orig_dict[key]), get_all=True)
+
+        tru_color = hp.pre_processing(os.path.join(vd.orig_dict[key]), utils.get_viz_bands())
+        tru_color = utils.make_rgb(tru_color['bands'])
+        tru_color = exposure.adjust_gamma(tru_color, 0.5)
+
+        rgb = rs.open(vd.rgb_dict[key])
+        big_img = rgb.read()
+        big_img = rearrange(big_img, 'c h w -> h w c')/255.0
+              
+        row = df.iloc[0]
+        x_min = row['easting_plot'] - (row['plotSize']**(1/2)/2)
+        x_max = row['easting_plot'] + (row['plotSize']**(1/2)/2)
+
+        y_min = row['northing_plot'] - (row['plotSize']**(1/2)/2)
+        y_max = row['northing_plot'] + (row['plotSize']**(1/2)/2)
+        
+
+        x = [x_min, x_max, x_max, x_min, x_min]
+        y = [y_max, y_max, y_min, y_min, y_max]
+        points = list(zip(x, y))
+        s = gpd.GeoSeries([Polygon(points)], crs='EPSG:32613')
+
+
+        open_ttops = gpd.read_file(vd.tree_tops_dict[key])
+
+        open_ttops = open_ttops.clip(s)
+        
+
+        x_min, x_max, y_min, y_max = row.x_min, row.x_max, row.y_min, row.y_max
+
+        xs = [r.geometry.x - west - x_min for _,r in open_ttops.iterrows()]
+        ys = [(1000 - (r.geometry.y - (north - 1000)))-y_min for _,r in open_ttops.iterrows()]
+
+        big_xs = [(r.geometry.x - west - x_min)*10 for _,r in open_ttops.iterrows()]
+        big_ys = [((1000 - (r.geometry.y - (north - 1000)))-y_min)*10 for _,r in open_ttops.iterrows()]
+        big_ticks = np.arange(5, 400, 10)
+
+        tc = tru_color[y_min:y_max,x_min:x_max,...]
+
+        big_rgb = big_img[y_min*10:y_max*10,x_min*10:x_max*10,...]
+
+        bands = scene['meta']['spectral_bands'][5:-5]
+        loaded_img = vd.process_hs_errors(scene["bands"][:,:,5:-5])
+
+        plotID = df.iloc[0]['plotID']
+
+        if 'ndvi' in filters:
+            ndvi = hp.pre_processing(os.path.join(vd.orig_dict[key]), utils.get_bareness_bands())["bands"]
+            
+            ndvi = utils.get_ndvi(ndvi)
+       
+            ndvi_mask = ndvi < filters['ndvi']
+            loaded_img[ndvi_mask] = np.nan
+        
+        if 'shadow' in filters:
+            shadow = hp.pre_processing(os.path.join(vd.orig_dict[key]), utils.get_shadow_bands())["bands"]
+            
+            shadow = utils.han_2018(shadow)
+            shadow_mask = shadow < filters['shadow']
+            loaded_img[shadow_mask] = np.nan
+
+        if scale == 'Plot':
+            fig, ax = plt.subplots()
+
+        for ix, row in df.iterrows():
+            tree_poly = row.geometry
+            tree_id = vd.species_lookup[row.taxonID]
+            tree_color = vd.species_colors[row.taxonID]
+            
+            
+            big_tree_alpha, big_tree_mask = make_tree_mask(tree_poly, decimeter_affine, (y_min,y_max,x_min,x_max), 10, 1.0, 0.5, all_touched=False)
+            tree_alpha, tree_mask = make_tree_mask(tree_poly, meter_affine, (y_min,y_max,x_min,x_max), 1, 2.5, 1.0, all_touched=False)
+
+            tree_data = loaded_img[tree_mask]
+            if scale == 'Tree':
+                fig, ax = plt.subplots(2, 2, figsize=(10,10))
+                ax=np.ravel(ax)
+                for pix in tree_data:
+                    ax[0].plot(bands, pix)
+                    per_change = np.diff(pix) / pix[1:]
+                    ax[1].plot(bands[1:], per_change)
+                    ax[1].set_ylim((-1,1))
                     
-                    mask = rf.geometry_mask(tmp_gdf.geometry, (1000,1000), affine, invert=True)
-                    if self.ndvi_filter is not None:
-                        mask = mask + ndvi_mask
-                    selected_data = scene[mask]
-                    to_add = np.nansum(selected_data, axis=0)
-                    stored_stats[taxon][0] += to_add
-                    stored_stats[taxon][1] += selected_data.shape[0]
-                    #print('here')
-        calced_stats = {}
-        for k, v in stored_stats.items():
-            sums = v[0]
-            count = v[1]
+                ax[2].imshow(tc*tree_alpha)
+                ax[2].scatter(xs, ys)
+                ax[3].imshow(big_rgb*big_tree_alpha)
+                ax[3].scatter(big_xs, big_ys)
+                ax[3].set_xticks(big_ticks)
+                ax[3].set_yticks(big_ticks)
+                ax[3].grid()
+                plt.suptitle(tree_id + ' - ' + plotID)
+                if save_dir is not None:
+                    plt.savefig(os.path.join(save_dir, f'{plotID}_{tree_id}{ix}.png'))
+                plt.tight_layout()
+                plt.show()
 
-            mean = sums/count
-            calced_stats[k] = mean
-            plt.plot(bands, mean, label=self.species_lookup[k])
-            #plt.title(k)
-        class_weights_list = []
-        for k, v in stored_stats.items():
-            to_add = [k] * v[1]
-            class_weights_list = class_weights_list + to_add
-        self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=class_weights_list)
-        print(self.class_weights)
-        plt.legend()
-        plt.title(title)
-        plt.xlabel('Wavelength (nm)', fontsize='large')
-        plt.ylabel('Mean Reflectance', fontsize='large')
-        plt.show()
-        # print('here')
+            if scale == 'Plot':
+
+                pixel_mean = np.mean(tree_data, axis=0)
+
+                per_change = np.diff(pixel_mean) / pixel_mean[1:]
+                #ax.plot(bands[1:], per_change, label=tree_id, color=tree_color)
+                ax.plot(bands, pixel_mean, label=tree_id, color=tree_color)
+
+                cur_handles, cur_labels = ax.get_legend_handles_labels()
+                for h, l in zip(cur_handles, cur_labels):
+                    if l not in labels:
+                        labels.append(l)
+                        handles.append(h)
+
+
+        if scale == 'Plot':
+        #ax.set_ylim(-1, 1)
+            plt.legend(handles, labels)
+            if save_dir is not None:
+                    plt.savefig(os.path.join(save_dir, f'{plotID}.png'))
+            plt.show()
+
+
+        return None
+
+    
+    @staticmethod
+    def process_hs_errors(hs_file):
+        bad_mask = np.zeros((1000,1000), dtype=bool)
+        for i in range(0, hs_file.shape[-1]):
+            z = hs_file[:,:,i]
+            y = z>1
+            bad_mask += y
+        hs_file[bad_mask] = np.nan
+
+        return hs_file
+
+
+
+    # def make_spectrographs(self, title, gdf_type):
+    #     taxa = self.taxa.keys()
+    #     stored_stats = {t: [np.zeros((416,), dtype=np.float32), 0] for t in taxa}
+    #     for k, v in self.valid_files.items():
+           
+    #         scene = hp.pre_processing(self.orig_dict[k], get_all=True)
+    #         bands = scene['meta']['spectral_bands'][5:-5]
+    #         scene = scene["bands"][:,:,5:-5]
+    #         if self.ndvi_filter is not None:
+    #             ndvi = hp.pre_processing(os.path.join(self.orig_dict[k]), utils.get_bareness_bands())["bands"]
+    #             ndvi = utils.get_ndvi(ndvi)
+    #             ndvi_mask = ndvi > self.ndvi_filter
+
+    #         west = int(k.split('_')[0])
+    #         north = int(k.split('_')[1]) + 1000
+    #         affine = from_origin(west, north, 1, 1)
+
+    #         for taxon in taxa:
+    #             if gdf_type == 'all':
+    #                 tmp_gdf = self.data_gdf.loc[(self.data_gdf['taxonID'] == taxon) & (self.data_gdf['file_coords'] == k)]
+    #             if gdf_type == 'train':
+    #                 tmp_gdf = self.train.loc[(self.data_gdf['taxonID'] == taxon) & (self.data_gdf['file_coords'] == k)]
+    #             if len(tmp_gdf) > 0:
+                    
+    #                 mask = rf.geometry_mask(tmp_gdf.geometry, (1000,1000), affine, invert=True)
+    #                 if self.ndvi_filter is not None:
+    #                     mask = mask + ndvi_mask
+    #                 selected_data = scene[mask]
+    #                 to_add = np.nansum(selected_data, axis=0)
+    #                 stored_stats[taxon][0] += to_add
+    #                 stored_stats[taxon][1] += selected_data.shape[0]
+    #                 #print('here')
+    #     calced_stats = {}
+    #     for k, v in stored_stats.items():
+    #         sums = v[0]
+    #         count = v[1]
+
+    #         mean = sums/count
+    #         calced_stats[k] = mean
+    #         plt.plot(bands, mean, label=self.species_lookup[k])
+    #         #plt.title(k)
+    #     class_weights_list = []
+    #     for k, v in stored_stats.items():
+    #         to_add = [k] * v[1]
+    #         class_weights_list = class_weights_list + to_add
+    #     self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=class_weights_list)
+    #     print(self.class_weights)
+    #     plt.legend()
+    #     plt.title(title)
+    #     plt.xlabel('Wavelength (nm)', fontsize='large')
+    #     plt.ylabel('Mean Reflectance', fontsize='large')
+    #     plt.show()
+    #     # print('here')
 
 
     def save_orig_to_geotiff(self, key, save_loc, thresh=None, mode='rgb'):
@@ -971,7 +1121,17 @@ class Validator():
 
 
 
+##HELPER FUNCTIONS
 
+
+
+def make_tree_mask(polygon, transform, slice_params, scale, upper, lower, all_touched=False):
+    mask = rf.geometry_mask([polygon], [1000*scale, 1000*scale], transform=transform, all_touched=all_touched, invert=True)
+    ym, yma, xm, xma = slice_params
+    cropped_mask = mask[ym*scale:yma*scale, xm*scale:xma*scale, ...]
+    cropped_mask = cropped_mask * upper
+    cropped_mask[cropped_mask == 0] = lower
+    return cropped_mask[...,np.newaxis], mask
         
 
     
@@ -1003,7 +1163,7 @@ if __name__ == "__main__":
                     pca_dir=PCA_DIR, 
                     site_name='NIWO',
                     train_split=0.7,
-                    test_split=0.3, 
+                    test_split=0.2, 
                     valid_split=0.1,
                     num_classes=NUM_CLASSES, 
                     plot_file=PLOT_FILE, 
@@ -1017,12 +1177,15 @@ if __name__ == "__main__":
                     scholl_filter=False,
                     scholl_output=False,
                     filter_species = 'SALIX',
-                    object_split=False,
+                    object_split=True,
                     data_gdf='3m_search_0.5_crowns_ttops_clipped_to_plot.pkl.pkl',
                     crown_diameter_mult=0.5,
                     constant_diameter=1.5,
                     ttops_search_buffer=3,
                     ndvi_filter=0.5)
+
+    #valid.make_spectrographs(filters={'ndvi': 0.2, 'shadow': 0.03})
+    valid.make_spectrographs()
 
     #valid.save_orig_to_geotiff('451000_4432000', 'C:/Users/tonyt/Documents/Research/rendered_imgs/451000_4432000_mpsi_threshed_0.03.tif', thresh=0.03, mode='mpsi')
 

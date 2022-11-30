@@ -231,8 +231,9 @@ class SwaVModelUnified(pl.LightningModule):
     def forward(self, x):
         x = x['scenes']
         out = self.swav.forward(x)
-        out = rearrange(out, 'b s f -> (b s) f')
+        out = rearrange(out, 'b (h w) f -> b f h w', h=64, w=64)
         out = self.predict(out)
+        out = torch.softmax(out, dim=1)
         return out
 
 

@@ -1,3 +1,4 @@
+from operator import index
 from dataloaders import SentinelDataLoader
 import pytorch_lightning as pl
 import torch
@@ -6,6 +7,9 @@ import models
 from pytorch_lightning.callbacks import ModelCheckpoint, StochasticWeightAveraging, BaseFinetuning
 from pytorch_lightning import loggers as pl_loggers
 import os
+import numpy as np
+import pandas as pd
+
 
 class FeatureExtractorFreezeUnfreeze(BaseFinetuning):
      def __init__(self, unfreeze_at_epoch=100):
@@ -154,6 +158,43 @@ def unified_training(class_key,
         refiner.save_checkpoint(f'ckpts/sentinel_{extra_labels}_{refine_epochs}'+'.ckpt')
         #refiner.test(refine_model, dataloaders=test_loader, ckpt_path='best')
 
+def infer(model_ckpt, base_dir, targets_dir, stats_loc, class_key, out_file):
+    model = models.SwaVModelUnified.load_from_checkpoint(model_ckpt)
+    model.eval()
+
+    dataset = SentinelDataLoader(base_dir, targets_dir, stats_loc, testing=True)
+    test_loader = DataLoader(dataset, batch_size=1)
+
+    col_labels = ['Field ID'] + list(class_key.keys())
+    output_probs = []
+
+    for x in test_loader:
+        output = model(x).squeeze().detach().numpy()
+        field_ids = x['field_ids']
+        field_ids = field_ids.squeeze().detach().numpy()
+
+        for id in np.unique(field_ids):
+            if id != 0:
+                id_mask = field_ids == id
+                pixel_holder = {p:{} for p in range(0,id_mask.sum())}
+                for ix in class_key.values():
+                    cur_probs = output[ix]
+                    cur_probs = cur_probs[id_mask]
+                    for p in pixel_holder.keys():
+                        pixel_holder[p][ix] = cur_probs[p]
+
+                append_base = [id]
+                for v in pixel_holder.values():
+                    to_append = append_base + list(v.values())
+                    output_probs.append(to_append)
+        print('here')
+    print('here')
+
+    to_save = pd.DataFrame.from_records(output_probs, columns=col_labels)
+    to_save = to_save.groupby('Field ID').aggregate('mean')
+    to_save.to_csv(out_file)
+
+
 if __name__ == '__main__':
 
     BASE_DIR = r'C:\Users\tonyt\Documents\agrifield\ref_agrifieldnet_competition_v1_source'
@@ -165,7 +206,7 @@ if __name__ == '__main__':
         'Wheat': 0,
         'Mustard': 1,
         'Lentil': 2,
-        'No Crop-Fallow': 3,
+        'No Crop': 3,
         'Green Pea': 4,
         'Sugarcane': 5,
         'Garlic': 6,
@@ -177,39 +218,66 @@ if __name__ == '__main__':
         'Rice': 12
     }
 
-    unified_training(
-        class_key=CLASS_KEY,
-        base_lr = 5e-5,
-        refine_lr = 5e-4,
-        class_weights=None,
-        num_intermediate_classes=128,
-        train_folder = BASE_DIR,
-        test_folder=TEST_DIR,
-        targets_folder=TARGET_DIR,
-        stats_loc=STATS_LOC,
-        pre_training_epochs = 800,
-        refine_epochs=400,
-        pre_train_batch_size=64,
-        refine_batch_size=128,
-        pre_train_workers=6,
-        refine_workers=6,
-        patch_size=4,
-        pre_training=False,
-        crop_size=64
-    )
+    #infer(r'ckpts\sentinel_refine_ova=0.69_epoch=595.ckpt', BASE_DIR, TEST_DIR, STATS_LOC, CLASS_KEY, '')
 
+    #reconcile(r'C:\Users\tonyt\Documents\agrifield\output_1.csv', r'C:\Users\tonyt\Documents\agrifield\submission_1_median.csv')
+    #54
+    # unified_training(
+    #     class_key=CLASS_KEY,
+    #     base_lr = 5e-5,
+    #     refine_lr = 5e-4,
+    #     class_weights=None,
+    #     num_intermediate_classes=128,
+    #     train_folder = BASE_DIR,
+    #     test_folder=TEST_DIR,
+    #     targets_folder=TARGET_DIR,
+    #     stats_loc=STATS_LOC,
+    #     pre_training_epochs = 0,
+    #     refine_epochs=400,
+    #     pre_train_batch_size=64,
+    #     refine_batch_size=128,
+    #     pre_train_workers=6,
+    #     refine_workers=6,
+    #     patch_size=4,
+    #     pre_training=False,
+    #     crop_size=64,
+    #     extra_labels='No_Pre'
+    # )
+    # #55
+    # unified_training(
+    #     class_key=CLASS_KEY,
+    #     base_lr = 5e-5,
+    #     refine_lr = 5e-4,
+    #     class_weights=None,
+    #     num_intermediate_classes=64,
+    #     train_folder = BASE_DIR,
+    #     test_folder=TEST_DIR,
+    #     targets_folder=TARGET_DIR,
+    #     stats_loc=STATS_LOC,
+    #     pre_training_epochs = 800,
+    #     refine_epochs=400,
+    #     pre_train_batch_size=64,
+    #     refine_batch_size=128,
+    #     pre_train_workers=6,
+    #     refine_workers=6,
+    #     patch_size=4,
+    #     pre_training=True,
+    #     crop_size=64,
+    #     extra_labels='64_Int'
+    # )
+    #56
     unified_training(
         class_key=CLASS_KEY,
         base_lr = 5e-5,
         refine_lr = 5e-4,
-        class_weights=None,
+        class_weights=[0.1927511,0.30926304,5.02222578,0.39780963,27.26756483,2.4878139,4.59653236,1.65041342,4.13333626,21.35557068,16.34207328,55.47539051,4.24606361],
         num_intermediate_classes=128,
         train_folder = BASE_DIR,
         test_folder=TEST_DIR,
         targets_folder=TARGET_DIR,
         stats_loc=STATS_LOC,
         pre_training_epochs = 800,
-        refine_epochs=400,
+        refine_epochs=600,
         pre_train_batch_size=64,
         refine_batch_size=128,
         pre_train_workers=6,
@@ -217,27 +285,70 @@ if __name__ == '__main__':
         patch_size=4,
         pre_training=False,
         crop_size=64,
-        initial_freeze=300
     )
 
-    unified_training(
-        class_key=CLASS_KEY,
-        base_lr = 5e-5,
-        refine_lr = 5e-4,
-        class_weights=None,
-        num_intermediate_classes=128,
-        train_folder = BASE_DIR,
-        test_folder=TEST_DIR,
-        targets_folder=TARGET_DIR,
-        stats_loc=STATS_LOC,
-        pre_training_epochs = 800,
-        refine_epochs=400,
-        pre_train_batch_size=64,
-        refine_batch_size=128,
-        pre_train_workers=6,
-        refine_workers=6,
-        patch_size=4,
-        pre_training=False,
-        crop_size=64,
-        swa=0.75
-    )
+    #50
+    # unified_training(
+    #     class_key=CLASS_KEY,
+    #     base_lr = 5e-5,
+    #     refine_lr = 5e-4,
+    #     class_weights=None,
+    #     num_intermediate_classes=128,
+    #     train_folder = BASE_DIR,
+    #     test_folder=TEST_DIR,
+    #     targets_folder=TARGET_DIR,
+    #     stats_loc=STATS_LOC,
+    #     pre_training_epochs = 800,
+    #     refine_epochs=400,
+    #     pre_train_batch_size=64,
+    #     refine_batch_size=128,
+    #     pre_train_workers=6,
+    #     refine_workers=6,
+    #     patch_size=4,
+    #     pre_training=False,
+    #     crop_size=64
+    # )
+    #51
+    # unified_training(
+    #     class_key=CLASS_KEY,
+    #     base_lr = 5e-5,
+    #     refine_lr = 5e-4,
+    #     class_weights=None,
+    #     num_intermediate_classes=128,
+    #     train_folder = BASE_DIR,
+    #     test_folder=TEST_DIR,
+    #     targets_folder=TARGET_DIR,
+    #     stats_loc=STATS_LOC,
+    #     pre_training_epochs = 800,
+    #     refine_epochs=400,
+    #     pre_train_batch_size=64,
+    #     refine_batch_size=128,
+    #     pre_train_workers=6,
+    #     refine_workers=6,
+    #     patch_size=4,
+    #     pre_training=False,
+    #     crop_size=64,
+    #     initial_freeze=300
+    # )
+    #52
+    # unified_training(
+    #     class_key=CLASS_KEY,
+    #     base_lr = 5e-5,
+    #     refine_lr = 5e-4,
+    #     class_weights=None,
+    #     num_intermediate_classes=128,
+    #     train_folder = BASE_DIR,
+    #     test_folder=TEST_DIR,
+    #     targets_folder=TARGET_DIR,
+    #     stats_loc=STATS_LOC,
+    #     pre_training_epochs = 800,
+    #     refine_epochs=400,
+    #     pre_train_batch_size=64,
+    #     refine_batch_size=128,
+    #     pre_train_workers=6,
+    #     refine_workers=6,
+    #     patch_size=4,
+    #     pre_training=False,
+    #     crop_size=64,
+    #     swa=0.75
+    # )

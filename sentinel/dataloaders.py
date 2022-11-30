@@ -8,6 +8,7 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import torchvision.transforms.functional as ttf
 import torchvision.transforms as tt
+from sklearn.utils.class_weight import compute_class_weight
 
 def fix_labels(arr, forward=True):
     label_keys = [
@@ -35,14 +36,14 @@ def fix_labels(arr, forward=True):
             arr[arr==k_v[1]] = k_v[0]
     return arr
 
-
-class SentinelDataLoader(Dataset):
+class SentinelSequenceDataLoader(Dataset):
     def __init__(self,
             base_dir,
             target_dir,
             stats_loc,
             testing=False,
-            crop_size = None):
+            crop_size = None,
+            calc_class_weights=False):
         self.base_dir = base_dir
         self.target_dir = target_dir
         self.stats_loc = stats_loc
@@ -57,6 +58,10 @@ class SentinelDataLoader(Dataset):
 
         self.calc_stats = True       
         self.scaler = StandardScaler()
+        if calc_class_weights:
+            self.weights_list = []
+        self.calc_class_weights = calc_class_weights
+        
         
         
         if os.path.exists(stats_loc):
@@ -70,6 +75,11 @@ class SentinelDataLoader(Dataset):
         to_save = {'scale': self.scaler.scale_, 'mean': self.scaler.mean_, 'var': self.scaler.var_}
         #with open(self.stats_loc, 'wb') as f:
         torch.save(to_save, self.stats_loc)
+    
+    def return_class_weights(self):
+        out = compute_class_weight(class_weight='balanced', classes=list(range(0, 13)), y=self.weights_list)
+        print(out)
+
 
         
     
@@ -78,7 +88,8 @@ class SentinelDataLoader(Dataset):
     
     def __getitem__(self, ix):
         to_open = self.all_folders[ix]
-        target_folder = os.path.join(self.target_dir, 'ref_agrifieldnet_competition_v1_labels_train_' + to_open.split('_')[-1])
+        target_prefix = 'ref_agrifieldnet_competition_v1_labels_train_' if not self.testing else 'ref_agrifieldnet_competition_v1_labels_test_'
+        target_folder = os.path.join(self.target_dir, target_prefix + to_open.split('_')[-1])
         opened = []
         for b in self.bands:
             im = Image.open(os.path.join(self.base_dir, to_open, b +'.tif'))
@@ -103,6 +114,102 @@ class SentinelDataLoader(Dataset):
         if not self.testing:
             targets = Image.open(os.path.join(target_folder, 'raster_labels.tif'))
             targets = np.array(targets, dtype=np.int64)
+            targets = fix_labels(targets, forward=True)
+
+            
+            to_return['targets'] = torch.from_numpy(targets)                 
+
+        
+        return to_return
+
+
+class SentinelDataLoader(Dataset):
+    def __init__(self,
+            base_dir,
+            target_dir,
+            stats_loc,
+            testing=False,
+            crop_size = None,
+            calc_class_weights=False):
+        self.base_dir = base_dir
+        self.target_dir = target_dir
+        self.stats_loc = stats_loc
+        self.testing = testing
+        self.crop_size = crop_size
+        if crop_size is not None:
+            self.crop = tt.RandomCrop(crop_size)
+        targets_list = [f.split('_')[-1] for f in os.listdir(target_dir) if '.json' not in f]
+        self.all_folders = [f for f in os.listdir(base_dir) if '.json' not in f and f.split('_')[-1] in targets_list]
+
+        self.bands = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B09', 'B11', 'B12']
+
+        self.calc_stats = True       
+        self.scaler = StandardScaler()
+        if calc_class_weights:
+            self.weights_list = []
+        self.calc_class_weights = calc_class_weights
+        
+        
+        
+        if os.path.exists(stats_loc):
+            self.stats = torch.load(stats_loc)
+            self.scaler.scale_ = self.stats['scale']
+            self.scaler.mean_ = self.stats['mean']
+            self.scaler.var_ = self.stats['var']
+            self.calc_stats = False
+
+    def save_stats(self):
+        to_save = {'scale': self.scaler.scale_, 'mean': self.scaler.mean_, 'var': self.scaler.var_}
+        #with open(self.stats_loc, 'wb') as f:
+        torch.save(to_save, self.stats_loc)
+    
+    def return_class_weights(self):
+        out = compute_class_weight(class_weight='balanced', classes=list(range(0, 13)), y=self.weights_list)
+        print(out)
+
+
+        
+    
+    def __len__(self):
+        return len(self.all_folders)
+    
+    def __getitem__(self, ix):
+        to_open = self.all_folders[ix]
+        target_prefix = 'ref_agrifieldnet_competition_v1_labels_train_' if not self.testing else 'ref_agrifieldnet_competition_v1_labels_test_'
+        target_folder = os.path.join(self.target_dir, target_prefix + to_open.split('_')[-1])
+        opened = []
+        for b in self.bands:
+            im = Image.open(os.path.join(self.base_dir, to_open, b +'.tif'))
+            im = np.array(im)
+            opened.append(im)
+        
+        base_img = np.stack(opened)/10000
+        base_img = base_img.astype(np.float32)
+
+        to_scale = rearrange(base_img, 'c h w -> (h w) c')
+        if self.calc_stats:
+            self.scaler.partial_fit(to_scale)
+        scaled = self.scaler.transform(to_scale)
+        base_img = rearrange(scaled, '(h w) c -> c h w', h=256, w=256)
+
+        field_img = Image.open(os.path.join(target_folder, 'field_ids.tif'))
+        field_img = np.array(field_img, dtype=np.int16)
+
+        to_return = {'scenes': torch.from_numpy(base_img),
+                'field_ids': torch.from_numpy(field_img)}
+
+        if not self.testing:
+            targets = Image.open(os.path.join(target_folder, 'raster_labels.tif'))
+            targets = np.array(targets, dtype=np.int64)
+            targets = fix_labels(targets, forward=True)
+            if self.calc_class_weights:
+                targets[targets == -1] = 13
+                counts = np.bincount(targets.flatten())[:-1]
+                for ix, n in np.ndenumerate(counts):
+                    if n > 0:
+                        to_add = [ix[0]] * n
+                        self.weights_list = self.weights_list + to_add
+                targets[targets == 13] = -1
             
             to_return['targets'] = torch.from_numpy(targets)
 
@@ -115,9 +222,9 @@ class SentinelDataLoader(Dataset):
                     target_sum = ttf.crop(to_return['targets'], *params).sum()
             for k, v in to_return.items():
                 to_return[k] = ttf.crop(v, *params)
+                   
+
         
-        if 'targets' in to_return:
-            to_return['targets'] = fix_labels(to_return['targets'], forward=True)
         return to_return
                 
 
@@ -132,7 +239,10 @@ if __name__ == "__main__":
     TARGET_DIR = r'C:\Users\tonyt\Documents\agrifield\train\ref_agrifieldnet_competition_v1_labels_train'
     STATS_LOC = r'C:\Users\tonyt\Documents\agrifield\stats.npy'
 
-    test = SentinelDataLoader(BASE_DIR, TARGET_DIR, STATS_LOC)
+    test = SentinelDataLoader(BASE_DIR, TARGET_DIR, STATS_LOC, calc_class_weights=True)
+    for x in test:
+        1+1
+    test.return_class_weights()
     # for x in test:
     #     print(x['scenes'])
     # #test.save_stats()
