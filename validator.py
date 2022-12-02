@@ -1159,6 +1159,8 @@ class MultiPanelFigure:
         self.rgb_xlim = (0, 0)
         self.rgb_ylim = (0, 0)
 
+        self.line_holder = dict()
+
         self.draw_spectral_plots()
         self.hs_im = self.draw_hs_plot()
         self.rgb_im = self.draw_rgb_plot()
@@ -1167,15 +1169,41 @@ class MultiPanelFigure:
 
         
     def draw_spectral_plots(self):
-        self.spectrograph.clear()
-        self.derivative_graph.clear()
-        pixels = self.hs_image[self.selected_hs_pixels]
-        if pixels.shape[0] > 0:
-            for pix in pixels:
-                self.spectrograph.plot(self.bands, pix)
+        selected_indexes = np.argwhere(self.selected_hs_pixels)
+        current_lines_length = len(self.spectrograph.get_lines())
+        tracker=0
+        for ix, location in enumerate(selected_indexes):
+            location = tuple(location)
+            
+            if location not in self.line_holder:
+                pix = self.hs_image[location[0], location[1]]
                 per_change = np.diff(pix) / pix[1:]
+                self.spectrograph.plot(self.bands, pix)
                 self.derivative_graph.plot(self.bands[1:], per_change)
                 self.derivative_graph.set_ylim((-1,1))
+                
+                self.line_holder[location] = current_lines_length + tracker
+                tracker+=1
+
+        remove_keys = []
+        remove_values = []
+        for k, v in self.line_holder.items():
+            if not self.selected_hs_pixels[k[0],k[1]]:
+                remove_keys.append(k)
+                remove_values.append(v)
+                self.spectrograph.lines.pop(v)
+                self.derivative_graph.lines.pop(v)
+        
+        remove_values.sort()
+        for ix in remove_values:
+            temp_dict = self.line_holder.copy()
+            for k, v in temp_dict.items():
+                if v > ix:
+                    self.line_holder[k] = v - 1
+        
+        for remove_key in remove_keys:
+            del self.line_holder[remove_key]
+
 
     def draw_hs_plot(self):
         viz_im = self.hs_viz.imshow(self.tru_color_hs*self.hs_overlay, picker=True)
@@ -1205,7 +1233,7 @@ class MultiPanelFigure:
     
     def on_enter_axis(self, event):
         self.current_axis = event.inaxes
-        print(self.current_axis)
+        #print(self.current_axis)
     
     
     def on_release(self, event):
