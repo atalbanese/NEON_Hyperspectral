@@ -6,12 +6,17 @@ import os
 import matplotlib.style as mplstyle
 from matplotlib.widgets import Button, RectangleSelector
 from matplotlib.patches import Rectangle
-
+import math
+import torch
+from einops import rearrange
 
 mplstyle.use('fast')
 
 class MultiPanelFigure:
-    def __init__(self, fig, axes, hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs, title):
+    def __init__(self, fig, axes, hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs, title, taxa, taxonID, f_name, save_dir):
+        self.f_name = f_name
+        self.save_dir = save_dir
+        self.taxonID = taxonID
         self.title = title
         self.spectrograph = axes[0]
         self.derivative_graph = axes[1]
@@ -19,7 +24,7 @@ class MultiPanelFigure:
         self.rgb_viz = axes[3]
         self.all_axes = axes
         self.fig = fig
-
+        self.taxa = taxa
         self.hs_image = hs_image
         self.tru_color_hs = tru_color_hs
         self.rgb_image = rgb_image
@@ -50,6 +55,7 @@ class MultiPanelFigure:
         self.patch_select_button = self.draw_select_button()
         self.selector_rect = RectangleSelector(self.hs_viz, self.select_callback, useblit=True, minspanx=1.0, minspany=1.0)
         self.selector_rect.set_active(False)
+        self.last_patch = None
 
         plt.suptitle(title)
 
@@ -59,10 +65,40 @@ class MultiPanelFigure:
     def draw_save_button(self):
         ax_button = self.fig.add_axes([0.45, 0.05, 0.1, 0.06])
         save_button = Button(ax_button, 'Save Tensor')
+        save_button.on_clicked(self.save_selected_as_tensor)
         return save_button
 
-    def save_selected_as_tensor(self):
+    def save_selected_as_tensor(self, _):
+        if self.last_patch is not None:
+            extents = self.last_patch.get_bbox()
+            y_min = math.ceil(extents.y0)
+            y_max = math.ceil(extents.y1)
+            x_min = math.ceil(extents.x0)
+            x_max = math.ceil(extents.x1)
 
+            cropped = self.hs_image[y_min:y_max,x_min:x_max,...]
+            target_mask = self.selected_hs_pixels[y_min:y_max,x_min:x_max]
+
+            orig_crop = torch.tensor(cropped, dtype=torch.float32)
+            orig_crop = rearrange(orig_crop, 'h w c -> c h w')
+
+            label = torch.zeros((len(self.taxa.keys()),*target_mask.shape), dtype=torch.float32)
+            label[self.taxa[self.taxonID]] = 1.0
+
+            to_save = {
+                'orig': orig_crop,
+                'mask': target_mask,
+                'target': label,
+                #'height': height,
+            }
+
+            
+            with open(os.path.join(self.save_dir, self.f_name), 'wb') as f:
+                torch.save(to_save, f)
+
+        pass
+
+    def make_mask(self):
         pass
 
     def handle_patch_click(self, _):
@@ -70,10 +106,11 @@ class MultiPanelFigure:
 
 
     def select_callback(self, eclick, erelease):
-        x1, y1 = eclick.xdata//1, eclick.ydata//1
-        x2, y2 = erelease.xdata//1 + 1, erelease.ydata//1 + 1
+        x1, y1 = math.floor(eclick.xdata-0.5) +0.5, math.floor(eclick.ydata-0.5) +0.5
+        x2, y2 = round(erelease.xdata)+ 0.5, round(erelease.ydata)+ 0.5
         new_patch = Rectangle((x1, y1), x2-x1, y2-y1, fill=False, edgecolor='red')
         self.hs_viz.add_patch(new_patch)
+        self.last_patch = new_patch
         self.hs_viz.figure.canvas.draw()
         pass
         
@@ -226,16 +263,19 @@ def make_tree_mask(polygon, transform, slice_params, scale, upper, lower, all_to
     mask = mask[ym*scale:yma*scale, xm*scale:xma*scale, ...]
     return make_tree_overlay(mask, upper, lower), mask
 
-def make_tree_plot(hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs, plotID, tree_id, save_dir, ix, crown_diam):
+def make_tree_plot(hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs, plotID, tree_id, save_dir, ix, crown_diam, taxa, taxonID, f_name):
     fig, ax = plt.subplots(2, 2, figsize=(10,10))
     ax=np.ravel(ax)
     title = tree_id + ' - ' + plotID + ' - ' + str(crown_diam) + 'm'
-    this_fig = MultiPanelFigure(fig, ax, hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs, title)
+    this_fig = MultiPanelFigure(fig, ax, hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs, title, taxa, taxonID, f_name, save_dir)
    
-    if save_dir is not None:
-        plt.savefig(os.path.join(save_dir, f'{plotID}_{tree_id}{ix}.png'))
+    # if save_dir is not None:
+    #     plt.savefig(os.path.join(save_dir, f'{plotID}_{tree_id}{ix}.png'))
     #plt.tight_layout()
     fig.canvas.mpl_connect('axes_enter_event', this_fig.on_enter_axis)
     fig.canvas.mpl_connect('pick_event', this_fig.on_click)
     fig.canvas.mpl_connect('button_release_event', this_fig.on_release)
     plt.show()
+
+def myround(x, prec=2, base=.5):
+  return round(base * round(float(x)/base),prec)

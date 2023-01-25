@@ -100,7 +100,7 @@ class Validator():
 
         
         self.rng = np.random.default_rng(42)
-        self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
+        self.taxa = {key: ix for ix, key in enumerate(sorted(self.data_gdf['taxonID'].unique()))}
         
         if use_tt:
             if not os.path.exists(data_gdf):
@@ -207,7 +207,8 @@ class Validator():
                 
                
                 if scale == 'Tree':
-                    make_tree_plot(hs_crop, tc, big_rgb, bands, slice_params, tree_poly, meter_affine, decimeter_affine, (xs, ys), plotID, tree_id, save_dir, ix, crown_diam)
+                    f_name = f'{row["file_coords"]}_{row["taxonID"]}_{row["individualID"]}.pt'
+                    make_tree_plot(hs_crop, tc, big_rgb, bands, slice_params, tree_poly, meter_affine, decimeter_affine, (xs, ys), plotID, tree_id, save_dir, ix, crown_diam, self.taxa, row.taxonID, f_name)
                     yield None
 
             continue
@@ -575,33 +576,6 @@ class Validator():
                         #shadow_mask = shadow < 0.03
                         masks['shadow'] = shadow_clip
                     
-                    if 'rgb_z_max' in filters:
-                        if key != rgb_key:
-                            rgb = rs.open(self.rgb_dict[key])
-                            img = rgb.read()
-
-                            
-                            stats = torch.load(self.stats_loc)
-                            
-                            scaler = StandardScaler()
-                            cur_stats = stats['rgb']
-                            scaler.scale_ = cur_stats['scale']
-                            scaler.mean_ = cur_stats['mean']
-                            scaler.var_ = cur_stats['var']
-
-                            img = rearrange(img, 'c h w -> (h w) c')
-                            img = scaler.transform(img)
-                            img = rearrange(img, '(h w) c -> c h w', h=10000, w=10000)
-                            img = torch.from_numpy(img).float()
-                            
-                            #img = tf.center_crop(img, [512,512])
-                            img = torch.nn.functional.interpolate(img.unsqueeze(0), scale_factor=0.1).squeeze()
-
-                            img = torch.argmax(img, dim=0)
-                            rgb_key = key
-                        clip_img = img[y_min:y_max, x_min:x_max]
-                        green_mask = clip_img == 1
-                        masks['rgb_z_max'] = green_mask
                     #pca_crop[mask] = 0
                     
 
@@ -1051,9 +1025,9 @@ if __name__ == "__main__":
                     ndvi_filter=0.5)
 
     #valid.make_spectrographs(filters={'ndvi': 0.2, 'shadow': 0.03})
-    test = valid.per_plot_spectro()
-    next(test)
-    next(test)
+    test = valid.per_plot_spectro(save_dir=r'C:\Users\tonyt\Documents\Research\render_test')
+    for tree in test:
+        print('1')
 
     #valid.save_orig_to_geotiff('451000_4432000', 'C:/Users/tonyt/Documents/Research/rendered_imgs/451000_4432000_mpsi_threshed_0.03.tif', thresh=0.03, mode='mpsi')
 

@@ -193,52 +193,10 @@ class RenderedDataLoader(Dataset):
         return to_return
     
 
-class SentinelDataLoader(Dataset):
-    def __init__(self,
-            base_dir,
-            target_dir):
-        self.base_dir = base_dir
-        self.target_dir = target_dir
-        self.all_folders = [f for f in os.listdir(base_dir) if '.json' not in f]
-        self.bands = ['B01', 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B8A', 'B09', 'B11', 'B12']
-    
-    def __len__(self):
-        return len(self.all_folders)
-    
-    def __getitem__(self, ix):
-        to_open = self.all_folders[ix]
-        target_folder = os.path.join(self.target_dir, 'ref_agrifieldnet_competition_v1_labels_train_' + to_open.split('_')[-1])
-        opened = []
-        for b in self.bands:
-            im = Image.open(os.path.join(self.base_dir, to_open, b +'.tif'))
-            im = np.array(im)
-            opened.append(im)
-        
-        base_img = np.stack(opened)/10000
-        base_img = base_img.astype(np.float32)
-
-        field_img = Image.open(os.path.join(target_folder, 'field_ids.tif'))
-        field_img = np.array(field_img)
-
-        targets = Image.open(os.path.join(target_folder, 'raster_labels.tif'))
-        targets = np.array(targets)
-
-        return {'base_img': base_img,
-                'field_ids': field_img,
-                'targets': targets}
 
 
 
-
-
-if __name__ == "__main__":
-
-
-    BASE_DIR = r'C:\Users\tonyt\Documents\agrifield\ref_agrifieldnet_competition_v1_source'
-    TARGET_DIR = r'C:\Users\tonyt\Documents\agrifield\train\ref_agrifieldnet_competition_v1_labels_train'
-
-    test = SentinelDataLoader(BASE_DIR, TARGET_DIR)
-    print(test.__getitem__(69))
+#if __name__ == "__main__":
 
     # NUM_CLASSES = 12
     # NUM_CHANNELS = 10
