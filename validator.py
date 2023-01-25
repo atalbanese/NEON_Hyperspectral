@@ -22,7 +22,7 @@ import sklearn.utils.class_weight as cw
 from shapely.geometry import Polygon
 from rasterio.transform import from_origin
 import matplotlib.style as mplstyle
-
+from mpfigure import make_tree_plot
 
 mplstyle.use('fast')
 
@@ -127,16 +127,6 @@ class Validator():
         self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=self.train['taxonID'])
 
 
-    # def make_spectrographs(self, filters={}, scale='Tree', save_dir=None):
-    #     plot_ids = pd.unique(self.data_gdf['plotID'])
-    #     all_gens = []
-    #     for id in plot_ids:
-    #         current_df = self.data_gdf.loc[self.data_gdf['plotID'] == id]
-    #         #all_gens.append(self._per_plot_spectro(current_df, filters, scale, save_dir))
-    #     #return all_gens
-
-
-    #@staticmethod
     def per_plot_spectro(self, filters={}, scale='Tree', save_dir=None):
         plot_ids = pd.unique(self.data_gdf['plotID'])
         for id in plot_ids:
@@ -213,35 +203,13 @@ class Validator():
                 tree_poly = row.geometry
                 tree_id = self.species_lookup[row.taxonID]
                 tree_color = self.species_colors[row.taxonID]
+                crown_diam = row.maxCrownDiameter
                 
                
                 if scale == 'Tree':
-                    make_tree_plot(hs_crop, tc, big_rgb, bands, slice_params, tree_poly, meter_affine, decimeter_affine, (xs, ys), plotID, tree_id, save_dir, ix)
+                    make_tree_plot(hs_crop, tc, big_rgb, bands, slice_params, tree_poly, meter_affine, decimeter_affine, (xs, ys), plotID, tree_id, save_dir, ix, crown_diam)
                     yield None
 
-            #     if scale == 'Plot':
-
-            #         pixel_mean = np.mean(tree_data, axis=0)
-
-            #         per_change = np.diff(pixel_mean) / pixel_mean[1:]
-            #         #ax.plot(bands[1:], per_change, label=tree_id, color=tree_color)
-            #         ax.plot(bands, pixel_mean, label=tree_id, color=tree_color)
-
-            #         cur_handles, cur_labels = ax.get_legend_handles_labels()
-            #         for h, l in zip(cur_handles, cur_labels):
-            #             if l not in labels:
-            #                 labels.append(l)
-            #                 handles.append(h)
-
-
-
-            # if scale == 'Plot':
-            # #ax.set_ylim(-1, 1)
-            #     plt.legend(handles, labels)
-            #     if save_dir is not None:
-            #             plt.savefig(os.path.join(save_dir, f'{plotID}.png'))
-            #     plt.show()
-            #     yield None
             continue
 
     
@@ -255,62 +223,6 @@ class Validator():
         hs_file[bad_mask] = np.nan
 
         return hs_file
-
-
-
-    # def make_spectrographs(self, title, gdf_type):
-    #     taxa = self.taxa.keys()
-    #     stored_stats = {t: [np.zeros((416,), dtype=np.float32), 0] for t in taxa}
-    #     for k, v in self.valid_files.items():
-           
-    #         scene = hp.pre_processing(self.orig_dict[k], get_all=True)
-    #         bands = scene['meta']['spectral_bands'][5:-5]
-    #         scene = scene["bands"][:,:,5:-5]
-    #         if self.ndvi_filter is not None:
-    #             ndvi = hp.pre_processing(os.path.join(self.orig_dict[k]), utils.get_bareness_bands())["bands"]
-    #             ndvi = utils.get_ndvi(ndvi)
-    #             ndvi_mask = ndvi > self.ndvi_filter
-
-    #         west = int(k.split('_')[0])
-    #         north = int(k.split('_')[1]) + 1000
-    #         affine = from_origin(west, north, 1, 1)
-
-    #         for taxon in taxa:
-    #             if gdf_type == 'all':
-    #                 tmp_gdf = self.data_gdf.loc[(self.data_gdf['taxonID'] == taxon) & (self.data_gdf['file_coords'] == k)]
-    #             if gdf_type == 'train':
-    #                 tmp_gdf = self.train.loc[(self.data_gdf['taxonID'] == taxon) & (self.data_gdf['file_coords'] == k)]
-    #             if len(tmp_gdf) > 0:
-                    
-    #                 mask = rf.geometry_mask(tmp_gdf.geometry, (1000,1000), affine, invert=True)
-    #                 if self.ndvi_filter is not None:
-    #                     mask = mask + ndvi_mask
-    #                 selected_data = scene[mask]
-    #                 to_add = np.nansum(selected_data, axis=0)
-    #                 stored_stats[taxon][0] += to_add
-    #                 stored_stats[taxon][1] += selected_data.shape[0]
-    #                 #print('here')
-    #     calced_stats = {}
-    #     for k, v in stored_stats.items():
-    #         sums = v[0]
-    #         count = v[1]
-
-    #         mean = sums/count
-    #         calced_stats[k] = mean
-    #         plt.plot(bands, mean, label=self.species_lookup[k])
-    #         #plt.title(k)
-    #     class_weights_list = []
-    #     for k, v in stored_stats.items():
-    #         to_add = [k] * v[1]
-    #         class_weights_list = class_weights_list + to_add
-    #     self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=class_weights_list)
-    #     print(self.class_weights)
-    #     plt.legend()
-    #     plt.title(title)
-    #     plt.xlabel('Wavelength (nm)', fontsize='large')
-    #     plt.ylabel('Mean Reflectance', fontsize='large')
-    #     plt.show()
-    #     # print('here')
 
 
     def save_orig_to_geotiff(self, key, save_loc, thresh=None, mode='rgb'):
@@ -933,14 +845,10 @@ class Validator():
                 pc[df.iloc[0]['plotID']][tx] = len(cur)
 
 
-
-
     def extract_plots(self, save_dir):
         grouped_files = self.data_gdf.groupby(['plotID'])
         grouped_files.apply(self._extract_plot, self.orig_dict, save_dir)
-        
-
-    
+            
     def extract_pca_plots(self, save_dir):
         grouped_files = self.data_gdf.groupby(['plotID'])
         grouped_files.apply(self._extract_pca_plot, self.pca_dict, save_dir)
@@ -1091,213 +999,9 @@ class Validator():
         return selected
 
 
-
-
-    
     def map_plots(self, save_dir):
         grouped_files = self.data_gdf.groupby(['file_coords', 'plotID'])
         grouped_files.apply(self._map_plot, self.orig_dir, save_dir, self.site_name, self.site_prefix)
-
-
-
-##HELPER FUNCTIONS
-
-def make_tree_overlay(mask, upper, lower):
-    mask = mask * upper
-    mask[mask == 0] = lower
-    return mask[...,np.newaxis]
-
-
-def make_tree_mask(polygon, transform, slice_params, scale, upper, lower, all_touched=False):
-    mask = rf.geometry_mask([polygon], [1000*scale, 1000*scale], transform=transform, all_touched=all_touched, invert=True)
-    ym, yma, xm, xma = slice_params
-    mask = mask[ym*scale:yma*scale, xm*scale:xma*scale, ...]
-    return make_tree_overlay(mask, upper, lower), mask
-
-def make_tree_plot(hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs, plotID, tree_id, save_dir, ix):
-    fig, ax = plt.subplots(2, 2, figsize=(10,10))
-    ax=np.ravel(ax)
-    this_fig = MultiPanelFigure(fig, ax, hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs)
-    plt.suptitle(tree_id + ' - ' + plotID)
-    if save_dir is not None:
-        plt.savefig(os.path.join(save_dir, f'{plotID}_{tree_id}{ix}.png'))
-    plt.tight_layout()
-    fig.canvas.mpl_connect('axes_enter_event', this_fig.on_enter_axis)
-    fig.canvas.mpl_connect('pick_event', this_fig.on_click)
-    fig.canvas.mpl_connect('button_release_event', this_fig.on_release)
-    plt.show()
-
-
-
-class MultiPanelFigure:
-    def __init__(self, fig, axes, hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs):
-        self.spectrograph = axes[0]
-        self.derivative_graph = axes[1]
-        self.hs_viz = axes[2]
-        self.rgb_viz = axes[3]
-        self.all_axes = axes
-        self.fig = fig
-
-        self.hs_image = hs_image
-        self.tru_color_hs = tru_color_hs
-        self.rgb_image = rgb_image
-
-        self.hs_overlay, self.selected_hs_pixels = make_tree_mask(polygon, hs_affine, slice_params, 1, 2.5, 1.0, all_touched=False)
-        self.rgb_overlay, self.selected_rgb_pixels = make_tree_mask(polygon, rgb_affine, slice_params, 10, 1.0, 0.5, all_touched=False)
-
-        self.hs_crowns_x, self.hs_crowns_y = tree_crowns_hs
-        self.rgb_crowns_x, self.rgb_crowns_y = [crown*10 for crown in self.hs_crowns_x], [crown*10 for crown in self.hs_crowns_y]
-
-        self.bands = hs_bands
-        self.slice_params = slice_params
-
-        self.rgb_ticks = np.arange(5, 400, 10)
-
-        self.hs_xlim = (0, 0)
-        self.hs_ylim= (0, 0)
-
-        self.rgb_xlim = (0, 0)
-        self.rgb_ylim = (0, 0)
-
-        self.line_holder = dict()
-
-        self.draw_spectral_plots()
-        self.hs_im = self.draw_hs_plot()
-        self.rgb_im = self.draw_rgb_plot()
-
-        self.current_axis = None
-
-        
-    def draw_spectral_plots(self):
-        selected_indexes = np.argwhere(self.selected_hs_pixels)
-        current_lines_length = len(self.spectrograph.get_lines())
-        tracker=0
-        for ix, location in enumerate(selected_indexes):
-            location = tuple(location)
-            
-            if location not in self.line_holder:
-                pix = self.hs_image[location[0], location[1]]
-                per_change = np.diff(pix) / pix[1:]
-                self.spectrograph.plot(self.bands, pix)
-                self.derivative_graph.plot(self.bands[1:], per_change)
-                self.derivative_graph.set_ylim((-1,1))
-                
-                self.line_holder[location] = current_lines_length + tracker
-                tracker+=1
-
-        remove_keys = []
-        remove_values = []
-        for k, v in self.line_holder.items():
-            if not self.selected_hs_pixels[k[0],k[1]]:
-                remove_keys.append(k)
-                remove_values.append(v)
-                self.spectrograph.lines.pop(v)
-                self.derivative_graph.lines.pop(v)
-        
-        remove_values.sort()
-        for ix in remove_values:
-            temp_dict = self.line_holder.copy()
-            for k, v in temp_dict.items():
-                if v > ix:
-                    self.line_holder[k] = v - 1
-        
-        for remove_key in remove_keys:
-            del self.line_holder[remove_key]
-
-
-    def draw_hs_plot(self):
-        viz_im = self.hs_viz.imshow(self.tru_color_hs*self.hs_overlay, picker=True)
-        self.hs_viz.scatter(self.hs_crowns_x, self.hs_crowns_y)
-        self.hs_xlim = self.hs_viz.get_xlim()
-        self.hs_ylim = self.hs_viz.get_ylim()
-        return viz_im
-
-    def draw_rgb_plot(self):
-        rgb_im = self.rgb_viz.imshow(self.rgb_image*self.rgb_overlay, picker=True)
-        self.rgb_viz.scatter(self.rgb_crowns_x, self.rgb_crowns_y)
-        self.rgb_viz.set_xticks(self.rgb_ticks)
-        self.rgb_viz.set_yticks(self.rgb_ticks)
-        self.rgb_viz.grid()
-        self.rgb_xlim = self.rgb_viz.get_xlim()
-        self.rgb_ylim = self.rgb_viz.get_ylim()
-        return rgb_im
-        
-    def on_click(self, event):
-        artist = event.artist
-        if artist.axes == self.hs_viz:
-            self.handle_hs_click(event)
-        if artist.axes == self.rgb_viz:
-            self.handle_rgb_click(event)
-        self.update_after_click()
-        return None
-    
-    def on_enter_axis(self, event):
-        self.current_axis = event.inaxes
-        #print(self.current_axis)
-    
-    
-    def on_release(self, event):
-        if self.current_axis == self.hs_viz:
-            self.handle_hs_release()
-        if self.current_axis == self.rgb_viz:
-            self.handle_rgb_release()
-    
-    def handle_hs_release(self):
-        xlim_check = self.hs_viz.get_xlim()
-        ylim_check = self.hs_viz.get_ylim()
-
-        if xlim_check != self.hs_xlim:
-            self.hs_xlim = xlim_check
-            self.rgb_viz.set_xlim(xlim_check[0]*10, xlim_check[1]*10)
-
-        if ylim_check != self.hs_ylim:
-            self.hs_ylim = ylim_check
-            self.rgb_viz.set_ylim(ylim_check[0]*10, ylim_check[1]*10)
-
-        self.rgb_viz.figure.canvas.draw()
-        return None
-
-    def handle_rgb_release(self):
-        xlim_check = self.rgb_viz.get_xlim()
-        ylim_check = self.rgb_viz.get_ylim()
-
-        if xlim_check != self.rgb_xlim:
-            self.rgb_xlim = xlim_check
-            self.hs_viz.set_xlim(xlim_check[0]/10, xlim_check[1]/10)
-
-        if ylim_check != self.rgb_ylim:
-            self.rgb_ylim = ylim_check
-            self.hs_viz.set_ylim(ylim_check[0]/10, ylim_check[1]/10)
-
-        self.hs_viz.figure.canvas.draw()
-        return None
-    
-    def handle_hs_click(self, event):
-        x_loc = round(event.mouseevent.xdata)
-        y_loc = round(event.mouseevent.ydata)
-        self.selected_hs_pixels[y_loc, x_loc] = ~self.selected_hs_pixels[y_loc, x_loc]
-        self.hs_overlay = make_tree_overlay(self.selected_hs_pixels, 2.5, 1.0)
-        return None
-    
-    def handle_rgb_click(self, event):
-        x_loc = round(event.mouseevent.xdata/10)
-        y_loc = round(event.mouseevent.ydata/10)
-        self.selected_hs_pixels[y_loc, x_loc] = ~self.selected_hs_pixels[y_loc, x_loc]
-        self.hs_overlay = make_tree_overlay(self.selected_hs_pixels, 2.5, 1.0)
-        return None
-
-
-    def update_after_click(self):
-        self.hs_im.set_data(self.tru_color_hs*self.hs_overlay)
-        self.hs_im.axes.figure.canvas.draw()
-
-        self.draw_spectral_plots()
-        self.spectrograph.figure.canvas.draw()
-        self.derivative_graph.figure.canvas.draw()
-        return None
-
-    
-
 
 
 
