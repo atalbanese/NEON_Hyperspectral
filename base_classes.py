@@ -70,8 +70,6 @@ class Plot:
 
     pass
 
-class Tile:
-    pass
 
 class StudyArea:
     pass
