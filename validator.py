@@ -29,7 +29,7 @@ mplstyle.use('fast')
 
 
 #TODO: Clean this mess up
-#Switch plots to plotly? Good for overlays
+
 class Validator():
     def __init__(self, 
                 train_split=0.6, 
@@ -89,6 +89,7 @@ class Validator():
         self.pca_files = [os.path.join(kwargs['pca_dir'], file) for file in os.listdir(kwargs['pca_dir']) if ".npy" in file]
         self.tree_tops_files = [os.path.join(tree_tops_dir, file) for file in os.listdir(tree_tops_dir) if ".geojson" in file]
         self.rgb_files = [os.path.join(rgb_dir, file) for file in os.listdir(rgb_dir) if ".tif" in file]
+        self.chm_files = [os.path.join(kwargs['chm'], file) for file in os.listdir(kwargs['chm']) if ".tif" in file]
         
         def make_dict(file_list, param_1, param_2):
             return {f"{file.split('_')[param_1]}_{file.split('_')[param_2]}": file for file in file_list}
@@ -97,7 +98,7 @@ class Validator():
         self.pca_dict = make_dict(self.pca_files, -4, -3)
         self.tree_tops_dict = make_dict(self.tree_tops_files, -3, -2)
         self.rgb_dict = make_dict(self.rgb_files, -3, -2)
-
+        self.chm_dict = make_dict(self.chm_files, -3, -2)
         
         self.rng = np.random.default_rng(42)
         self.taxa = {key: ix for ix, key in enumerate(sorted(self.data_gdf['taxonID'].unique()))}
@@ -154,9 +155,14 @@ class Validator():
             rgb = rs.open(self.rgb_dict[key])
             big_img = rgb.read()
             big_img = rearrange(big_img, 'c h w -> h w c')/255.0
+
+            chm = rs.open(self.chm_dict[key])
+            open_chm = chm.read()
+            open_chm = rearrange(open_chm, 'c h w -> h w c')
+            open_chm = np.squeeze(open_chm)
                 
 
-            s = self._make_plot_outlines(df)
+            s = self._make_plot_outlines(df, make_list=True)
 
             open_ttops = gpd.read_file(self.tree_tops_dict[key])
 
@@ -171,6 +177,8 @@ class Validator():
 
 
             tc = tru_color[y_min:y_max,x_min:x_max,...]
+            
+            open_chm = open_chm[y_min*10:y_max*10,x_min*10:x_max*10,...]
 
             big_rgb = big_img[y_min*10:y_max*10,x_min*10:x_max*10,...]
 
@@ -208,8 +216,8 @@ class Validator():
                
                 if scale == 'Tree':
                     f_name = f'{row["file_coords"]}_{row["taxonID"]}_{row["individualID"]}.pt'
-                    make_tree_plot(hs_crop, tc, big_rgb, bands, slice_params, tree_poly, meter_affine, decimeter_affine, (xs, ys), plotID, tree_id, save_dir, ix, crown_diam, self.taxa, row.taxonID, f_name)
-                    yield None
+                    make_tree_plot(hs_crop, tc, big_rgb, bands, slice_params, tree_poly, meter_affine, decimeter_affine, (xs, ys), plotID, tree_id, save_dir, ix, crown_diam, self.taxa, row.taxonID, f_name, open_chm)
+                    #yield None
 
             continue
 
@@ -307,18 +315,21 @@ class Validator():
         to_save.to_file(save_loc)
     
     @staticmethod
-    def _make_plot_outlines(df):
+    def _make_plot_outlines(df, make_list=False):
         row = df.iloc[0]
-        x_min = row['easting_plot'] - (row['plotSize']**(1/2)/2)
-        x_max = row['easting_plot'] + (row['plotSize']**(1/2)/2)
+        x_min = row['easting_plot']//1 - (row['plotSize']**(1/2)/2)
+        x_max = row['easting_plot']//1 + (row['plotSize']**(1/2)/2)
 
-        y_min = row['northing_plot'] - (row['plotSize']**(1/2)/2)
-        y_max = row['northing_plot'] + (row['plotSize']**(1/2)/2)
-        x = [x_min, x_max, x_max, x_min, x_min]
-        y = [y_max, y_max, y_min, y_min, y_max]
-        points = list(zip(x, y))
-        s = gpd.GeoSeries([Polygon(points)], crs='EPSG:32613')
-        to_return = gpd.GeoDataFrame(geometry=s)
+        y_min = row['northing_plot']//1 - (row['plotSize']**(1/2)/2)
+        y_max = row['northing_plot']//1 + (row['plotSize']**(1/2)/2)
+        if not make_list:
+            x = [x_min, x_max, x_max, x_min, x_min]
+            y = [y_max, y_max, y_min, y_min, y_max]
+            points = list(zip(x, y))
+            s = gpd.GeoSeries([Polygon(points)], crs='EPSG:32613')
+            to_return = gpd.GeoDataFrame(geometry=s)
+        else:
+            to_return = (x_min, y_min, x_max, y_max)
         return to_return
 
         
@@ -988,7 +999,7 @@ if __name__ == "__main__":
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
     CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct_de_dupe.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
-    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
+    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test'
     AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
     ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
@@ -1011,6 +1022,7 @@ if __name__ == "__main__":
                     curated=CURATED_FILE, 
                     orig=ORIG_DIR, 
                     rgb_dir=RGB_DIR,
+                    chm=CHM_DIR,
                     stats_loc='C:/Users/tonyt/Documents/Research/datasets/tensors/rgb_blocks/stats/stats.npy',
                     prefix='D13',
                     use_tt=True,
@@ -1025,9 +1037,10 @@ if __name__ == "__main__":
                     ndvi_filter=0.5)
 
     #valid.make_spectrographs(filters={'ndvi': 0.2, 'shadow': 0.03})
-    test = valid.per_plot_spectro(save_dir=r'C:\Users\tonyt\Documents\Research\render_test')
-    for tree in test:
-        print('1')
+    #test = 
+    valid.per_plot_spectro(save_dir=r'C:\Users\tonyt\Documents\Research\render_test')
+   # for tree in test:
+      #  print('1')
 
     #valid.save_orig_to_geotiff('451000_4432000', 'C:/Users/tonyt/Documents/Research/rendered_imgs/451000_4432000_mpsi_threshed_0.03.tif', thresh=0.03, mode='mpsi')
 

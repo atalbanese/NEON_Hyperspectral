@@ -9,6 +9,13 @@ from matplotlib.patches import Rectangle
 import math
 import torch
 from einops import rearrange
+from skimage.segmentation import watershed, mark_boundaries, random_walker, felzenszwalb, slic, quickshift
+from skimage.feature import peak_local_max
+from skimage.color import rgb2gray
+from skimage.filters import sobel
+from scipy import ndimage
+from skimage.transform import rescale
+from skimage import morphology
 
 mplstyle.use('fast')
 
@@ -263,7 +270,7 @@ def make_tree_mask(polygon, transform, slice_params, scale, upper, lower, all_to
     mask = mask[ym*scale:yma*scale, xm*scale:xma*scale, ...]
     return make_tree_overlay(mask, upper, lower), mask
 
-def make_tree_plot(hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs, plotID, tree_id, save_dir, ix, crown_diam, taxa, taxonID, f_name):
+def make_tree_plot(hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, polygon, hs_affine, rgb_affine, tree_crowns_hs, plotID, tree_id, save_dir, ix, crown_diam, taxa, taxonID, f_name, chm):
     fig, ax = plt.subplots(2, 2, figsize=(10,10))
     ax=np.ravel(ax)
     title = tree_id + ' - ' + plotID + ' - ' + str(crown_diam) + 'm'
@@ -276,6 +283,32 @@ def make_tree_plot(hs_image, tru_color_hs, rgb_image, hs_bands, slice_params, po
     fig.canvas.mpl_connect('pick_event', this_fig.on_click)
     fig.canvas.mpl_connect('button_release_event', this_fig.on_release)
     plt.show()
+    plt.close()
+    x_crowns = np.array(this_fig.rgb_crowns_x)
+    y_crowns = np.array(this_fig.rgb_crowns_y)
+    xs = x_crowns[np.logical_and.reduce((x_crowns<400, y_crowns<400, x_crowns>0, y_crowns>0))]
+    ys = y_crowns[np.logical_and.reduce((x_crowns<400, y_crowns<400, x_crowns>0, y_crowns>0))]
+    test_labels = np.zeros((400,400), dtype=np.int32)
+    for ix, coord in enumerate(zip(xs, ys)):
+        x_index = int(coord[0]//1)
+        y_index = int(coord[1]//1)
+
+        test_labels[y_index, x_index] = ix
+    #labelled = felzenszwalb(this_fig.rgb_image)
+    #labelled = slic(this_fig.rgb_image, n_segments=len(x_crowns)*10)
+    #labelled = quickshift(this_fig.rgb_image)
+    mask = chm>2
+    mask = morphology.remove_small_holes(mask)
+    mask = morphology.remove_small_objects(mask)
+    labelled = watershed(sobel(rgb2gray(this_fig.rgb_image)), markers=test_labels, mask=mask, compactness=0.01)
+    #labelled = watershed(sobel(this_fig.rgb_image[...,1]), markers=test_labels, compactness=0.01)
+    #labelled = watershed(this_fig.rgb_image[...,1], markers=test_labels, compactness=0.01)
+    #labelled = random_walker(data=this_fig.rgb_image, labels=test_labels, channel_axis=2)
+    fig, ax = plt.subplots()
+    ax.imshow(mark_boundaries(this_fig.rgb_image, labelled))
+    ax.scatter(xs, ys)
+    plt.show()
+    print('here')
 
 def myround(x, prec=2, base=.5):
   return round(base * round(float(x)/base),prec)
