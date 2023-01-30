@@ -100,8 +100,8 @@ get_chms <- function(chunk) {
 
 
 
-niwo_folder <- "C:/Users/tonyt/Documents/Research/datasets/lidar/niwo_point_cloud/valid_sites_orig"
-out_folder <- "C:/Users/tonyt/Documents/Research/datasets/niwo_tree_tops"
+niwo_folder <- "C:/Users/tonyt/Documents/Research/datasets/lidar/niwo_point_cloud/temp"
+out_folder <- "C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test"
 
 # test_file <- "C:/Users/tonyt/Documents/Research/datasets/lidar/niwo_point_cloud/valid_sites_orig/NEON_D13_NIWO_DP1_452000_4432000_classified_point_cloud_colorized.laz"
 # col <- height.colors(25)
@@ -114,4 +114,5 @@ out_folder <- "C:/Users/tonyt/Documents/Research/datasets/niwo_tree_tops"
 # 
 # plot(chm, col = col)
 
-process_all_ttops(niwo_folder, out_folder)
+process_all_chm(niwo_folder, out_folder)
+

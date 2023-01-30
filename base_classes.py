@@ -45,9 +45,8 @@ class Tree:
 class Plot:
     def __init__(
         self,
-        tile_origin: tuple,
-        width: int,
         utm_origin: tuple,
+        width: int,
         rgb: np.ndarray,
         hyperspectral: np.ndarray,
         hyperspectral_bands: list,
@@ -55,14 +54,13 @@ class Plot:
         canopy_height_model: np.ndarray,
         potential_trees: list
     ):
-        self.tile_origin = tile_origin
         self.width = width
         self.utm_origin = utm_origin
         self.rgb = rgb
-        self.hyperspectral = hyperspectral,
-        self.hyperspectral_bands = hyperspectral_bands,
-        self.tree_tops = tree_tops,
-        self.canopy_height_model = canopy_height_model,
+        self.hyperspectral = hyperspectral
+        self.hyperspectral_bands = hyperspectral_bands
+        self.tree_tops = tree_tops
+        self.canopy_height_model = canopy_height_model
         self.potential_trees = potential_trees
 
         self.identified_trees = list()
@@ -92,16 +90,27 @@ class TileSet:
 
     def __make_tile_gdf__(self):
         polygons = []
+        file_west_bounds = []
+        file_north_bounds = []
         #Using filenames instead of actual metadata since metadata we are dealing with a bunch of different filetypes
         #Filenames: The original metadata
         for f in self.all_files:
             split_name = f.path.split('_')
             min_x, min_y = int(split_name[self.coord_locs[0]]), int(split_name[self.coord_locs[1]])
             max_x, max_y = min_x + 1000, min_y + 1000
+            file_west_bounds.append(min_x)
+            file_north_bounds.append(max_y)
             tile_poly = shapely.box(min_x, min_y, max_x, max_y)
             polygons.append(tile_poly)
 
-        gdf = gpd.GeoDataFrame(data=self.all_files, geometry=polygons, crs=self.epsg)
+        gdf = gpd.GeoDataFrame(
+            data={
+                    'filepath': self.all_files,
+                    'file_west_bound': file_west_bounds,
+                    'file_north_bound': file_north_bounds
+                }, 
+            geometry=polygons, 
+            crs=self.epsg)
 
         return gdf
 
