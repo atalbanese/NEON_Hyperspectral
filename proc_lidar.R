@@ -37,10 +37,11 @@ get_crown_stats <- function(chunk) {
 }
 
 
+##I THINK THESE NEED TO BE RERUN
 process_all_ttops <- function(cat_folder, out_folder){
   ctg <- readLAScatalog(cat_folder, filter = "-drop_withheld")
   # Set output
-  opt_output_files(ctg) <- paste0(out_folder, "/{XLEFT}_{YBOTTOM}_ttops")
+  opt_output_files(ctg) <- paste0(out_folder, "/NIWO_{XLEFT}_{YBOTTOM}_ttops")
   ctg@output_options$drivers$sf$extension <- ".geojson"
   
 
@@ -100,7 +101,7 @@ get_chms <- function(chunk) {
 
 
 niwo_folder <- "C:/Users/tonyt/Documents/Research/datasets/lidar/niwo_point_cloud/valid_sites_orig"
-out_folder <- "C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test"
+out_folder <- "C:/Users/tonyt/Documents/Research/datasets/niwo_tree_tops"
 
 # test_file <- "C:/Users/tonyt/Documents/Research/datasets/lidar/niwo_point_cloud/valid_sites_orig/NEON_D13_NIWO_DP1_452000_4432000_classified_point_cloud_colorized.laz"
 # col <- height.colors(25)
@@ -113,4 +114,4 @@ out_folder <- "C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_t
 # 
 # plot(chm, col = col)
 
-process_all_chm(niwo_folder, out_folder)
+process_all_ttops(niwo_folder, out_folder)

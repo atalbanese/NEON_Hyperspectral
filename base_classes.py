@@ -1,9 +1,8 @@
 import numpy as np
 import torch
 import geopandas as gpd
-
-
-
+import os
+import shapely
 
 class Tree:
     def __init__(
@@ -71,5 +70,47 @@ class Plot:
     pass
 
 
+class TileSet:
+    ##ASSUMES EVERYTHING IS A LOWER LEFT ORIGIN, BECAUSE THAT IS THE NEON CONVENTION
+    ##I AM PERSONALLY MORE OF AN UPPER LEFT ORIGIN GUY SINCE THAT IS THE WAY NUMPY ARRAYS ARE ORDERED 
+    def __init__(
+        self,
+        tile_dir: str,
+        epsg: str,
+        file_ext: str,
+        coord_locs: tuple,
+        file_width: int, 
+    ):
+        self.all_files = [f for f in os.scandir(tile_dir) if f.is_file() and f.path.endswith(file_ext)]
+        self.epsg = epsg
+        self.coord_locs = coord_locs
+        #Assumes square file size. Do we need to know units? 1m vs 10cm
+        self.file_width = file_width
+
+        self.tile_gdf = self.__make_tile_gdf__()
+
+
+    def __make_tile_gdf__(self):
+        polygons = []
+        #Using filenames instead of actual metadata since metadata we are dealing with a bunch of different filetypes
+        #Filenames: The original metadata
+        for f in self.all_files:
+            split_name = f.path.split('_')
+            min_x, min_y = int(split_name[self.coord_locs[0]]), int(split_name[self.coord_locs[1]])
+            max_x, max_y = min_x + 1000, min_y + 1000
+            tile_poly = shapely.box(min_x, min_y, max_x, max_y)
+            polygons.append(tile_poly)
+
+        gdf = gpd.GeoDataFrame(data=self.all_files, geometry=polygons, crs=self.epsg)
+
+        return gdf
+
+
+
+
 class StudyArea:
     pass
+
+if __name__ == "__main__":
+    test = TileSet('W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022','EPSG:32613','.h5', (-3, -2), 1000)
+
