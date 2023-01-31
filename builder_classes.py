@@ -338,6 +338,8 @@ class TreeBuilder:
 
     def segment_trees(self):
         mask = self.plot.canopy_height_model>2
+
+        #CAN ALSO TRY SCIPY METHODS HERE
         mask = morphology.remove_small_holes(mask)
         mask = morphology.remove_small_objects(mask)
 
@@ -346,7 +348,8 @@ class TreeBuilder:
             markers[rowcol] = ix
 
         labelled = watershed(sobel(rgb2gray(self.plot.rgb)), markers=markers, mask=mask, compactness=0.01)
-
+    
+        #NEXT STEPS: https://stackoverflow.com/questions/49774179/python-get-boundingbox-coordinates-for-each-cluster-in-segmentation-map-2d-num
         pass
     
     def identify_trees(self):
