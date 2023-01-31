@@ -17,29 +17,46 @@ from skimage.color import rgb2gray
 from skimage.filters import sobel
 
 
+
+
+
 class Tree:
     def __init__(
         self,
         hyperspectral: np.ndarray,
         rgb: np.ndarray,
         rgb_mask: np.ndarray,
-        hyperspectral_mask: np.ndarray,
         hyperspectral_bands: list,
+        chm: np.ndarray,
         site_id: str,
-        tile_origin: tuple,
+        plot_id: str,
         utm_origin: tuple,
-        taxa: str = None,
+        individual_id:str,
+        taxa: str,
         ):
 
         self.hyperspectral = hyperspectral
         self.rgb = rgb
         self.rgb_mask = rgb_mask
-        self.hyperspectral_mask = hyperspectral_mask
+        self.hyperspectral_mask = self.make_hs_mask()
         self.hyperspectral_bands = hyperspectral_bands
         self.site_id = site_id
         self.taxa = taxa
         self.utm_origin = utm_origin
-        self.tile_origin = tile_origin
+        self.plot_id = plot_id
+        self.individual_id = individual_id
+        self.chm = chm
+
+    def make_hs_mask(self):
+        y_shape, x_shape = self.rgb_mask.shape[0]//10, self.rgb_mask.shape[1]//10
+        out = np.zeros((y_shape, x_shape), dtype=np.bool8)
+        for i in range(y_shape):
+            for j in range(x_shape):
+                subset = self.rgb_mask[i*10:(i+1)*10, j*10:(j+1)*10]
+                if subset.sum()>50:
+                    out[i, j] = True
+        return out
+
 
     def get_masked_hs(self, out_type ='numpy'):
         if out_type == 'numpy':
@@ -54,6 +71,8 @@ class Tree:
         if out_type == 'torch':
             return torch.from_numpy(self.rgb[self.rgb_mask])
 
+    
+
 
 class Plot:
     def __init__(
@@ -65,30 +84,38 @@ class Plot:
         hyperspectral_bands: list,
         tree_tops: gpd.GeoDataFrame,
         canopy_height_model: np.ndarray,
-        potential_trees: list
+        potential_trees: gpd.GeoDataFrame,
+        epsg
     ):
+        self.epsg = epsg
         self.width = width
         self.utm_origin = utm_origin
         self.rgb = rgb
         self.hyperspectral = hyperspectral
         self.hyperspectral_bands = hyperspectral_bands
-        self.tree_tops = tree_tops
+        self.tree_tops = tree_tops.reset_index(drop=True)
         self.canopy_height_model = canopy_height_model
         self.potential_trees = potential_trees
+        self.cm_affine = AffineTransformer(from_origin(self.utm_origin[0], self.utm_origin[1], .1, .1))
+        self.m_affine = AffineTransformer(from_origin(self.utm_origin[0], self.utm_origin[1], 1, 1))
         self.tree_tops_local = self.make_local_tree_tops()
 
         self.identified_trees = list()
     
     def make_local_tree_tops(self):
-        affine = AffineTransformer(from_origin(self.utm_origin[0], self.utm_origin[1], .1, .1))
         out_list = []
         for ix, tree in self.tree_tops.iterrows():
-            out_list.append(affine.rowcol(tree.geometry.x, tree.geometry.y))
+            out_list.append(self.cm_affine.rowcol(tree.geometry.x, tree.geometry.y))
         return out_list
 
+    def drop_ttops(self, include_idxs):
+        self.tree_tops = self.tree_tops.iloc[include_idxs]
+
     def find_trees(self):
+        #This will modifiy some of the data in this object as well. They are intertwined like the forest and the sky
         tree_builder = TreeBuilder(self)
-        identified_trees = tree_builder.identify_trees()
+        self.identified_trees = tree_builder.build_trees()
+        #identified_trees = tree_builder.identify_trees()
 
         
 
@@ -159,6 +186,7 @@ class PlotBuilder:
         ):
         #Static Vars
         self.sitename = sitename
+        self.epsg = epsg
         self.h5_tiles = TileSet(h5_files, epsg, '.h5', (-3,-2), 1000)
         self.chm_tiles = TileSet(chm_files, epsg, '.tif', (-3, -2), 1000)
         self.ttop_tiles = TileSet(ttop_files, epsg, '.geojson', (-3, -2), 1000)
@@ -215,7 +243,8 @@ class PlotBuilder:
             hyperspectral_bands= hs_bands,
             tree_tops= ttops,
             canopy_height_model= chm,
-            potential_trees= selected_plot
+            potential_trees= selected_plot,
+            epsg = self.epsg
         )
 
 
@@ -330,13 +359,137 @@ class PlotBuilder:
         return tileset.tile_gdf.clip(bbox).sort_values(['file_west_bound', 'file_north_bound'])
 
 
+class CanopySegment:
+    def __init__(
+        self,
+        bbox: np.ndarray,
+        affine,
+        epsg,
+        original_index
+    ):
+
+        self.x_min, self.y_min, self.x_max, self.y_max = self.get_bounds(bbox)
+        self.epsg = epsg
+        #self.labelled_index = original_index
+        self.ttop_index = original_index - 1
+        #Origin = upper left, row-col
+        #Anything local is y-x
+        #Anything utm is x-y
+        #If only there was some way to standardize this!
+        self.local_origin = self.y_min, self.x_min
+
+        self.utm_origin = affine.xy(*self.local_origin)
+        self.utm_x_min, self.utm_y_min = affine.xy(self.y_min, self.x_min)
+        self.utm_x_max, self.utm_y_max = affine.xy(self.y_max, self.x_max)
+        # self.height = self.y_max - self.y_min
+        # self.width = self.x_max - self.x_min
+
+        # self.local_centroid = self.y_min + (self.height//2), self.x_min + (self.width//2)
+        # self.utm_centroid = affine.xy(*self.local_centroid)
+
+    def get_bounds(self, bbox: np.ndarray):
+        bbox_min = bbox.min(0)
+        bbox_max = bbox.max(0)
+
+        return bbox_min[1], bbox_min[0], bbox_max[1], bbox_max[0]
+    
+    def to_polygon(self):
+        return shapely.box(self.utm_x_min, self.utm_y_min, self.utm_x_max, self.utm_y_max)
+
+    def to_dict(self):
+        return {'properties':{
+                    'ttop_index': self.ttop_index,
+                    'epsg': self.epsg,
+                    'utm_origin': self.utm_origin,
+                    'local_x_min': self.x_min,
+                    'local_y_min': self.y_min,
+                    'local_x_max': self.x_max,
+                    'local_y_max': self.y_max
+                }, 
+                'geometry': self.to_polygon()}
+
+
 
 class TreeBuilder:
     def __init__(self, plot: Plot):
         self.plot = plot
-        self.tree_segments = self.segment_trees
+        #Find visible canopies using watershed segmentation + lidar treetops locations
+        self.canopy_segments, self.labelled_plot = self.segment_canopy()
+        #Make geodataframe of segment bounding boxes
+        #Need to get actual label geometry in here somehow
+        self.canopy_segments_gdf = gpd.GeoDataFrame.from_features([cs.to_dict() for cs in self.canopy_segments])
 
-    def segment_trees(self):
+        #Drop any tree tops that didn't match visible trees
+        self.plot.drop_ttops(self.canopy_segments_gdf['ttop_index'])
+        self.tree_crown_pairs = self.identify_trees()
+        #self.labelled_trees = self.build_trees()
+
+
+    
+    def build_trees(self):
+        trees = []
+        #For each tree crown pair, assemble all data into Tree object
+        for tree_idx, crown_idx in self.tree_crown_pairs.items():
+            selected_tree = self.plot.potential_trees.loc[tree_idx]
+            selected_crown = self.canopy_segments_gdf.loc[self.canopy_segments_gdf['ttop_index'] == crown_idx]
+
+            taxa = selected_tree.abs
+            plot_id = selected_tree.plotID
+            individual_id = selected_tree.individualID
+            site_id = selected_tree.siteID
+
+            local_y_min, local_y_max = int(selected_crown.local_y_min), int(selected_crown.local_y_max)
+            local_x_min, local_x_max = int(selected_crown.local_x_min), int(selected_crown.local_x_max)
+
+            rgb = self.plot.rgb[local_y_min:local_y_max, local_x_min:local_x_max,...]
+            chm = self.plot.canopy_height_model[local_y_min:local_y_max, local_x_min:local_x_max,...]
+
+            label_subset = self.labelled_plot[local_y_min:local_y_max, local_x_min:local_x_max,...]
+            label_mask = label_subset == crown_idx +1
+
+            #Potentially do this to clean up labels
+            label_mask = morphology.remove_small_objects(morphology.erosion(label_mask), min_size=225)
+            #TODO: make this a button on the tree approver
+
+            #Need to get HS and RGB onto same grid to get HS mask. This could all maybe be moved to Tree?
+
+            hs_x_min, hs_y_min = math.floor(local_x_min/10), math.floor(local_y_min/10)
+            hs_x_max, hs_y_max = math.ceil(local_x_max/10), math.ceil(local_y_max/10)
+
+            x_left_pad, x_right_pad = local_x_min-(hs_x_min*10), (hs_x_max*10) - local_x_max
+            y_up_pad, y_down_pad = local_y_min - (hs_y_min*10), (hs_y_max*10) - local_y_max 
+
+            rgb_mask = np.pad(label_mask, ((y_up_pad, y_down_pad), (x_left_pad, x_right_pad)))
+            chm = np.pad(chm, ((y_up_pad, y_down_pad), (x_left_pad, x_right_pad)))
+
+            hs = self.plot.hyperspectral[hs_y_min:hs_y_max, hs_x_min:hs_x_max, ...]
+            hs_bands = self.plot.hyperspectral_bands
+            
+            #Fix origin to account for padding
+            #0 is y, 1 is x
+            utm_origin = selected_crown.utm_origin[0] + y_up_pad*.1, selected_crown.utm_origin[1] - x_left_pad*.1
+            
+
+            new_tree = Tree(
+                hyperspectral=hs,
+                rgb=rgb,
+                rgb_mask=rgb_mask,
+                hyperspectral_bands=hs_bands,
+                chm=chm,
+                site_id=site_id,
+                plot_id=plot_id,
+                utm_origin=utm_origin,
+                individual_id=individual_id,
+                taxa=taxa
+            )
+            trees.append(new_tree)
+
+
+        return trees
+    
+
+
+    def segment_canopy(self):
         mask = self.plot.canopy_height_model>2
 
         #CAN ALSO TRY SCIPY METHODS HERE
@@ -345,17 +498,83 @@ class TreeBuilder:
 
         markers = np.zeros(self.plot.rgb.shape[0:2], dtype=np.int32)
         for ix, rowcol in enumerate(self.plot.tree_tops_local):
-            markers[rowcol] = ix
+            #Zero means not a marker so we add 1
+            markers[rowcol] = ix + 1
 
         labelled = watershed(sobel(rgb2gray(self.plot.rgb)), markers=markers, mask=mask, compactness=0.01)
     
-        #NEXT STEPS: https://stackoverflow.com/questions/49774179/python-get-boundingbox-coordinates-for-each-cluster-in-segmentation-map-2d-num
-        #Do argwhere for each index
-        #crop and keep track of bbox?
-        pass
+
+        canopy_segs = []
+        for ix in np.unique(labelled):
+            if ix == 0:
+                continue
+            bbox = np.argwhere(labelled == ix)
+            canopy_segs.append(CanopySegment(bbox, self.plot.cm_affine, self.plot.epsg, ix))
+
+        return canopy_segs, labelled
     
-    def identify_trees(self):
-        pass
+    def identify_trees(self, search_buffer = 3, max_search = 10):
+        tree_skip_list = set()
+        selected_crowns = set()
+        labelled_pairs = dict()
+        searches = 0
+        num_pairs = len(labelled_pairs)
+        while searches<max_search:
+            for ix, tree in self.plot.potential_trees.iterrows():
+                if ix not in tree_skip_list:
+                    #Finds the index of the best tree top/crown pair based on distance to tree top
+                    best_crown_idx = self.find_best_crown(tree, search_buffer, selected_crowns)
+                    #Finds the best potential tree for that tree top/crown pair
+                    if best_crown_idx is not None:
+                        best_tree_idx = self.find_best_tree(best_crown_idx, search_buffer, tree_skip_list)
+                    else:
+                        #If there are no treetops within distance just throw this one out
+                        tree_skip_list.add(ix)
+                    #If they are both each others best pair, add them to the pairs list and remove from consideration
+                    if best_tree_idx == ix:
+                        selected_crowns.add(best_crown_idx)
+                        tree_skip_list.add(best_tree_idx)
+                        labelled_pairs[int(best_tree_idx)] = int(best_crown_idx)
+            searches += 1
+            #Early stopping if we are not adding anymore pairs
+            if num_pairs == len(labelled_pairs):
+                break
+            num_pairs = len(labelled_pairs)
+        
+        return labelled_pairs
+        
+        print('here')
+                
+
+    #Find the closest tree top/crown pair based on distance to potential labelled tree
+    def find_best_crown(self, tree, search_buffer, selected_crowns):
+        #Remove any already selected tops/crowns from consideration
+        test_tops = self.plot.tree_tops.loc[self.plot.tree_tops.index.difference(selected_crowns)]
+        distances = test_tops.distance(tree.geometry)
+        distances = distances[distances<search_buffer]
+        if len(distances) == 0:
+            return None
+        return distances.sort_values().index[0]
+
+    #Find best potential labelled tree based on distance to tree top/crown pair
+    def find_best_tree(self, best_crown_idx, search_buffer, tree_skip_list):
+
+        tree_top = self.plot.tree_tops.loc[best_crown_idx]
+        #Remove any skipped/selected trees from consideration
+        test_trees = self.plot.potential_trees.loc[self.plot.potential_trees.index.difference(tree_skip_list)]
+        distances = test_trees.distance(tree_top.geometry)
+        distances = distances[distances<search_buffer]
+        if len(distances) == 0:
+            return None
+        return distances.sort_values().index[0]
+
+
+class TreePlotter:
+    def __init__(
+        self,
+        tree: Tree
+    ):
+        self.tree = tree
 
     
 
