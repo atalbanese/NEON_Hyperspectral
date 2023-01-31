@@ -350,10 +350,12 @@ class TreeBuilder:
         labelled = watershed(sobel(rgb2gray(self.plot.rgb)), markers=markers, mask=mask, compactness=0.01)
     
         #NEXT STEPS: https://stackoverflow.com/questions/49774179/python-get-boundingbox-coordinates-for-each-cluster-in-segmentation-map-2d-num
+        #Do argwhere for each index
+        #crop and keep track of bbox?
         pass
     
     def identify_trees(self):
-        segmented = self.segment_trees()
+        pass
 
     
 
