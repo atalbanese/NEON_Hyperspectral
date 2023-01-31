@@ -3,6 +3,8 @@ import torch
 import geopandas as gpd
 import os
 import shapely
+from rasterio.transform import from_origin, AffineTransformer
+from builder_classes import TreeBuilder
 
 class Tree:
     def __init__(
@@ -62,8 +64,23 @@ class Plot:
         self.tree_tops = tree_tops
         self.canopy_height_model = canopy_height_model
         self.potential_trees = potential_trees
+        self.tree_tops_local = self.make_local_tree_tops()
 
         self.identified_trees = list()
+    
+    def make_local_tree_tops(self):
+        affine = AffineTransformer(from_origin(self.utm_origin[0], self.utm_origin[1], .1, .1))
+        out_list = []
+        for ix, tree in self.tree_tops.iterrows():
+            out_list.append(affine.rowcol(tree.geometry.x, tree.geometry.y))
+        return out_list
+
+    def find_trees(self):
+        tree_builder = TreeBuilder(self)
+        identified_trees = tree_builder.identify_trees()
+
+        
+
 
     pass
 
