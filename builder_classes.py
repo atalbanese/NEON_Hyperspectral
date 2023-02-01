@@ -679,7 +679,7 @@ class TreePlotter:
         
         rgb_im = self.rgb_ax.imshow(mark_boundaries(self.tree.rgb, self.tree.rgb_mask), picker=True)
         self.rgb_ax.set_xticks(self.rgb_ticks_x)
-        self.rgb_ax.set_yticks(self.rgb_ticks_x)
+        self.rgb_ax.set_yticks(self.rgb_ticks_y)
         self.rgb_ax.grid()
 
         return rgb_im
@@ -714,7 +714,7 @@ def annotate_all(completed_plots, **kwargs):
 if __name__ == "__main__":
 
     annotate_all(
-        [],
+        ['NIWO_001'],
         sitename = "NIWO",
         h5_files= 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022',
         chm_files= 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test',
