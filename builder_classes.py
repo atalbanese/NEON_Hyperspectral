@@ -120,19 +120,6 @@ class Tree:
         self.rgb_mask = self.old_rgb_mask
         self.hyperspectral_mask = self.make_hs_mask()
 
-    #TODO: Will Be switched to LoadedTree
-    # def get_masked_hs(self, out_type ='numpy'):
-    #     if out_type == 'numpy':
-    #         return self.hyperspectral[self.hyperspectral_mask]
-    #     if out_type == 'torch':
-    #         return torch.from_numpy(self.hyperspectral[self.hyperspectral_mask])
-
-
-    # def get_masked_rgb(self, out_type ='numpy'):
-    #     if out_type == 'numpy':
-    #         return self.rgb[self.rgb]
-    #     if out_type == 'torch':
-    #         return torch.from_numpy(self.rgb[self.rgb_mask])
     
     def save(self):
         savedir = os.path.join(self.plot.base_dir, self.plot.sitename, self.plot.name)
@@ -725,23 +712,3 @@ if __name__ == "__main__":
         epsg='EPSG:32613',
         base_dir=r'C:\Users\tonyt\Documents\Research\thesis_final'
         )
-
-    # test = PlotBuilder(
-    #     sitename = "NIWO",
-    #     h5_files= 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022',
-    #     chm_files= 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test',
-    #     ttop_files = "C:/Users/tonyt/Documents/Research/datasets/niwo_tree_tops",
-    #     tree_data_file= 'C:/Users/tonyt/Documents/Research/datasets/tree_locations/NIWO.geojson',
-    #     rgb_files =  r'C:\Users\tonyt\Documents\Research\datasets\rgb\NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022',
-    #     epsg='EPSG:32613',
-    #     base_dir=r'C:\Users\tonyt\Documents\Research\thesis_final'
-    # )
-
-    # #all_plots = []
-
-    # pb = test.build_plots()
-    # test = next(pb)
-    # test.find_trees()
-    # test.plot_and_check_trees()
-    
-    # print('here')
