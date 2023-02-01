@@ -145,6 +145,9 @@ class Tree:
             hyperspectral_bands = self.hyperspectral_bands,
             chm = self.chm,
             utm_origin = np.array(self.utm_origin),
+            taxa = self.taxa,
+            plot_id = self.plot_id,
+            site_id = self.site_id
             )
 
 
@@ -464,7 +467,7 @@ class TreeBuilder:
             selected_tree = self.plot.potential_trees.loc[tree_idx]
             selected_crown = self.canopy_segments_gdf.loc[self.canopy_segments_gdf['ttop_index'] == crown_idx]
 
-            taxa = selected_tree.abs
+            taxa = selected_tree.taxonID
             plot_id = selected_tree.plotID
             individual_id = selected_tree.individualID
             site_id = selected_tree.siteID
@@ -613,7 +616,7 @@ class TreePlotter:
         self.tree = tree
         #self.save_size = save_size
 
-        self.fig, self.axes = plt.subplots(nrows=1, ncols=2, figsize=(8, 3.5))
+        self.fig, self.axes = plt.subplots(nrows=1, ncols=2, figsize=(10, 5))
         self.hs_ax = self.axes[0]
         self.rgb_ax = self.axes[1]
 
@@ -632,7 +635,7 @@ class TreePlotter:
         print('here')
         
     def on_press(self, event):
-        print('press')
+        #print('press')
         if event.key == 'c':
             self.tree.clean_label_mask()
             self.update()
@@ -644,9 +647,11 @@ class TreePlotter:
             plt.close()
         if event.key == 'r':
             plt.close()
+        if event.key == 's':
+            self.fig.savefig(os.path.join(self.tree.plot.base_dir, "Figures", "Annotation", self.tree.name + ".pdf"))
 
     def on_click(self, event):
-        print('event')
+        #print('event')
         artist = event.artist
         if artist.axes == self.hs_ax:
             self.handle_hs_click(event)
@@ -683,13 +688,19 @@ class TreePlotter:
         print(y_loc)
         self.tree.hyperspectral_mask[y_loc, x_loc] = ~self.tree.hyperspectral_mask[y_loc, x_loc]
     
-    
+def annotate_all(**kwargs):
+    pb = PlotBuilder(**kwargs)
+    for plot in pb.build_plots():
+        print(plot.name)
+        plot.find_trees()
+        plot.plot_and_check_trees()
+
     
 
 
 if __name__ == "__main__":
 
-    test = PlotBuilder(
+    annotate_all(
         sitename = "NIWO",
         h5_files= 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022',
         chm_files= 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test',
@@ -697,14 +708,25 @@ if __name__ == "__main__":
         tree_data_file= 'C:/Users/tonyt/Documents/Research/datasets/tree_locations/NIWO.geojson',
         rgb_files =  r'C:\Users\tonyt\Documents\Research\datasets\rgb\NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022',
         epsg='EPSG:32613',
-        base_dir='C:\Users\tonyt\Documents\Research\thesis_final'
-    )
+        base_dir=r'C:\Users\tonyt\Documents\Research\thesis_final'
+        )
 
-    #all_plots = []
+    # test = PlotBuilder(
+    #     sitename = "NIWO",
+    #     h5_files= 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022',
+    #     chm_files= 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test',
+    #     ttop_files = "C:/Users/tonyt/Documents/Research/datasets/niwo_tree_tops",
+    #     tree_data_file= 'C:/Users/tonyt/Documents/Research/datasets/tree_locations/NIWO.geojson',
+    #     rgb_files =  r'C:\Users\tonyt\Documents\Research\datasets\rgb\NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022',
+    #     epsg='EPSG:32613',
+    #     base_dir=r'C:\Users\tonyt\Documents\Research\thesis_final'
+    # )
 
-    pb = test.build_plots()
-    test = next(pb)
-    test.find_trees()
-    test.plot_and_check_trees()
+    # #all_plots = []
+
+    # pb = test.build_plots()
+    # test = next(pb)
+    # test.find_trees()
+    # test.plot_and_check_trees()
     
-    print('here')
+    # print('here')
