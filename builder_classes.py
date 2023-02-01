@@ -3,7 +3,6 @@ import geopandas as gpd
 import pandas as pd
 import h5py as hp
 import shapely
-import torch
 import math
 import os
 from rasterio.transform import from_origin, AffineTransformer
@@ -67,6 +66,7 @@ class Plot:
     def plot_and_check_trees(self, save_size = 8):
         for tree in self.identified_trees:
             tp = TreePlotter(tree)
+
 
 class Tree:
     def __init__(
@@ -149,9 +149,6 @@ class Tree:
             plot_id = self.plot_id,
             site_id = self.site_id
             )
-
-
-    
 
 
 class TileSet:
@@ -565,14 +562,15 @@ class TreeBuilder:
                     #Finds the best potential tree for that tree top/crown pair
                     if best_crown_idx is not None:
                         best_tree_idx = self.find_best_tree(best_crown_idx, search_buffer, tree_skip_list)
+                        if best_tree_idx == ix:
+                            selected_crowns.add(best_crown_idx)
+                            tree_skip_list.add(best_tree_idx)
+                            labelled_pairs[int(best_tree_idx)] = int(best_crown_idx)
                     else:
                         #If there are no treetops within distance just throw this one out
                         tree_skip_list.add(ix)
                     #If they are both each others best pair, add them to the pairs list and remove from consideration
-                    if best_tree_idx == ix:
-                        selected_crowns.add(best_crown_idx)
-                        tree_skip_list.add(best_tree_idx)
-                        labelled_pairs[int(best_tree_idx)] = int(best_crown_idx)
+                    
             searches += 1
             #Early stopping if we are not adding anymore pairs
             if num_pairs == len(labelled_pairs):
@@ -623,6 +621,9 @@ class TreePlotter:
         self.hs_ax.set_title('1m Hyperspectral Mask')
         self.rgb_ax.set_title('10cm RGB')
 
+        self.rgb_ticks_x = np.arange(0, self.tree.rgb.shape[1], 10)
+        self.rgb_ticks_y = np.arange(0, self.tree.rgb.shape[0], 10)
+
         self.hs_im = self.draw_hs()
         self.rgb_im = self.draw_rgb()
 
@@ -655,6 +656,8 @@ class TreePlotter:
         artist = event.artist
         if artist.axes == self.hs_ax:
             self.handle_hs_click(event)
+        if artist.axes == self.rgb_ax:
+            self.handle_rgb_click(event)
         self.update()
 
     def update(self):
@@ -674,7 +677,10 @@ class TreePlotter:
 
     def draw_rgb(self):
         
-        rgb_im = self.rgb_ax.imshow(mark_boundaries(self.tree.rgb, self.tree.rgb_mask))
+        rgb_im = self.rgb_ax.imshow(mark_boundaries(self.tree.rgb, self.tree.rgb_mask), picker=True)
+        self.rgb_ax.set_xticks(self.rgb_ticks_x)
+        self.rgb_ax.set_yticks(self.rgb_ticks_x)
+        self.rgb_ax.grid()
 
         return rgb_im
     
@@ -685,15 +691,22 @@ class TreePlotter:
     def handle_hs_click(self, event):
         x_loc = round(event.mouseevent.xdata)
         y_loc = round(event.mouseevent.ydata)
-        print(y_loc)
+        #print(y_loc)
         self.tree.hyperspectral_mask[y_loc, x_loc] = ~self.tree.hyperspectral_mask[y_loc, x_loc]
     
-def annotate_all(**kwargs):
+    def handle_rgb_click(self, event):
+        x_loc = math.floor(event.mouseevent.xdata/10)
+        y_loc = math.floor(event.mouseevent.ydata/10)
+        self.tree.hyperspectral_mask[y_loc, x_loc] = ~self.tree.hyperspectral_mask[y_loc, x_loc]
+
+    
+def annotate_all(completed_plots, **kwargs):
     pb = PlotBuilder(**kwargs)
     for plot in pb.build_plots():
         print(plot.name)
-        plot.find_trees()
-        plot.plot_and_check_trees()
+        if plot.name not in completed_plots:
+            plot.find_trees()
+            plot.plot_and_check_trees()
 
     
 
@@ -701,6 +714,7 @@ def annotate_all(**kwargs):
 if __name__ == "__main__":
 
     annotate_all(
+        [],
         sitename = "NIWO",
         h5_files= 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022',
         chm_files= 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test',
