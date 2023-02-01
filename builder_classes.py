@@ -16,64 +16,6 @@ from skimage.segmentation import watershed, mark_boundaries
 from skimage.color import rgb2gray
 from skimage.filters import sobel
 
-
-
-
-
-class Tree:
-    def __init__(
-        self,
-        hyperspectral: np.ndarray,
-        rgb: np.ndarray,
-        rgb_mask: np.ndarray,
-        hyperspectral_bands: list,
-        chm: np.ndarray,
-        site_id: str,
-        plot_id: str,
-        utm_origin: tuple,
-        individual_id:str,
-        taxa: str,
-        ):
-
-        self.hyperspectral = hyperspectral
-        self.rgb = rgb
-        self.rgb_mask = rgb_mask
-        self.hyperspectral_mask = self.make_hs_mask()
-        self.hyperspectral_bands = hyperspectral_bands
-        self.site_id = site_id
-        self.taxa = taxa
-        self.utm_origin = utm_origin
-        self.plot_id = plot_id
-        self.individual_id = individual_id
-        self.chm = chm
-
-    def make_hs_mask(self):
-        y_shape, x_shape = self.rgb_mask.shape[0]//10, self.rgb_mask.shape[1]//10
-        out = np.zeros((y_shape, x_shape), dtype=np.bool8)
-        for i in range(y_shape):
-            for j in range(x_shape):
-                subset = self.rgb_mask[i*10:(i+1)*10, j*10:(j+1)*10]
-                if subset.sum()>50:
-                    out[i, j] = True
-        return out
-
-
-    def get_masked_hs(self, out_type ='numpy'):
-        if out_type == 'numpy':
-            return self.hyperspectral[self.hyperspectral_mask]
-        if out_type == 'torch':
-            return torch.from_numpy(self.hyperspectral[self.hyperspectral_mask])
-
-
-    def get_masked_rgb(self, out_type ='numpy'):
-        if out_type == 'numpy':
-            return self.rgb[self.rgb]
-        if out_type == 'torch':
-            return torch.from_numpy(self.rgb[self.rgb_mask])
-
-    
-
-
 class Plot:
     def __init__(
         self,
@@ -85,8 +27,14 @@ class Plot:
         tree_tops: gpd.GeoDataFrame,
         canopy_height_model: np.ndarray,
         potential_trees: gpd.GeoDataFrame,
-        epsg
+        epsg: str,
+        base_dir: str,
+        name: str,
+        sitename: str
     ):
+        self.name = name
+        self.sitename = sitename
+        self.base_dir = base_dir
         self.epsg = epsg
         self.width = width
         self.utm_origin = utm_origin
@@ -115,12 +63,92 @@ class Plot:
         #This will modifiy some of the data in this object as well. They are intertwined like the forest and the sky
         tree_builder = TreeBuilder(self)
         self.identified_trees = tree_builder.build_trees()
-        #identified_trees = tree_builder.identify_trees()
 
-        
+    def plot_and_check_trees(self, save_size = 8):
+        for tree in self.identified_trees:
+            tp = TreePlotter(tree)
+
+class Tree:
+    def __init__(
+        self,
+        hyperspectral: np.ndarray,
+        rgb: np.ndarray,
+        rgb_mask: np.ndarray,
+        hyperspectral_bands: np.ndarray,
+        chm: np.ndarray,
+        site_id: str,
+        plot_id: str,
+        utm_origin: tuple,
+        individual_id:str,
+        taxa: str,
+        plot: Plot,
+        ):
+
+        self.hyperspectral = hyperspectral
+        self.rgb = rgb
+        self.rgb_mask = rgb_mask
+        self.hyperspectral_mask = self.make_hs_mask()
+        self.hyperspectral_bands = hyperspectral_bands
+        self.site_id = site_id
+        self.taxa = taxa
+        self.utm_origin = utm_origin
+        self.plot_id = plot_id
+        self.individual_id = individual_id
+        self.chm = chm
+        self.old_rgb_mask = None
+        self.plot = plot
+
+        self.name = f"{plot_id}_{individual_id}_{taxa}"
+
+    def make_hs_mask(self):
+        y_shape, x_shape = self.rgb_mask.shape[0]//10, self.rgb_mask.shape[1]//10
+        out = np.zeros((y_shape, x_shape), dtype=np.bool8)
+        for i in range(y_shape):
+            for j in range(x_shape):
+                subset = self.rgb_mask[i*10:(i+1)*10, j*10:(j+1)*10]
+                if subset.sum()>50:
+                    out[i, j] = True
+        return out
+    
+    def clean_label_mask(self):
+        self.old_rgb_mask = self.rgb_mask
+        self.rgb_mask = morphology.remove_small_objects(morphology.erosion(self.rgb_mask), min_size=225)
+        self.hyperspectral_mask = self.make_hs_mask()
+    
+    def go_back_to_old_mask(self):
+        self.rgb_mask = self.old_rgb_mask
+        self.hyperspectral_mask = self.make_hs_mask()
+
+    #TODO: Will Be switched to LoadedTree
+    # def get_masked_hs(self, out_type ='numpy'):
+    #     if out_type == 'numpy':
+    #         return self.hyperspectral[self.hyperspectral_mask]
+    #     if out_type == 'torch':
+    #         return torch.from_numpy(self.hyperspectral[self.hyperspectral_mask])
 
 
-    pass
+    # def get_masked_rgb(self, out_type ='numpy'):
+    #     if out_type == 'numpy':
+    #         return self.rgb[self.rgb]
+    #     if out_type == 'torch':
+    #         return torch.from_numpy(self.rgb[self.rgb_mask])
+    
+    def save(self):
+        savedir = os.path.join(self.plot.base_dir, self.plot.sitename, self.plot.name)
+        if not os.path.exists(savedir):
+            os.makedirs(savedir)
+        np.savez(os.path.join(savedir, self.name),
+            hyperspectral = self.hyperspectral,
+            rgb = self.rgb,
+            rgb_mask = self.rgb_mask,
+            hyperspectral_mask = self.hyperspectral_mask,
+            hyperspectral_bands = self.hyperspectral_bands,
+            chm = self.chm,
+            utm_origin = np.array(self.utm_origin),
+            )
+
+
+    
 
 
 class TileSet:
@@ -170,7 +198,6 @@ class TileSet:
         return gdf
 
 
-
 class PlotBuilder:
     """Takes in known data for a study site and returns Plot object populated with relevant data for that plot. 
         All plots should be contained within a Study Site object. The goal is total abstraction"""
@@ -182,9 +209,11 @@ class PlotBuilder:
         ttop_files: str,
         rgb_files: str,
         tree_data_file: str,
-        epsg: str
+        epsg: str,
+        base_dir: str,
         ):
         #Static Vars
+        self.base_dir = base_dir
         self.sitename = sitename
         self.epsg = epsg
         self.h5_tiles = TileSet(h5_files, epsg, '.h5', (-3,-2), 1000)
@@ -244,7 +273,10 @@ class PlotBuilder:
             tree_tops= ttops,
             canopy_height_model= chm,
             potential_trees= selected_plot,
-            epsg = self.epsg
+            epsg = self.epsg,
+            base_dir= self.base_dir,
+            name = self.current_plot_id,
+            sitename=self.sitename
         )
 
 
@@ -409,7 +441,6 @@ class CanopySegment:
                 'geometry': self.to_polygon()}
 
 
-
 class TreeBuilder:
     def __init__(self, plot: Plot):
         self.plot = plot
@@ -448,7 +479,7 @@ class TreeBuilder:
             label_mask = label_subset == crown_idx +1
 
             #Potentially do this to clean up labels
-            label_mask = morphology.remove_small_objects(morphology.erosion(label_mask), min_size=225)
+            #label_mask = morphology.remove_small_objects(morphology.erosion(label_mask), min_size=225)
             #TODO: make this a button on the tree approver
 
             #Need to get HS and RGB onto same grid to get HS mask. This could all maybe be moved to Tree?
@@ -461,13 +492,16 @@ class TreeBuilder:
 
             rgb_mask = np.pad(label_mask, ((y_up_pad, y_down_pad), (x_left_pad, x_right_pad)))
             chm = np.pad(chm, ((y_up_pad, y_down_pad), (x_left_pad, x_right_pad)))
+            rgb = np.pad(rgb, ((y_up_pad, y_down_pad), (x_left_pad, x_right_pad), (0,0)))
 
             hs = self.plot.hyperspectral[hs_y_min:hs_y_max, hs_x_min:hs_x_max, ...]
+            #TODO: check if hs bands really are identical between all datasets
             hs_bands = self.plot.hyperspectral_bands
             
             #Fix origin to account for padding
             #0 is y, 1 is x
-            utm_origin = selected_crown.utm_origin[0] + y_up_pad*.1, selected_crown.utm_origin[1] - x_left_pad*.1
+            utm_origin = selected_crown.utm_origin.iat[0]
+            utm_origin = utm_origin[0] + y_up_pad*.1, utm_origin[1] - x_left_pad*.1
             
 
             new_tree = Tree(
@@ -480,7 +514,8 @@ class TreeBuilder:
                 plot_id=plot_id,
                 utm_origin=utm_origin,
                 individual_id=individual_id,
-                taxa=taxa
+                taxa=taxa,
+                plot=self.plot
             )
             trees.append(new_tree)
 
@@ -572,10 +607,83 @@ class TreeBuilder:
 class TreePlotter:
     def __init__(
         self,
-        tree: Tree
+        tree: Tree,
+        #save_size: int
     ):
         self.tree = tree
+        #self.save_size = save_size
 
+        self.fig, self.axes = plt.subplots(nrows=1, ncols=2, figsize=(8, 3.5))
+        self.hs_ax = self.axes[0]
+        self.rgb_ax = self.axes[1]
+
+        self.hs_ax.set_title('1m Hyperspectral Mask')
+        self.rgb_ax.set_title('10cm RGB')
+
+        self.hs_im = self.draw_hs()
+        self.rgb_im = self.draw_rgb()
+
+        self.fig.canvas.mpl_connect('key_press_event', self.on_press)
+        self.fig.canvas.mpl_connect('pick_event', self.on_click)
+        self.fig.suptitle("A = Accept and Save | R = Reject | C = Clean Up | V = Revert\nClick to toggle pixels")
+        self.fig.supxlabel(tree.name)
+
+        plt.show()
+        print('here')
+        
+    def on_press(self, event):
+        print('press')
+        if event.key == 'c':
+            self.tree.clean_label_mask()
+            self.update()
+        if event.key == 'v':
+            self.tree.go_back_to_old_mask()
+            self.update()
+        if event.key == 'a':
+            self.tree.save()
+            plt.close()
+        if event.key == 'r':
+            plt.close()
+
+    def on_click(self, event):
+        print('event')
+        artist = event.artist
+        if artist.axes == self.hs_ax:
+            self.handle_hs_click(event)
+        self.update()
+
+    def update(self):
+        self.hs_ax.clear()
+        self.rgb_ax.clear()
+        self.draw_hs()
+        self.draw_rgb()
+        self.hs_im.axes.figure.canvas.draw()
+        self.rgb_im.axes.figure.canvas.draw()
+
+    def draw_hs(self):
+        # rgb = [700, 546.1, 435.8]
+        # rgb_idxs = [self.find_nearest(wave) for wave in rgb]
+        
+        hs_im = self.hs_ax.imshow(self.tree.hyperspectral_mask, picker=True)
+        return hs_im
+
+    def draw_rgb(self):
+        
+        rgb_im = self.rgb_ax.imshow(mark_boundaries(self.tree.rgb, self.tree.rgb_mask))
+
+        return rgb_im
+    
+    def find_nearest(self, search_val):
+        diff_arr = np.absolute(self.tree.hyperspectral_bands-search_val)
+        return diff_arr.argmin()
+
+    def handle_hs_click(self, event):
+        x_loc = round(event.mouseevent.xdata)
+        y_loc = round(event.mouseevent.ydata)
+        print(y_loc)
+        self.tree.hyperspectral_mask[y_loc, x_loc] = ~self.tree.hyperspectral_mask[y_loc, x_loc]
+    
+    
     
 
 
@@ -588,7 +696,8 @@ if __name__ == "__main__":
         ttop_files = "C:/Users/tonyt/Documents/Research/datasets/niwo_tree_tops",
         tree_data_file= 'C:/Users/tonyt/Documents/Research/datasets/tree_locations/NIWO.geojson',
         rgb_files =  r'C:\Users\tonyt\Documents\Research\datasets\rgb\NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022',
-        epsg='EPSG:32613'
+        epsg='EPSG:32613',
+        base_dir='C:\Users\tonyt\Documents\Research\thesis_final'
     )
 
     #all_plots = []
@@ -596,5 +705,6 @@ if __name__ == "__main__":
     pb = test.build_plots()
     test = next(pb)
     test.find_trees()
+    test.plot_and_check_trees()
     
     print('here')
