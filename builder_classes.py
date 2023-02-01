@@ -61,7 +61,8 @@ class Plot:
     def find_trees(self):
         #This will modifiy some of the data in this object as well. They are intertwined like the forest and the sky
         tree_builder = TreeBuilder(self)
-        self.identified_trees = tree_builder.build_trees()
+        if len(tree_builder.canopy_segments) >0:
+            self.identified_trees = tree_builder.build_trees()
 
     def plot_and_check_trees(self, save_size = 8):
         for tree in self.identified_trees:
@@ -211,6 +212,7 @@ class PlotBuilder:
         tree_data_file: str,
         epsg: str,
         base_dir: str,
+        completed_plots: list,
         ):
         #Static Vars
         self.base_dir = base_dir
@@ -221,7 +223,7 @@ class PlotBuilder:
         self.ttop_tiles = TileSet(ttop_files, epsg, '.geojson', (-3, -2), 1000)
         self.rgb_tiles = TileSet(rgb_files, epsg, '.tif', (-3, -2), 1000)
         self.plot_data_file = gpd.read_file(tree_data_file).sort_values(['easting_plot', 'northing_plot'])
-        self.all_plot_ids = list(np.unique(self.plot_data_file.plotID))
+        self.all_plot_ids = list(set(np.unique(self.plot_data_file.plotID)) - set(completed_plots))
 
         #Will need two affine transforms for 1m and 10cm raster data
 
@@ -446,14 +448,15 @@ class TreeBuilder:
         self.plot = plot
         #Find visible canopies using watershed segmentation + lidar treetops locations
         self.canopy_segments, self.labelled_plot = self.segment_canopy()
-        #Make geodataframe of segment bounding boxes
-        #Need to get actual label geometry in here somehow
-        self.canopy_segments_gdf = gpd.GeoDataFrame.from_features([cs.to_dict() for cs in self.canopy_segments])
+        if len(self.canopy_segments) > 0: 
+            #Make geodataframe of segment bounding boxes
+            #Need to get actual label geometry in here somehow
+            self.canopy_segments_gdf = gpd.GeoDataFrame.from_features([cs.to_dict() for cs in self.canopy_segments])
 
-        #Drop any tree tops that didn't match visible trees
-        self.plot.drop_ttops(self.canopy_segments_gdf['ttop_index'])
-        self.tree_crown_pairs = self.identify_trees()
-        #self.labelled_trees = self.build_trees()
+            #Drop any tree tops that didn't match visible trees
+            self.plot.drop_ttops(self.canopy_segments_gdf['ttop_index'])
+            self.tree_crown_pairs = self.identify_trees()
+            #self.labelled_trees = self.build_trees()
 
 
     
@@ -700,13 +703,11 @@ class TreePlotter:
         self.tree.hyperspectral_mask[y_loc, x_loc] = ~self.tree.hyperspectral_mask[y_loc, x_loc]
 
     
-def annotate_all(completed_plots, **kwargs):
+def annotate_all(**kwargs):
     pb = PlotBuilder(**kwargs)
     for plot in pb.build_plots():
-        print(plot.name)
-        if plot.name not in completed_plots:
-            plot.find_trees()
-            plot.plot_and_check_trees()
+        plot.find_trees()
+        plot.plot_and_check_trees()
 
     
 
@@ -714,7 +715,7 @@ def annotate_all(completed_plots, **kwargs):
 if __name__ == "__main__":
 
     annotate_all(
-        ['NIWO_001'],
+        completed_plots = ['NIWO_001', 'NIWO_002', 'NIWO_004', 'NIWO_005', 'NIWO_007', 'NIWO_009', 'NIWO_010', 'NIWO_011', 'NIWO_012', 'NIWO_014', 'NIWO_015', 'NIWO_016', 'NIWO_017', 'NIWO_041'],
         sitename = "NIWO",
         h5_files= 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022',
         chm_files= 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test',
