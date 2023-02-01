@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import itertools
 from typing import Literal
+import math
 
 class TreeData:
     def __init__(
@@ -75,9 +76,6 @@ class SiteData:
         self.validation_data = None
 
 
-
-        print('here')
-
     
     def find_all_trees(self):
         all_dirs = [os.scandir(d) for d in os.scandir(self.site_dir) if d.is_dir()]
@@ -107,6 +105,36 @@ class SiteData:
         if split_style == "plot_level":
             self.make_plot_level_splits()
 
+    def make_tree_level_splits(self):
+        training, testing, validation = [], [], []
+
+        #Splits trees proportionally to how frequently taxa appear ie if there are 100 pine trees and 10 spruce and a 6/2/2 split, there will be 60/20/20 pines and 6/2/2 spruce
+        for tree_list in self.all_taxa.values():
+            list_length = len(tree_list)
+            train_len = math.floor(self.train_proportion * list_length)
+            validation_len = math.floor(self.valid_proportion * list_length)
+
+            self.rng.shuffle(tree_list)
+
+            training = training + tree_list[0:train_len]
+            validation = validation + tree_list[train_len:train_len+validation_len]
+            testing = testing + tree_list[train_len+validation_len:]
+
+
+        self.training_data = training
+        self.testing_data = testing
+        self.validation_data = validation
+
+    def make_plot_level_splits():
+        pass
+
 
 if __name__ == "__main__":
-    test = SiteData(r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO', random_seed=42)
+    test = SiteData(
+        site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
+        random_seed=42,
+        train = 0.6,
+        test= 0.2,
+        valid = 0.2)
+
+    test.make_splits('tree_level')
