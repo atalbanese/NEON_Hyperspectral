@@ -84,7 +84,6 @@ class TreeData:
 
 
 
-
 class PlotData:
     def __init__(
         self,
@@ -285,7 +284,7 @@ class SiteData:
         return solutions_dict
 
     def get_data(self, 
-        data_selection: Literal["training", "testing", "validation", "all"], 
+        data_selection: Literal["training", "testing", "validation", "training and testing" "all"], 
         data_choices, 
         out_dim, 
         hs_filter=[[410,1357],[1400,1800],[1965,2490]], 
@@ -315,6 +314,8 @@ class SiteData:
             return self.validation_data
         if data_selection == "all":
             return self.all_trees
+        if data_selection == "training and testing":
+            return self.training_data + self.testing_data
 
 
 if __name__ == "__main__":
