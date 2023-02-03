@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 from einops import rearrange
-from data_loading_classes import SiteData
+from splitting import SiteData
 
 class TreeDataset(Dataset):
     def __init__(

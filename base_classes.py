@@ -4,7 +4,7 @@ import geopandas as gpd
 import os
 import shapely
 from rasterio.transform import from_origin, AffineTransformer
-from data_building_classes import TreeBuilder
+from annotation import TreeBuilder
 
 class Tree:
     def __init__(
