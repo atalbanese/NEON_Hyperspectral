@@ -286,7 +286,7 @@ class SiteData:
         data_selection: Literal["training", "testing", "validation", "training and testing" "all"], 
         data_choices, 
         out_dim, 
-        hs_filter=[[410,1357],[1400,1800],[1965,2490]], 
+        hs_filter=[[410,1357],[1400,1800],[1965,2485]], 
         make_key=False):
         working_data = self.select_working_data(data_selection)
         data_list = []

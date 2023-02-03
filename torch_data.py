@@ -5,19 +5,21 @@ from einops import rearrange
 from typing import Literal
 
 #These are just needed for testing
-# from splitting import SiteData
-# from torch.utils.data import DataLoader
+from splitting import SiteData
+from torch.utils.data import DataLoader
 #import scipy.ndimage
 
 class TreeDataset(Dataset):
     def __init__(
         self,
         tree_list,
-        output_mode: Literal["full", "pixel", "flat_padded"]
+        output_mode: Literal["full", "pixel", "flat_padded"],
+        pad_length = 16
     ):
         self.tree_list = tree_list
-        self.set_output_mode(output_mode)
-        self.pad_length = self.calculate_max_pad()
+        self.output_mode = output_mode
+        #self.set_output_mode(output_mode)
+        self.pad_length = pad_length
 
         if output_mode == 'pixel':
             print('Pixel mode does not output consistent sequence sizes and cannot be used with a torch DataLoader. Use mode padded_flat instead')
@@ -47,8 +49,8 @@ class TreeDataset(Dataset):
     def handle_padding(self, arr):
         pad_diff = self.pad_length - arr.shape[0]
         #0 = pay attention, 1= ignore
-        pad_mask = np.ones((self.pad_length,), dtype=np.uint8)
-        pad_mask[:arr.shape[0]] = 0
+        pad_mask = np.ones((self.pad_length,), dtype=np.bool8)
+        pad_mask[:arr.shape[0]] = False
 
         arr = np.pad(arr, ((0, pad_diff), (0,0)))
 
@@ -68,15 +70,15 @@ class TreeDataset(Dataset):
                     v, pad_mask = self.handle_padding(v)
                     assert v.shape[0] == self.pad_length, 'incorrect padding occured'
                     out[k] = torch.from_numpy(v).float()
-                    out[k+'_pad_mask'] = torch.from_numpy(pad_mask).byte()
+                    out[k+'_pad_mask'] = torch.from_numpy(pad_mask).bool()
                 elif v.dtype == np.bool8:
                     pass
                 else:
-                    out[k] = torch.from_numpy(v).float()
+                    out[k] = torch.from_numpy(v).long()
             else:
                 out[k] = v
         return out
-        pass
+
 
     #Only works with HS items rn, need to go back to splitting/treedata and pad the bigger arrays properly
     def get_pixel_item(self, item):
@@ -111,13 +113,13 @@ class TreeDataset(Dataset):
         
         return out
 
-    def set_output_mode(self, mode: Literal["full", "pixel", "flat_padded"]):
-        if mode == "full":
-            self.output_fn = self.get_full_patch
-        if mode == "pixel":
-            self.output_fn = self.get_pixel_item
-        if mode == "flat_padded":
-            self.output_fn = self.get_flat_item
+    def handle_output_mode(self, item):
+        if self.output_mode == "full":
+            return self.get_full_patch(item)
+        if self.output_mode == "pixel":
+            return self.get_pixel_item(item)
+        if self.output_mode == "flat_padded":
+            return self.get_flat_item(item)
         
     def __len__(self):
         return len(self.tree_list)
@@ -125,29 +127,29 @@ class TreeDataset(Dataset):
     def __getitem__(self, index):
 
         item = self.tree_list[index]
-        return self.output_fn(item)
+        return self.handle_output_mode(item)
 
 
-# if __name__ == "__main__":
-#     test = SiteData(
-#         site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
-#         random_seed=42,
-#         train = 0.6,
-#         test= 0.1,
-#         valid = 0.3)
+if __name__ == "__main__":
+    test = SiteData(
+        site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
+        random_seed=42,
+        train = 0.6,
+        test= 0.1,
+        valid = 0.3)
 
-#     #test.all_trees[0].apply_hs_filter([[410,1357],[1400,1800],[1965,2490]])
+    #test.all_trees[0].apply_hs_filter([[410,1357],[1400,1800],[1965,2490]])
 
-#     test.make_splits('plot_level')
-#     tree_data = test.get_data('training', ['hs', 'origin'], 16, make_key=True)
+    test.make_splits('plot_level')
+    tree_data = test.get_data('training', ['hs', 'origin'], 16, make_key=True)
 
-#     test_set = TreeDataset(tree_data, output_mode='pixel')
-#     test_loader = DataLoader(test_set, batch_size=len(test_set), num_workers=1)
+    test_set = TreeDataset(tree_data, output_mode='flat_padded')
+    test_loader = DataLoader(test_set, batch_size=len(test_set), num_workers=1)
 
-#     for x in test_loader:
-#         pass
+    for x in test_loader:
+        print(x.keys())
 
-#     #x = test_set.__getitem__(69)
+    x = test_set.__getitem__(69)
 
 #     print(x)
 
