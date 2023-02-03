@@ -79,7 +79,7 @@ class SimpleTransformer(pl.LightningModule):
         x = self.decoder(x)
 
         loss = self.loss(x, target)
-
+        self.log("val_loss", loss, prog_bar=True)
         return loss
 
     def configure_optimizers(self):
