@@ -73,8 +73,10 @@ class TreeDataset(Dataset):
                     out[k+'_pad_mask'] = torch.from_numpy(pad_mask).bool()
                 elif v.dtype == np.bool8:
                     pass
-                else:
+                elif k == 'single_target':
                     out[k] = torch.from_numpy(v).long()
+                else:
+                    out[k] = torch.from_numpy(v).float()
             else:
                 out[k] = v
         return out

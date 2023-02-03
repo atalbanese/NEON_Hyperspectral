@@ -300,10 +300,10 @@ class SiteData:
         return data_list
     
     def make_key(self, tree, out_dim):
-        new_key = np.zeros((out_dim, out_dim, self.num_taxa), np.float32)
+        new_key = np.zeros((self.num_taxa), np.float32)
 
         this_tree = tree.taxa
-        new_key[...,self.key[this_tree]] = 1.0
+        new_key[self.key[this_tree]] = 1.0
         return new_key
 
     def select_working_data(self, data_selection):

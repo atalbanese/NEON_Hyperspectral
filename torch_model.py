@@ -22,8 +22,7 @@ class SimpleTransformer(pl.LightningModule):
         #self.class_weights = class_weights
         self.scheduler = scheduler
 
-        self.loss = torch.nn.CrossEntropyLoss()
-        self.missing_data = torch.nn.Parameter(torch.randn((1)))
+        self.loss = torch.nn.CrossEntropyLoss(label_smoothing=0.05)
 
         encoder_layer = torch.nn.TransformerEncoderLayer(
             d_model = num_features,
@@ -34,9 +33,8 @@ class SimpleTransformer(pl.LightningModule):
         self.encoder = torch.nn.TransformerEncoder(
             encoder_layer=encoder_layer,
             num_layers = num_layers,
+            enable_nested_tensor=False,
         )
-
-        self.encoder = torch.nn.Sequential()
 
         post_pool_size = round((num_features - 4)/5) * sequence_length
         self.pooling = torch.nn.Sequential( torch.nn.MaxPool1d(5),
@@ -57,7 +55,22 @@ class SimpleTransformer(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         hs = batch['hs']
         hs_pad_mask = batch['hs_pad_mask']
-        target = batch['single_target']
+        target = batch['target_arr']
+
+        x = self.encoder(hs, src_key_padding_mask = hs_pad_mask)
+        #x = self.encoder(hs)
+        x = self.pooling(x)
+        x = torch.flatten(x, 1)
+        x = self.decoder(x)
+
+        loss = self.loss(x, target)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        hs = batch['hs']
+        hs_pad_mask = batch['hs_pad_mask']
+        target = batch['target_arr']
 
         x = self.encoder(hs, src_key_padding_mask = hs_pad_mask)
         #x = self.encoder(hs)
