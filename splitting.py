@@ -84,8 +84,6 @@ class TreeData:
 
         return return_dict
 
-
-
 class PlotData:
     def __init__(
         self,
@@ -121,7 +119,6 @@ class PlotData:
     @property
     def all_trees(self):
         return list(itertools.chain(*[v for v in self.trees.values()]))
-
 
 class SiteData:
     def __init__(

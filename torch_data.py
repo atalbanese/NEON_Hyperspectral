@@ -2,14 +2,25 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 from einops import rearrange
-from splitting import SiteData
+from typing import Literal
+
+#These are just needed for testing
+# from splitting import SiteData
+# from torch.utils.data import DataLoader
+#import scipy.ndimage
 
 class TreeDataset(Dataset):
     def __init__(
         self,
-        tree_list
+        tree_list,
+        output_mode: Literal["full", "pixel", "flat_padded"]
     ):
         self.tree_list = tree_list
+        self.set_output_mode(output_mode)
+        self.pad_length = self.calculate_max_pad()
+
+        if output_mode == 'pixel':
+            print('Pixel mode does not output consistent sequence sizes and cannot be used with a torch DataLoader. Use mode padded_flat instead')
 
     def fix_2d(self, item):
         return torch.from_numpy(item).float()
@@ -18,11 +29,72 @@ class TreeDataset(Dataset):
         item = rearrange(item, 'h w c -> c h w')
         return torch.from_numpy(item).float()
     
-    def get_flat_item(self):
+    def calculate_max_pad(self):
+        max_pad = 0
+        for tree in self.tree_list:
+            tree_sum = tree['hs_mask'].sum()
+            max_pad = tree_sum if tree_sum > max_pad else max_pad
+        return max_pad
+    
+    def handle_masking(self, arr, small_mask):
+        if arr.shape[0] == small_mask.shape[0]:
+            return arr[small_mask]
+        # if arr.shape[0] == big_mask.shape[0]:
+        #     return arr[big_mask]
+        else:
+            return arr
+
+    def handle_padding(self, arr):
+        pad_diff = self.pad_length - arr.shape[0]
+        #0 = pay attention, 1= ignore
+        pad_mask = np.ones((self.pad_length,), dtype=np.uint8)
+        pad_mask[:arr.shape[0]] = 0
+
+        arr = np.pad(arr, ((0, pad_diff), (0,0)))
+
+        return arr, pad_mask
+
+
+    def get_flat_item(self, item):
+        #TODO: there is definitely a way to reconcile this with get_pixel item
+        assert 'hs_mask' in item, 'no mask found to select pixels'
+        out = dict()
+        hs_mask = item['hs_mask']
+
+        for k,v in item.items():
+            if isinstance(v, np.ndarray):
+                if len(v.shape)>1 and v.dtype != np.bool8:
+                    v = self.handle_masking(v, hs_mask)
+                    v, pad_mask = self.handle_padding(v)
+                    assert v.shape[0] == self.pad_length, 'incorrect padding occured'
+                    out[k] = torch.from_numpy(v).float()
+                    out[k+'_pad_mask'] = torch.from_numpy(pad_mask).byte()
+                elif v.dtype == np.bool8:
+                    pass
+                else:
+                    out[k] = torch.from_numpy(v).float()
+            else:
+                out[k] = v
+        return out
         pass
 
-    def get_pixel_item(self):
-        pass
+    #Only works with HS items rn, need to go back to splitting/treedata and pad the bigger arrays properly
+    def get_pixel_item(self, item):
+        assert 'hs_mask' in item, 'no mask found to select pixels'
+        out = dict()
+        hs_mask = item['hs_mask']
+        #scaled_mask = scipy.ndimage.zoom(hs_mask, 10.0)
+
+        for k,v in item.items():
+            if isinstance(v, np.ndarray):
+                if len(v.shape)>1 and v.dtype != np.bool8:
+                    v = self.handle_masking(v, hs_mask)
+                    out[k] = torch.from_numpy(v).float()
+                else:
+                    out[k] = torch.from_numpy(v).float()
+            else:
+                out[k] = v
+        return out
 
     def get_full_patch(self, item):
         out = dict()
@@ -39,8 +111,13 @@ class TreeDataset(Dataset):
         
         return out
 
-    def set_output_mode(self):
-        pass
+    def set_output_mode(self, mode: Literal["full", "pixel", "flat_padded"]):
+        if mode == "full":
+            self.output_fn = self.get_full_patch
+        if mode == "pixel":
+            self.output_fn = self.get_pixel_item
+        if mode == "flat_padded":
+            self.output_fn = self.get_flat_item
         
     def __len__(self):
         return len(self.tree_list)
@@ -48,40 +125,31 @@ class TreeDataset(Dataset):
     def __getitem__(self, index):
 
         item = self.tree_list[index]
-
-        out = dict()
-        for k, v in item.items():
-            if isinstance(v, np.ndarray):
-                if len(v.shape) == 2:
-                    out[k] = self.fix_2d(v)
-                if len(v.shape) == 3:
-                    out[k] = self.fix_3d(v)
-                else:
-                    out[k] = torch.from_numpy(v).float()
-            else:
-                out[k] = v
-        
-        return out
+        return self.output_fn(item)
 
 
-if __name__ == "__main__":
-    test = SiteData(
-        site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
-        random_seed=42,
-        train = 0.6,
-        test= 0.1,
-        valid = 0.3)
+# if __name__ == "__main__":
+#     test = SiteData(
+#         site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
+#         random_seed=42,
+#         train = 0.6,
+#         test= 0.1,
+#         valid = 0.3)
 
-    #test.all_trees[0].apply_hs_filter([[410,1357],[1400,1800],[1965,2490]])
+#     #test.all_trees[0].apply_hs_filter([[410,1357],[1400,1800],[1965,2490]])
 
-    test.make_splits('plot_level')
-    tree_data = test.get_data('training', ['hs', 'chm', 'rgb', 'origin'], 16, make_key=True)
+#     test.make_splits('plot_level')
+#     tree_data = test.get_data('training', ['hs', 'origin'], 16, make_key=True)
 
-    test_set = TreeDataset(tree_data)
+#     test_set = TreeDataset(tree_data, output_mode='pixel')
+#     test_loader = DataLoader(test_set, batch_size=len(test_set), num_workers=1)
 
-    x = test_set.__getitem__(69)
+#     for x in test_loader:
+#         pass
 
-    print(x)
+#     #x = test_set.__getitem__(69)
+
+#     print(x)
 
 
 
