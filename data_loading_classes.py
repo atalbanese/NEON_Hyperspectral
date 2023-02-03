@@ -55,7 +55,7 @@ class TreeData:
             return arr[:out_dim, :out_dim,...]
         else:
             if three_d:
-                return np.pad(arr, [(0,y_pad), (0,x_pad), (0,0)])
+                return np.pad(arr, [(0,y_pad), (0,x_pad), (0,0)], mode='mean')
             else:
                 return np.pad(arr, [(0,y_pad), (0,x_pad)])
 
@@ -71,13 +71,15 @@ class TreeData:
             return_dict['hs_mask'] = self.pad_arr(self.hyperspectral_mask, out_dim)
         
         if "chm" in choices:
-            return_dict['chm'] = self.chm, out_dim
+            return_dict['chm'] = self.chm
         
         if "rgb" in choices:
             return_dict["rgb"] = self.rgb
         
         if "origin" in choices:
             return_dict["utm_origin"] = self.utm_origin
+        
+        return_dict['taxa'] = self.taxa
 
 
         return return_dict
@@ -290,13 +292,15 @@ class SiteData:
         hs_filter=[[410,1357],[1400,1800],[1965,2490]], 
         make_key=False):
         working_data = self.select_working_data(data_selection)
-
+        data_list = []
         for tree in working_data:
-            to_return = tree.get_dict(data_choices, out_dim, hs_filter)
+            to_append = tree.get_dict(data_choices, out_dim, hs_filter)
             if make_key:
-                to_return['key'] = self.make_key(tree, out_dim)
+                to_append['target_arr'] = self.make_key(tree, out_dim)
+                to_append['single_target'] = np.array(self.key[tree.taxa], dtype=np.float32)
         
-            yield to_return
+            data_list.append(to_append)
+        return data_list
     
     def make_key(self, tree, out_dim):
         new_key = np.zeros((out_dim, out_dim, self.num_taxa), np.float32)
