@@ -33,6 +33,7 @@ class BaseTreeDataSet(Dataset):
             if arr.shape[1] == 372:
                 arr = torch.from_numpy(arr).float()
                 arr = self.transforms(arr)
+                arr = arr.numpy()
         
         return arr
 
@@ -132,13 +133,13 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
         tree_samples = self.rng.choice(self.tree_list, self.pad_length, replace=False)
 
         tree_pix, tree_targets = self.assemble_tree_pixels(tree_samples)
-        synth_tree = torch.concat(tree_pix)[:self.pad_length,...]
+        synth_tree = np.concatenate(tree_pix)[:self.pad_length,...]
         synth_target = np.sum(tree_targets, axis=0)/self.pad_length
 
         #Done for consistency with other methods but we don't really need it
         pad_mask = torch.zeros((self.pad_length,), dtype=torch.bool)
 
-        out = {'hs': synth_tree,
+        out = {'hs': torch.from_numpy(synth_tree).float(),
                'target_arr': torch.from_numpy(synth_target).float(),
                'hs_pad_mask': pad_mask}
 

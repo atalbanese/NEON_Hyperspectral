@@ -33,14 +33,14 @@ if __name__ == "__main__":
         pad_length=16,
         num_synth_trees=5120,
         num_features=372,
-        stats='stats/niwo_statz.npz'
+        stats='stats/niwo_stats.npz'
     )
     train_loader = DataLoader(train_set, batch_size=512, num_workers=2)
 
-    valid_set = PaddedTreeDataSet(valid_data, pad_length=16)
+    valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='stats/niwo_stats.npz')
     valid_loader = DataLoader(valid_set, batch_size=38)
 
-    test_set = PaddedTreeDataSet(test_data, pad_length=16)
+    test_set = PaddedTreeDataSet(test_data, pad_length=16, stats='stats/niwo_stats.npz')
     test_loader = DataLoader(test_set)
 
     train_model = SimpleTransformer(
@@ -64,8 +64,8 @@ if __name__ == "__main__":
         save_top_k = 3
         )
 
-    logger = pl_loggers.MLFlowLogger(save_dir="thesis_final_logs/")
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=5000, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
+    logger = pl_loggers.TensorBoardLogger(save_dir=r'C:\Users\tonyt\Documents\Research\dl_model\lidar_hs_unsup_dl_model\most_recent_logs', default_hp_metric=False)
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=1000, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
     trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
-    trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
+    #trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
 

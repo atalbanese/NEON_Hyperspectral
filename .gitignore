@@ -22,3 +22,8 @@ final_logs/*
 *.0
 sentinel/lightning_logs/*
 *.npz
+ml-runs/729172761721984817/879059526119494fbb8f1c137cd1f290/tags/mlflow.runName
+ml-runs/729172761721984817/879059526119494fbb8f1c137cd1f290/tags/mlflow.source.git.commit
+ml-runs/729172761721984817/879059526119494fbb8f1c137cd1f290/tags/mlflow.source.name
+ml-runs/729172761721984817/879059526119494fbb8f1c137cd1f290/tags/mlflow.source.type
+ml-runs/729172761721984817/879059526119494fbb8f1c137cd1f290/tags/mlflow.user
