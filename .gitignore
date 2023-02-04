@@ -21,3 +21,4 @@ final_logs/*
 *.pyc
 *.0
 sentinel/lightning_logs/*
+*.npz

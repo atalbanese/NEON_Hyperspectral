@@ -32,7 +32,8 @@ if __name__ == "__main__":
         tree_list=train_data,
         pad_length=16,
         num_synth_trees=5120,
-        num_features=372
+        num_features=372,
+        stats='stats/niwo_statz.npz'
     )
     train_loader = DataLoader(train_set, batch_size=512, num_workers=2)
 
@@ -44,18 +45,18 @@ if __name__ == "__main__":
 
     train_model = SimpleTransformer(
         lr = 5e-4,
-        emb_size = 512,
+        emb_size = 128,
         scheduler=True,
         num_features=372,
         num_heads=12,
-        num_layers=8,
+        num_layers=4,
         num_classes=4,
         sequence_length=16
     )
 
     val_callback = ModelCheckpoint(
         dirpath='ckpts/', 
-        filename=f'niwo_synthetic_data_hand_annotated_labels_'+'{val_loss:.2f}_{epoch}',
+        filename=f'niwo_synthetic_data_hand_annotated_labels_normalized'+'{val_loss:.2f}_{epoch}',
         #every_n_epochs=log_every,
         monitor='val_loss',
         save_on_train_epoch_end=True,
@@ -63,8 +64,8 @@ if __name__ == "__main__":
         save_top_k = 3
         )
 
-    tb_logger = pl_loggers.TensorBoardLogger(save_dir="thesis_final_logs/")
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=5000, logger=tb_logger, log_every_n_steps=10, callbacks=[val_callback])
+    logger = pl_loggers.MLFlowLogger(save_dir="thesis_final_logs/")
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=5000, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
     trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
 

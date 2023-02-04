@@ -5,6 +5,15 @@ import torchvision.transforms.functional as F
 import random
 import numpy as np
 
+class NormalizeHS(torch.nn.Module):
+    def __init__(self, mean, std):
+        super().__init__()
+        self.mean = mean
+        self.std = std
+    
+    def forward(self, arr):
+        return (arr-self.mean)/self.std
+
 #From https://www.sciencedirect.com/science/article/pii/S0034425721000407
 class BrightnessAugment(torch.nn.Module):
     def __init__(self, p=0.5):
