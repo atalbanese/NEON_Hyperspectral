@@ -9,27 +9,34 @@ from splitting import SiteData
 from torch.utils.data import DataLoader
 #import scipy.ndimage
 
-class TreeDataset(Dataset):
-    def __init__(
-        self,
-        tree_list,
-        output_mode: Literal["full", "pixel", "flat_padded"],
-        pad_length = 16
-    ):
+
+class BaseTreeDataSet(Dataset):
+    def __init__(self,
+                tree_list
+                ):
+
+
         self.tree_list = tree_list
-        self.output_mode = output_mode
-        #self.set_output_mode(output_mode)
+    
+    def handle_masking(self, arr, mask):
+        if arr.shape[0] == mask.shape[0] and arr.shape[1] == mask.shape[1]:
+            return arr[mask]
+        else:
+            return arr
+
+    def __len__(self):
+        return len(self.tree_list)
+    
+    def __getitem__(self, index):
+        pass
+
+class PaddedTreeDataSet(BaseTreeDataSet):
+    def __init__(self, 
+                tree_list,
+                pad_length
+                ):
+        super().__init__(tree_list)
         self.pad_length = pad_length
-
-        if output_mode == 'pixel':
-            print('Pixel mode does not output consistent sequence sizes and cannot be used with a torch DataLoader. Use mode padded_flat instead')
-
-    def fix_2d(self, item):
-        return torch.from_numpy(item).float()
-
-    def fix_3d(self, item):
-        item = rearrange(item, 'h w c -> c h w')
-        return torch.from_numpy(item).float()
     
     def calculate_max_pad(self):
         max_pad = 0
@@ -38,14 +45,6 @@ class TreeDataset(Dataset):
             max_pad = tree_sum if tree_sum > max_pad else max_pad
         return max_pad
     
-    def handle_masking(self, arr, small_mask):
-        if arr.shape[0] == small_mask.shape[0]:
-            return arr[small_mask]
-        # if arr.shape[0] == big_mask.shape[0]:
-        #     return arr[big_mask]
-        else:
-            return arr
-
     def handle_padding(self, arr):
         pad_diff = self.pad_length - arr.shape[0]
         #0 = pay attention, 1= ignore
@@ -56,9 +55,8 @@ class TreeDataset(Dataset):
 
         return arr, pad_mask
 
-
-    def get_flat_item(self, item):
-        #TODO: there is definitely a way to reconcile this with get_pixel item
+    def __getitem__(self, index):
+        item = self.tree_list[index]
         assert 'hs_mask' in item, 'no mask found to select pixels'
         out = dict()
         hs_mask = item['hs_mask']
@@ -81,9 +79,69 @@ class TreeDataset(Dataset):
                 out[k] = v
         return out
 
+class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
+    def __init__(self, tree_list, pad_length, num_synth_trees, num_features):
+        super().__init__(tree_list)
+        self.pad_length = pad_length
+        self.num_synth_trees = num_synth_trees
+        self.num_features = num_features
+        self.rng = np.random.default_rng(42)
+    
+    #TODO: Mess around with rng weights to see if we can make up for unbalanced dataset?
 
-    #Only works with HS items rn, need to go back to splitting/treedata and pad the bigger arrays properly
-    def get_pixel_item(self, item):
+    def __len__(self):
+        return self.num_synth_trees
+    
+    def assemble_tree_pixels(self, tree_samples):
+        tree_pixels = []
+        tree_targets = []
+        synth_tree_len = 0
+        for tree in tree_samples:
+            tree_pix = self.handle_masking(tree['hs'], tree['hs_mask'])
+            tree_target = self.handle_masking(tree['target_arr'], tree['hs_mask'])
+            num_tree_pixels = tree_pix.shape[0]            
+            #Figure out if any pixels will be cropped and adjust the target multiplier accordingly
+            remaining_pixels = self.pad_length - (synth_tree_len+num_tree_pixels)
+            target_mult = num_tree_pixels + remaining_pixels if remaining_pixels < 0 else num_tree_pixels
+
+            tree_pixels.append(tree_pix)
+            tree_targets.append(tree_target* target_mult)
+
+            synth_tree_len += num_tree_pixels
+            if synth_tree_len >= self.pad_length:
+                break
+
+        return tree_pixels, tree_targets
+
+
+    def make_synthetic_tree(self):
+        tree_samples = self.rng.choice(self.tree_list, self.pad_length, replace=False)
+
+        tree_pix, tree_targets = self.assemble_tree_pixels(tree_samples)
+        synth_tree = np.concatenate(tree_pix)[:self.pad_length,...]
+        synth_target = np.sum(tree_targets, axis=0)/self.pad_length
+
+        #Done for consistency with other methods but we don't really need it
+        pad_mask = torch.zeros((self.pad_length,), dtype=torch.bool)
+
+        out = {'hs': torch.from_numpy(synth_tree).float(),
+               'target_arr': torch.from_numpy(synth_target).float(),
+               'hs_pad_mask': pad_mask}
+
+        return out
+
+    def __getitem__(self, index):
+        return self.make_synthetic_tree()
+
+
+class PixelTreeDataSet(BaseTreeDataSet):
+    def __init__(self, 
+                tree_list
+                ):
+        super().__init__(tree_list)
+    
+    def __getitem__(self, index):
+        item = self.tree_list[index]
         assert 'hs_mask' in item, 'no mask found to select pixels'
         out = dict()
         hs_mask = item['hs_mask']
@@ -100,7 +158,21 @@ class TreeDataset(Dataset):
                 out[k] = v
         return out
 
-    def get_full_patch(self, item):
+class FullTreeDataSet(BaseTreeDataSet):
+    def __init__(self, 
+                tree_list
+                ):
+        super().__init__(tree_list)
+
+    def fix_3d(self, item):
+        item = rearrange(item, 'h w c -> c h w')
+        return torch.from_numpy(item).float()
+    
+    def fix_2d(self, item):
+        return torch.from_numpy(item).float()
+    
+    def __getitem__(self, index):
+        item = self.tree_list[index]
         out = dict()
         for k, v in item.items():
             if isinstance(v, np.ndarray):
@@ -115,21 +187,6 @@ class TreeDataset(Dataset):
         
         return out
 
-    def handle_output_mode(self, item):
-        if self.output_mode == "full":
-            return self.get_full_patch(item)
-        if self.output_mode == "pixel":
-            return self.get_pixel_item(item)
-        if self.output_mode == "flat_padded":
-            return self.get_flat_item(item)
-        
-    def __len__(self):
-        return len(self.tree_list)
-    
-    def __getitem__(self, index):
-
-        item = self.tree_list[index]
-        return self.handle_output_mode(item)
 
 
 if __name__ == "__main__":
@@ -145,15 +202,23 @@ if __name__ == "__main__":
     test.make_splits('plot_level')
     tree_data = test.get_data('training', ['hs', 'origin'], 16, make_key=True)
 
-    test_set = TreeDataset(tree_data, output_mode='flat_padded')
-    test_loader = DataLoader(test_set, batch_size=len(test_set), num_workers=1)
+    test_set = SyntheticPaddedTreeDataSet(
+        tree_data,
+        16,
+        100,
+        4,
+        372
+    )
 
-    for x in test_loader:
-        print(x.keys())
+    # test_set = PaddedTreeDataSet(tree_data, 16)
+    # test_loader = DataLoader(test_set, batch_size=len(test_set), num_workers=1)
+
+    # for x in test_loader:
+    #     print(x.keys())
 
     x = test_set.__getitem__(69)
 
-#     print(x)
+    print(x)
 
 
 

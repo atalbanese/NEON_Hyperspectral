@@ -1,9 +1,11 @@
 from splitting import SiteData
-from torch_data import TreeDataset
+from torch_data import PaddedTreeDataSet, SyntheticPaddedTreeDataSet
 import pytorch_lightning as pl
-import torch
+#import torch
 from torch_model import SimpleTransformer
 from torch.utils.data import DataLoader
+from pytorch_lightning import loggers as pl_loggers
+
 
 
 if __name__ == "__main__":
@@ -23,10 +25,18 @@ if __name__ == "__main__":
 
     
 
-    train_set = TreeDataset(tree_data, output_mode='flat_padded')
-    test_loader = DataLoader(train_set, batch_size=64, num_workers=4)
+    #train_set = PaddedTreeDataSet(tree_data, pad_length=16)
+    train_set = SyntheticPaddedTreeDataSet(
+        tree_list=tree_data,
+        pad_length=16,
+        num_synth_trees=2560,
+        num_features=372
+    )
 
-    valid_set = TreeDataset(valid_data, output_mode='flat_padded')
+
+    test_loader = DataLoader(train_set, batch_size=256, num_workers=2)
+
+    valid_set = PaddedTreeDataSet(valid_data, pad_length=16)
     valid_loader = DataLoader(valid_set, batch_size=len(valid_set))
 
     test_model = SimpleTransformer(
@@ -34,12 +44,13 @@ if __name__ == "__main__":
         emb_size = 512,
         scheduler=True,
         num_features=372,
-        num_heads=6,
-        num_layers=4,
+        num_heads=12,
+        num_layers=6,
         num_classes=4,
         sequence_length=16
     )
 
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=500)
+    tb_logger = pl_loggers.TensorBoardLogger(save_dir="thesis_final_logs/")
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=5000, logger=tb_logger, log_every_n_steps=10)
     trainer.fit(test_model, test_loader, val_dataloaders=valid_loader)
 
