@@ -64,6 +64,7 @@ class SimpleTransformer(pl.LightningModule):
         x = self.decoder(x)
 
         loss = self.loss(x, target)
+        self.log('loss', loss)
 
         return loss
 
