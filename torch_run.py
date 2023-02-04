@@ -21,26 +21,28 @@ if __name__ == "__main__":
 
 
     niwo.make_splits('plot_level')
-    tree_data = niwo.get_data('training', ['hs', 'origin'], 16, make_key=True)
+    train_data = niwo.get_data('training', ['hs', 'origin'], 16, make_key=True)
     valid_data = niwo.get_data('validation', ['hs', 'origin'], 16, make_key=True)
+    test_data = niwo.get_data('testing', ['hs', 'origin'], 16, make_key=True)
 
     
 
     #train_set = PaddedTreeDataSet(tree_data, pad_length=16)
     train_set = SyntheticPaddedTreeDataSet(
-        tree_list=tree_data,
+        tree_list=train_data,
         pad_length=16,
         num_synth_trees=5120,
         num_features=372
     )
-
-
-    test_loader = DataLoader(train_set, batch_size=512, num_workers=2)
+    train_loader = DataLoader(train_set, batch_size=512, num_workers=2)
 
     valid_set = PaddedTreeDataSet(valid_data, pad_length=16)
     valid_loader = DataLoader(valid_set, batch_size=38)
 
-    test_model = SimpleTransformer(
+    test_set = PaddedTreeDataSet(test_data, pad_length=16)
+    test_loader = DataLoader(test_set)
+
+    train_model = SimpleTransformer(
         lr = 5e-4,
         emb_size = 512,
         scheduler=True,
@@ -51,7 +53,7 @@ if __name__ == "__main__":
         sequence_length=16
     )
 
-    refine_callback = ModelCheckpoint(
+    val_callback = ModelCheckpoint(
         dirpath='ckpts/', 
         filename=f'niwo_synthetic_data_hand_annotated_labels_'+'{val_loss:.2f}_{epoch}',
         #every_n_epochs=log_every,
@@ -62,6 +64,7 @@ if __name__ == "__main__":
         )
 
     tb_logger = pl_loggers.TensorBoardLogger(save_dir="thesis_final_logs/")
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=5000, logger=tb_logger, log_every_n_steps=10)
-    trainer.fit(test_model, test_loader, val_dataloaders=valid_loader)
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=5000, logger=tb_logger, log_every_n_steps=10, callbacks=[val_callback])
+    trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
+    trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
 
