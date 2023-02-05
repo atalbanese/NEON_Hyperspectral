@@ -3,7 +3,7 @@ from torch.utils.data import Dataset
 import numpy as np
 from einops import rearrange
 from typing import Literal
-from transforms import NormalizeHS
+from transforms import NormalizeHS, BrightnessAugment, Blit, Block
 #These are just needed for testing
 from splitting import SiteData
 from torch.utils.data import DataLoader
@@ -25,18 +25,17 @@ class BaseTreeDataSet(Dataset):
             )
 
     
-    def handle_masking_and_transforms(self, arr, mask):
+    def handle_masking(self, arr, mask):
         if arr.shape[0] == mask.shape[0] and arr.shape[1] == mask.shape[1]:
-            
-            #mask = torch.from_numpy(mask).bool()
             arr = arr[mask]
-            if arr.shape[1] == 372:
-                arr = torch.from_numpy(arr).float()
-                arr = self.transforms(arr)
-                arr = arr.numpy()
-        
         return arr
-
+    
+    def handle_transforms(self, arr):
+        if arr.shape[1] == 372:
+            arr = torch.from_numpy(arr).float()
+            arr = self.transforms(arr)
+            arr = arr.numpy()
+        return arr
 
     def __len__(self):
         return len(self.tree_list)
@@ -79,7 +78,8 @@ class PaddedTreeDataSet(BaseTreeDataSet):
         for k,v in item.items():
             if isinstance(v, np.ndarray):
                 if len(v.shape)>1 and v.dtype != np.bool8:
-                    v = self.handle_masking_and_transforms(v, hs_mask)
+                    v = self.handle_masking(v, hs_mask)
+                    v = self.handle_transforms(v)
                     v, pad_mask = self.handle_padding(v)
                     assert v.shape[0] == self.pad_length, 'incorrect padding occured'
                     out[k] = torch.from_numpy(v).float()
@@ -101,6 +101,13 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
         self.num_synth_trees = num_synth_trees
         self.num_features = num_features
         self.rng = np.random.default_rng(42)
+        with np.load(stats) as f:
+            self.transforms = torch.nn.Sequential(
+                BrightnessAugment(0.3),
+                #Blit(0.3),
+                #Block(0.3),
+                NormalizeHS(torch.from_numpy(f['mean']), torch.from_numpy(f['std'])),
+            )
     
     #TODO: Mess around with rng weights to see if we can make up for unbalanced dataset?
 
@@ -112,8 +119,8 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
         tree_targets = []
         synth_tree_len = 0
         for tree in tree_samples:
-            tree_pix = self.handle_masking_and_transforms(tree['hs'], tree['hs_mask'])
-            tree_target = self.handle_masking_and_transforms(tree['target_arr'], tree['hs_mask'])
+            tree_pix = self.handle_masking(tree['hs'], tree['hs_mask'])
+            tree_target = self.handle_masking(tree['target_arr'], tree['hs_mask'])
             num_tree_pixels = tree_pix.shape[0]            
             #Figure out if any pixels will be cropped and adjust the target multiplier accordingly
             remaining_pixels = self.pad_length - (synth_tree_len+num_tree_pixels)
@@ -134,6 +141,7 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
 
         tree_pix, tree_targets = self.assemble_tree_pixels(tree_samples)
         synth_tree = np.concatenate(tree_pix)[:self.pad_length,...]
+        synth_tree = self.handle_transforms(synth_tree)
         synth_target = np.sum(tree_targets, axis=0)/self.pad_length
 
         #Done for consistency with other methods but we don't really need it
@@ -166,7 +174,8 @@ class PixelTreeDataSet(BaseTreeDataSet):
         for k,v in item.items():
             if isinstance(v, np.ndarray):
                 if len(v.shape)>1 and v.dtype != np.bool8:
-                    v = self.handle_masking_and_transforms(v, hs_mask)
+                    v = self.handle_masking(v, hs_mask)
+                    v = self.handle_transforms(v)
                     out[k] = torch.from_numpy(v).float()
                 else:
                     out[k] = torch.from_numpy(v).float()
@@ -243,7 +252,7 @@ if __name__ == "__main__":
 
     x = test_set.__getitem__(69)
 
-    # print(x)
+    print(x)
 
 
 

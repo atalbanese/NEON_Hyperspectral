@@ -54,9 +54,10 @@ if __name__ == "__main__":
         sequence_length=16
     )
 
+    exp_name = 'niwo_synthetic_data_hand_annotated_labels_normalized_brightness_augment_only'
     val_callback = ModelCheckpoint(
         dirpath='ckpts/', 
-        filename=f'niwo_synthetic_data_hand_annotated_labels_normalized'+'{val_loss:.2f}_{epoch}',
+        filename=exp_name +'{val_loss:.2f}_{epoch}',
         #every_n_epochs=log_every,
         monitor='val_loss',
         save_on_train_epoch_end=True,
@@ -64,8 +65,8 @@ if __name__ == "__main__":
         save_top_k = 3
         )
 
-    logger = pl_loggers.TensorBoardLogger(save_dir=r'C:\Users\tonyt\Documents\Research\dl_model\lidar_hs_unsup_dl_model\most_recent_logs', default_hp_metric=False)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=1000, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
+    logger = pl_loggers.TensorBoardLogger(save_dir=r'C:\Users\tonyt\Documents\Research\dl_model\lidar_hs_unsup_dl_model\most_recent_logs', name=exp_name)
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=500, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
     trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
     #trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
 

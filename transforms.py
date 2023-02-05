@@ -23,7 +23,7 @@ class BrightnessAugment(torch.nn.Module):
     
     def forward(self, arr):
         if torch.rand(1) < self.p:
-            change = (1.2 - 0.8) * torch.rand(1).cuda() + 0.8
+            change = (1.2 - 0.8) * torch.rand(1) + 0.8
             a = torch.logit(arr) + torch.logit(change-0.5)
             b = torch.sigmoid(a)
             arr = b
@@ -128,10 +128,10 @@ class BlitDarken(torch.nn.Module):
 
 
 class Blit(torch.nn.Module):
-    def __init__(self, missing, p=.5):
+    def __init__(self, p=.5):
         super().__init__()
         self.p = p
-        self.missing = missing
+        self.missing = 0
         #self.rng = np.random.default_rng()
     
     def forward(self, arr):
@@ -161,10 +161,10 @@ class PatchBlock(torch.nn.Module):
 
 
 class Block(torch.nn.Module):
-    def __init__(self, missing, p=.5):
+    def __init__(self, p=.5):
         super().__init__()
         self.p = p
-        self.missing = missing
+        self.missing = 0
         #self.rng = np.random.default_rng()
     
     def forward(self, arr):
