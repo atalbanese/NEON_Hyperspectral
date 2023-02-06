@@ -1,4 +1,5 @@
 import torch.nn
+import torch
 import pytorch_lightning as pl
 
 class SimpleTransformer(pl.LightningModule):
@@ -12,7 +13,8 @@ class SimpleTransformer(pl.LightningModule):
         num_heads,
         num_layers,
         num_classes,
-        sequence_length
+        sequence_length,
+        weight
 
         ):
         super().__init__()
@@ -22,7 +24,7 @@ class SimpleTransformer(pl.LightningModule):
         #self.class_weights = class_weights
         self.scheduler = scheduler
 
-        self.loss = torch.nn.CrossEntropyLoss(label_smoothing=0.05)
+        self.loss = torch.nn.CrossEntropyLoss(label_smoothing=0.05, weight=torch.FloatTensor(weight))
 
         encoder_layer = torch.nn.TransformerEncoderLayer(
             d_model = num_features,

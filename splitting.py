@@ -299,6 +299,10 @@ class SiteData:
             data_list.append(to_append)
         return data_list
     
+    def get_class_weights(self):
+        pass
+
+
     def make_key(self, tree, out_dim):
         new_key = np.zeros((self.num_taxa), np.float32)
 

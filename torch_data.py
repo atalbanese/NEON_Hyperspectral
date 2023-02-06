@@ -79,8 +79,8 @@ class PaddedTreeDataSet(BaseTreeDataSet):
             if isinstance(v, np.ndarray):
                 if len(v.shape)>1 and v.dtype != np.bool8:
                     v = self.handle_masking(v, hs_mask)
-                    v = self.handle_transforms(v)
                     v, pad_mask = self.handle_padding(v)
+                    v = self.handle_transforms(v)
                     assert v.shape[0] == self.pad_length, 'incorrect padding occured'
                     out[k] = torch.from_numpy(v).float()
                     out[k+'_pad_mask'] = torch.from_numpy(pad_mask).bool()
@@ -103,7 +103,7 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
         self.rng = np.random.default_rng(42)
         with np.load(stats) as f:
             self.transforms = torch.nn.Sequential(
-                BrightnessAugment(0.3),
+#                BrightnessAugment(0.3),
                 #Blit(0.3),
                 #Block(0.3),
                 NormalizeHS(torch.from_numpy(f['mean']), torch.from_numpy(f['std'])),

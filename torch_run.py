@@ -35,6 +35,7 @@ if __name__ == "__main__":
         num_features=372,
         stats='stats/niwo_stats.npz'
     )
+    #train_set = PaddedTreeDataSet(train_data, pad_length=16, stats='stats/niwo_stats.npz')
     train_loader = DataLoader(train_set, batch_size=512, num_workers=2)
 
     valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='stats/niwo_stats.npz')
@@ -51,10 +52,11 @@ if __name__ == "__main__":
         num_heads=12,
         num_layers=4,
         num_classes=4,
-        sequence_length=16
+        sequence_length=16,
+        weight = [1.05,0.744,2.75,0.753]
     )
 
-    exp_name = 'niwo_synthetic_data_hand_annotated_labels_normalized_brightness_augment_only'
+    exp_name = 'niwo_synthetic_data_hand_annotated_labels_normalized_class_weights'
     val_callback = ModelCheckpoint(
         dirpath='ckpts/', 
         filename=exp_name +'{val_loss:.2f}_{epoch}',
