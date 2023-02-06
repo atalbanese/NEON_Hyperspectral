@@ -14,17 +14,29 @@ from torch.utils.data import DataLoader
 class BaseTreeDataSet(Dataset):
     def __init__(self,
                 tree_list,
-                stats
+                stats,
+                augments_list
                 ):
 
 
         self.tree_list = tree_list
-        with np.load(stats) as f:
-            self.transforms = torch.nn.Sequential(
-                NormalizeHS(torch.from_numpy(f['mean']), torch.from_numpy(f['std'])),
-            )
+        self.transforms = torch.nn.Sequential(*self.build_augments(stats, augments_list))
 
-    
+    def build_augments(self, stats_loc, augments_list):
+
+        augs = []
+        if "brightness" in augments_list:
+            augs = augs + [BrightnessAugment(0.5)]
+        if "blit" in augments_list:
+            augs = augs + [Blit()]
+        if "block" in augments_list:
+            augs = augs + [Block()]
+        if "normalize" in augments_list:
+            with np.load(stats_loc) as f:
+                augs = augs + [NormalizeHS(torch.from_numpy(f['mean']), torch.from_numpy(f['std']))]
+        
+        return augs
+
     def handle_masking(self, arr, mask):
         if arr.shape[0] == mask.shape[0] and arr.shape[1] == mask.shape[1]:
             arr = arr[mask]
@@ -47,9 +59,10 @@ class PaddedTreeDataSet(BaseTreeDataSet):
     def __init__(self, 
                 tree_list,
                 pad_length,
-                stats
+                stats,
+                augments_list
                 ):
-        super().__init__(tree_list, stats)
+        super().__init__(tree_list, stats, augments_list)
         self.pad_length = pad_length
     
     def calculate_max_pad(self):
@@ -95,19 +108,12 @@ class PaddedTreeDataSet(BaseTreeDataSet):
         return out
 
 class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
-    def __init__(self, tree_list, pad_length, num_synth_trees, num_features, stats):
-        super().__init__(tree_list, stats)
+    def __init__(self, tree_list, pad_length, num_synth_trees, num_features, stats, augments_list):
+        super().__init__(tree_list, stats, augments_list)
         self.pad_length = pad_length
         self.num_synth_trees = num_synth_trees
         self.num_features = num_features
         self.rng = np.random.default_rng(42)
-        with np.load(stats) as f:
-            self.transforms = torch.nn.Sequential(
-                BrightnessAugment(0.3),
-                Blit(0.3),
-                Block(0.3),
-                NormalizeHS(torch.from_numpy(f['mean']), torch.from_numpy(f['std'])),
-            )
     
     #TODO: Mess around with rng weights to see if we can make up for unbalanced dataset?
 
@@ -160,9 +166,10 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
 class PixelTreeDataSet(BaseTreeDataSet):
     def __init__(self, 
                 tree_list,
-                stats
+                stats,
+                augments_list
                 ):
-        super().__init__(tree_list, stats)
+        super().__init__(tree_list, stats, augments_list)
     
     def __getitem__(self, index):
         item = self.tree_list[index]
@@ -186,9 +193,10 @@ class PixelTreeDataSet(BaseTreeDataSet):
 class FullTreeDataSet(BaseTreeDataSet):
     def __init__(self, 
                 tree_list,
-                stats
+                stats,
+                augments_list
                 ):
-        super().__init__(tree_list, stats)
+        super().__init__(tree_list, stats, augments_list)
 
     def fix_3d(self, item):
         item = rearrange(item, 'h w c -> c h w')
@@ -227,32 +235,32 @@ def calc_stats(full_batch_dl, save_loc):
 
 
 
-if __name__ == "__main__":
-    test = SiteData(
-        site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
-        random_seed=42,
-        train = 0.6,
-        test= 0.1,
-        valid = 0.3)
+# if __name__ == "__main__":
+#     test = SiteData(
+#         site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
+#         random_seed=42,
+#         train = 0.6,
+#         test= 0.1,
+#         valid = 0.3)
 
-    #test.all_trees[0].apply_hs_filter([[410,1357],[1400,1800],[1965,2490]])
+#     #test.all_trees[0].apply_hs_filter([[410,1357],[1400,1800],[1965,2490]])
 
-    test.make_splits('plot_level')
-    tree_data = test.get_data('training', ['hs', 'origin'], 16, make_key=True)
+#     test.make_splits('plot_level')
+#     tree_data = test.get_data('training', ['hs', 'origin'], 16, make_key=True)
 
-    test_set = SyntheticPaddedTreeDataSet(tree_list = tree_data, pad_length=16, num_synth_trees=5000, num_features=372, stats = 'stats/niwo_stats.npz')
+#     test_set = SyntheticPaddedTreeDataSet(tree_list = tree_data, pad_length=16, num_synth_trees=5000, num_features=372, stats = 'stats/niwo_stats.npz')
 
-    #test_set = PaddedTreeDataSet(tree_data, 16, 'stats/niwo_stats.npz')
-    test_loader = DataLoader(test_set, batch_size=len(test_set), num_workers=1)
+#     #test_set = PaddedTreeDataSet(tree_data, 16, 'stats/niwo_stats.npz')
+#     test_loader = DataLoader(test_set, batch_size=len(test_set), num_workers=1)
 
-    #calc_stats(test_loader, 'stats/niwo_stats.npz')
+#     #calc_stats(test_loader, 'stats/niwo_stats.npz')
 
-    for x in test_loader:
-        print(x.keys())
+#     for x in test_loader:
+#         print(x.keys())
 
-    x = test_set.__getitem__(69)
+#     x = test_set.__getitem__(69)
 
-    print(x)
+#     print(x)
 
 
 

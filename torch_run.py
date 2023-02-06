@@ -5,7 +5,7 @@ import pytorch_lightning as pl
 from torch_model import SimpleTransformer
 from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import ModelCheckpoint, StochasticWeightAveraging
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 
 
@@ -28,49 +28,49 @@ if __name__ == "__main__":
 
     
 
-    #train_set = PaddedTreeDataSet(tree_data, pad_length=16)
+
     train_set = SyntheticPaddedTreeDataSet(
         tree_list=train_data,
         pad_length=16,
         num_synth_trees=5120,
         num_features=372,
-        stats='stats/niwo_stats.npz'
+        stats='stats/niwo_stats.npz',
+        augments_list=["brightness", "blit", "block", "normalize"]
     )
-    #train_set = PaddedTreeDataSet(train_data, pad_length=16, stats='stats/niwo_stats.npz')
     train_loader = DataLoader(train_set, batch_size=512, num_workers=2)
 
-    valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='stats/niwo_stats.npz')
+    valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='stats/niwo_stats.npz', augments_list=["normalize"])
     valid_loader = DataLoader(valid_set, batch_size=38)
 
-    test_set = PaddedTreeDataSet(test_data, pad_length=16, stats='stats/niwo_stats.npz')
+    test_set = PaddedTreeDataSet(test_data, pad_length=16, stats='stats/niwo_stats.npz', augments_list=["normalize"])
     test_loader = DataLoader(test_set)
 
     train_model = SimpleTransformer(
-        lr = 1e-3,
-        emb_size = 512,
+        lr = 5e-4,
+        emb_size = 128,
         scheduler=True,
         num_features=372,
         num_heads=12,
-        num_layers=4,
+        num_layers=6,
         num_classes=4,
         sequence_length=16,
-        weight = [1.05,0.744,2.75,0.753]
+        weight = [1.05,0.744,2.75,0.753],
+        classes=niwo.key
     )
 
-    exp_name = 'niwo_synthetic_data_hand_annotated_labels_normalized_class_weights_all_augments_new_decoder_softmax'
+    exp_name = 'niwo_synthetic_data_hand_annotated_labels_normalized_class_weights_bright_blit'
     val_callback = ModelCheckpoint(
         dirpath='ckpts/', 
-        filename=exp_name +'{val_loss:.2f}_{epoch}',
-        #every_n_epochs=log_every,
-        monitor='val_loss',
+        filename=exp_name +'{val_ova:.2f}_{epoch}',
+        monitor='val_ova',
         save_on_train_epoch_end=True,
         mode='min',
         save_top_k = 3
         )
 
     logger = pl_loggers.TensorBoardLogger(save_dir=r'C:\Users\tonyt\Documents\Research\dl_model\lidar_hs_unsup_dl_model\most_recent_logs', name=exp_name)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=1500, logger=logger, log_every_n_steps=10, callbacks=[val_callback], auto_lr_find=True)
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=1500, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
     #trainer.tune(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
-    #trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
+    trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
 
