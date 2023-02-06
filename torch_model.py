@@ -19,7 +19,7 @@ class SimpleTransformer(pl.LightningModule):
 
         ):
         super().__init__()
-        self.save_hyperparameters()
+        #self.save_hyperparameters()
         self.lr = lr
         self.emb_size = emb_size
         self.scheduler = scheduler

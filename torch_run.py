@@ -43,7 +43,7 @@ if __name__ == "__main__":
     valid_loader = DataLoader(valid_set, batch_size=38)
 
     test_set = PaddedTreeDataSet(test_data, pad_length=16, stats='stats/niwo_stats.npz', augments_list=["normalize"])
-    test_loader = DataLoader(test_set)
+    test_loader = DataLoader(test_set, batch_size = len(test_set))
 
     train_model = SimpleTransformer(
         lr = 5e-4,

@@ -1,19 +1,21 @@
-from ray import air, tune
-from ray.air import session
-from ray.tune import CLIReporter
-from ray.tune.schedulers import ASHAScheduler, PopulationBasedTraining
-from ray.tune.integration.pytorch_lightning import TuneReportCallback, TuneReportCheckpointCallback
+import optuna
+import os
+from optuna.integration import PyTorchLightningPruningCallback
 from splitting import SiteData
 from torch_data import PaddedTreeDataSet, SyntheticPaddedTreeDataSet
 import pytorch_lightning as pl
 from torch_model import SimpleTransformer
 from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import ModelCheckpoint
 
 
-def train(config, num_epochs):
-    pl.seed_everything(42)
+EPOCHS = 50
+    
+def objective(trial: optuna.trial.Trial):
+    lr = trial.suggest_float('lr', 1e-5, 1e-1, log=True)
+    batch_size = trial.suggest_int('batch_size', 128, 2048, log=True)
+    emb_size = trial.suggest_int("emb_size", 32, 2048, log=True)
+    augments = trial.suggest_categorical('augments', [0, 1, 2, 3, 4, 5, 6, 7])
 
     augment_options = {
         0: [],
@@ -44,16 +46,16 @@ def train(config, num_epochs):
         num_synth_trees=5120,
         num_features=372,
         stats='stats/niwo_stats.npz',
-        augments_list=augment_options[config['augments']] + ["normalize"]
+        augments_list=augment_options[augments] + ["normalize"]
     )
-    train_loader = DataLoader(train_set, batch_size=config['batch_size'], num_workers=2)
+    train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=2)
 
     valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='stats/niwo_stats.npz', augments_list=["normalize"])
     valid_loader = DataLoader(valid_set, batch_size=38)
 
     train_model = SimpleTransformer(
-        lr = config["lr"],
-        emb_size = config["emb_size"],
+        lr = lr,
+        emb_size = emb_size,
         scheduler=True,
         num_features=372,
         num_heads=12,
@@ -64,64 +66,35 @@ def train(config, num_epochs):
         classes=niwo.key
     )
 
-    tune_callback = TuneReportCallback(
-        {
-            "loss": "val_loss",
-            "ova": "val_ova"
-        },
-        on="validation_end",
+    trainer = pl.Trainer(gpus=1, max_epochs=EPOCHS, callbacks=[PyTorchLightningPruningCallback(trial, monitor="val_ova")])
+    hyperparameters = dict(lr=lr, batch_size=batch_size, emb_size=emb_size, augments=augment_options[augments])
+    trainer.logger.log_hyperparams(hyperparameters)
+    trainer.fit(train_model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
 
-    )
-    
+    return trainer.callback_metrics["val_ova"].item()
 
-    logger = pl_loggers.TensorBoardLogger(save_dir=r'C:\Users\tonyt\Documents\Research\dl_model\lidar_hs_unsup_dl_model\tuning_data', name="", version=".")
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=num_epochs, logger=logger, log_every_n_steps=10, callbacks=[tune_callback])
-    trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
 
-def train_tune(num_samples, num_epochs):
-    
-    config = {
-        "lr": tune.loguniform(1e-5, 1e-1),
-        "batch_size": tune.choice([128, 256, 512, 1024, 2048]),
-        "emb_size": tune.choice([32, 64, 128, 256, 512, 1024, 2048]),
-        "augments": tune.choice([0, 1, 2, 3, 4, 5, 6, 7])
-    }
 
-    scheduler = ASHAScheduler(
-        max_t=num_epochs,
-        grace_period=5,
-        reduction_factor=2)
 
-    reporter = CLIReporter(
-        parameter_columns=["lr", "batch_size", "emb_size", "augments"],
-        metric_columns=["loss", "ova", "training_iteration"])
 
-    train_fn_with_parameters = tune.with_parameters(train,
-                                                    num_epochs=num_epochs,)
-    resources_per_trial = {"cpu": 2, "gpu": 1}
-
-    tuner = tune.Tuner(
-        tune.with_resources(
-            train_fn_with_parameters,
-            resources=resources_per_trial
-        ),
-        tune_config=tune.TuneConfig(
-            metric="ova",
-            mode="min",
-            scheduler=scheduler,
-            num_samples=num_samples,
-        ),
-        run_config=air.RunConfig(
-            local_dir=r"C:\Users\tonyt\Documents\Research\dl_model\lidar_hs_unsup_dl_model\ray_results",
-            name="tune_tree_dl_asha",
-            progress_reporter=reporter,
-        ),
-        param_space=config,
-    )
-    results = tuner.fit()
-
-    print("Best hyperparameters found were: ", results.get_best_result().config)
 
 
 if __name__ == "__main__":
-    train_tune(50, 50)
+    pruner = optuna.pruners.MedianPruner()
+    study = optuna.create_study(direction="minimize", pruner=pruner)
+    study.optimize(objective, n_trials=100)
+
+    print("Number of finished trials: {}".format(len(study.trials)))
+
+    print("Best trial:")
+    trial = study.best_trial
+
+    print("  Value: {}".format(trial.value))
+
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print("    {}: {}".format(key, value))
+
+    df = study.trials_dataframe()
+
+    df.to_csv(os.path.join(os.getcwd(), "trials.csv"))
