@@ -10,11 +10,12 @@ from pytorch_lightning import loggers as pl_loggers
 
 
 EPOCHS = 50
-    
+
+
 def objective(trial: optuna.trial.Trial):
     lr = trial.suggest_float('lr', 1e-5, 1e-1, log=True)
     batch_size = trial.suggest_int('batch_size', 128, 2048, log=True)
-    emb_size = trial.suggest_int("emb_size", 32, 2048, log=True)
+    emb_size = trial.suggest_int("emb_size", 32, 1024, log=True)
     augments = trial.suggest_categorical('augments', [0, 1, 2, 3, 4, 5, 6, 7])
 
     augment_options = {
@@ -38,7 +39,7 @@ def objective(trial: optuna.trial.Trial):
     niwo.make_splits('plot_level')
     train_data = niwo.get_data('training', ['hs', 'origin'], 16, make_key=True)
     valid_data = niwo.get_data('validation', ['hs', 'origin'], 16, make_key=True)
-
+    
     
     train_set = SyntheticPaddedTreeDataSet(
         tree_list=train_data,
@@ -48,7 +49,7 @@ def objective(trial: optuna.trial.Trial):
         stats='stats/niwo_stats.npz',
         augments_list=augment_options[augments] + ["normalize"]
     )
-    train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=2)
+    train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=1)
 
     valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='stats/niwo_stats.npz', augments_list=["normalize"])
     valid_loader = DataLoader(valid_set, batch_size=38)
@@ -66,12 +67,12 @@ def objective(trial: optuna.trial.Trial):
         classes=niwo.key
     )
 
-    trainer = pl.Trainer(gpus=1, max_epochs=EPOCHS, callbacks=[PyTorchLightningPruningCallback(trial, monitor="val_ova")])
+    trainer = pl.Trainer(accelerator='gpu', max_epochs=EPOCHS, log_every_n_steps=10, callbacks=[PyTorchLightningPruningCallback(trial, monitor="val_loss")])
     hyperparameters = dict(lr=lr, batch_size=batch_size, emb_size=emb_size, augments=augment_options[augments])
     trainer.logger.log_hyperparams(hyperparameters)
     trainer.fit(train_model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
 
-    return trainer.callback_metrics["val_ova"].item()
+    return trainer.callback_metrics["val_loss"].item()
 
 
 
