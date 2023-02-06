@@ -13,8 +13,8 @@ EPOCHS = 50
 
 
 def objective(trial: optuna.trial.Trial):
-    lr = trial.suggest_float('lr', 1e-5, 1e-1, log=True)
-    batch_size = trial.suggest_int('batch_size', 128, 2048, log=True)
+    lr = trial.suggest_float('lr', 1e-6, 1e-4, log=True)
+    batch_size = trial.suggest_int('batch_size', 128, 2048)
     emb_size = trial.suggest_int("emb_size", 32, 1024, log=True)
     augments = trial.suggest_categorical('augments', [0, 1, 2, 3, 4, 5, 6, 7])
 
@@ -81,7 +81,7 @@ def objective(trial: optuna.trial.Trial):
 
 
 if __name__ == "__main__":
-    pruner = optuna.pruners.MedianPruner()
+    pruner = optuna.pruners.MedianPruner(n_warmup_steps=150)
     study = optuna.create_study(direction="minimize", pruner=pruner)
     study.optimize(objective, n_trials=100)
 
