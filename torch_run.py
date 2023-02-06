@@ -5,11 +5,12 @@ import pytorch_lightning as pl
 from torch_model import SimpleTransformer
 from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, StochasticWeightAveraging
 
 
 
 if __name__ == "__main__":
+    pl.seed_everything(42)
 
     niwo = SiteData(
         site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
@@ -45,8 +46,8 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_set)
 
     train_model = SimpleTransformer(
-        lr = 5e-4,
-        emb_size = 128,
+        lr = 1e-3,
+        emb_size = 512,
         scheduler=True,
         num_features=372,
         num_heads=12,
@@ -56,7 +57,7 @@ if __name__ == "__main__":
         weight = [1.05,0.744,2.75,0.753]
     )
 
-    exp_name = 'niwo_synthetic_data_hand_annotated_labels_normalized_class_weights'
+    exp_name = 'niwo_synthetic_data_hand_annotated_labels_normalized_class_weights_all_augments_new_decoder_softmax'
     val_callback = ModelCheckpoint(
         dirpath='ckpts/', 
         filename=exp_name +'{val_loss:.2f}_{epoch}',
@@ -68,7 +69,8 @@ if __name__ == "__main__":
         )
 
     logger = pl_loggers.TensorBoardLogger(save_dir=r'C:\Users\tonyt\Documents\Research\dl_model\lidar_hs_unsup_dl_model\most_recent_logs', name=exp_name)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=500, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=1500, logger=logger, log_every_n_steps=10, callbacks=[val_callback], auto_lr_find=True)
+    #trainer.tune(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
     #trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
 

@@ -103,9 +103,9 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
         self.rng = np.random.default_rng(42)
         with np.load(stats) as f:
             self.transforms = torch.nn.Sequential(
-#                BrightnessAugment(0.3),
-                #Blit(0.3),
-                #Block(0.3),
+                BrightnessAugment(0.3),
+                Blit(0.3),
+                Block(0.3),
                 NormalizeHS(torch.from_numpy(f['mean']), torch.from_numpy(f['std'])),
             )
     

@@ -38,15 +38,35 @@ class SimpleTransformer(pl.LightningModule):
             enable_nested_tensor=False,
         )
 
-        post_pool_size = round((num_features - 4)/5) * sequence_length
-        self.pooling = torch.nn.Sequential( torch.nn.MaxPool1d(5),
-                                            torch.nn.ReLU())
+        # post_pool_size = round((num_features - 4)/5) * sequence_length
+        # self.pooling = torch.nn.Sequential( torch.nn.MaxPool1d(5),
+        #                                     torch.nn.ReLU())
 
-        self.decoder = torch.nn.Sequential(torch.nn.Linear(post_pool_size, post_pool_size//2),
-                                            torch.nn.BatchNorm1d(post_pool_size//2),
+        # self.decoder = torch.nn.Sequential(torch.nn.Linear(post_pool_size, post_pool_size//2),
+        #                                     torch.nn.BatchNorm1d(post_pool_size//2),
+        #                                     torch.nn.ReLU(),
+        #                                     torch.nn.Linear(post_pool_size//2, num_classes),
+        #                                     #torch.nn.Softmax(1)
+        #                                     )
+
+        self.decoder = torch.nn.Sequential(torch.nn.Linear(num_features, num_features//2),
+                                            torch.nn.BatchNorm1d(sequence_length),
                                             torch.nn.ReLU(),
-                                            torch.nn.Linear(post_pool_size//2, num_classes),
-                                            #torch.nn.Softmax(1)
+                                            torch.nn.Linear(num_features//2, num_features//4),
+                                            torch.nn.BatchNorm1d(sequence_length),
+                                            torch.nn.ReLU(),
+                                            torch.nn.Flatten(),
+                                            torch.nn.Linear((num_features//4)*sequence_length, ((num_features//4)*sequence_length)//2),
+                                            torch.nn.BatchNorm1d(((num_features//4)*sequence_length)//2),
+                                            torch.nn.ReLU(),
+                                            torch.nn.Linear(((num_features//4)*sequence_length)//2, ((num_features//4)*sequence_length)//4),
+                                            torch.nn.BatchNorm1d(((num_features//4)*sequence_length)//4),
+                                            torch.nn.ReLU(),
+                                            torch.nn.Linear(((num_features//4)*sequence_length)//4, ((num_features//4)*sequence_length)//8),
+                                            torch.nn.BatchNorm1d(((num_features//4)*sequence_length)//8),
+                                            torch.nn.ReLU(),
+                                            torch.nn.Linear(((num_features//4)*sequence_length)//8, num_classes),
+                                            torch.nn.Softmax(1)
                                             )
 
 
@@ -61,8 +81,8 @@ class SimpleTransformer(pl.LightningModule):
 
         x = self.encoder(hs, src_key_padding_mask = hs_pad_mask)
         #x = self.encoder(hs)
-        x = self.pooling(x)
-        x = torch.flatten(x, 1)
+        #x = self.pooling(x)
+        #x = torch.flatten(x, 1)
         x = self.decoder(x)
 
         loss = self.loss(x, target)
@@ -77,8 +97,8 @@ class SimpleTransformer(pl.LightningModule):
 
         x = self.encoder(hs, src_key_padding_mask = hs_pad_mask)
         #x = self.encoder(hs)
-        x = self.pooling(x)
-        x = torch.flatten(x, 1)
+        #x = self.pooling(x)
+        #x = torch.flatten(x, 1)
         x = self.decoder(x)
 
         loss = self.loss(x, target)
