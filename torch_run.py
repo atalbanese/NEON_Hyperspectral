@@ -37,7 +37,7 @@ if __name__ == "__main__":
         stats='stats/niwo_stats.npz',
         augments_list=["brightness", "blit", "block", "normalize"]
     )
-    train_loader = DataLoader(train_set, batch_size=128, num_workers=2)
+    train_loader = DataLoader(train_set, batch_size=128, num_workers=1)
 
     valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='stats/niwo_stats.npz', augments_list=["normalize"])
     valid_loader = DataLoader(valid_set, batch_size=38)
@@ -69,7 +69,7 @@ if __name__ == "__main__":
         )
 
     logger = pl_loggers.TensorBoardLogger(save_dir=r'C:\Users\tonyt\Documents\Research\dl_model\lidar_hs_unsup_dl_model\trial_runs', name=exp_name)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=1500, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=2000, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
     #trainer.tune(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
