@@ -95,14 +95,14 @@ class PaddedTreeDataSet(BaseTreeDataSet):
                     v, pad_mask = self.handle_padding(v)
                     v = self.handle_transforms(v)
                     assert v.shape[0] == self.pad_length, 'incorrect padding occured'
-                    out[k] = torch.from_numpy(v).float()
-                    out[k+'_pad_mask'] = torch.from_numpy(pad_mask).bool()
+                    out[k] = torch.from_numpy(v).float().to(torch.device('cuda:0'))
+                    out[k+'_pad_mask'] = torch.from_numpy(pad_mask).bool().to(torch.device('cuda:0'))
                 elif v.dtype == np.bool8:
                     pass
                 elif k == 'single_target':
-                    out[k] = torch.from_numpy(v).long()
+                    out[k] = torch.from_numpy(v).long().to(torch.device('cuda:0'))
                 else:
-                    out[k] = torch.from_numpy(v).float()
+                    out[k] = torch.from_numpy(v).float().to(torch.device('cuda:0'))
             else:
                 out[k] = v
         return out
@@ -151,10 +151,10 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
         synth_target = np.sum(tree_targets, axis=0)/self.pad_length
 
         #Done for consistency with other methods but we don't really need it
-        pad_mask = torch.zeros((self.pad_length,), dtype=torch.bool)
+        pad_mask = torch.zeros((self.pad_length,), dtype=torch.bool, device=torch.device('cuda:0'))
 
-        out = {'hs': torch.from_numpy(synth_tree).float(),
-               'target_arr': torch.from_numpy(synth_target).float(),
+        out = {'hs': torch.from_numpy(synth_tree).float().to(torch.device('cuda:0')),
+               'target_arr': torch.from_numpy(synth_target).float().to(torch.device('cuda:0')),
                'hs_pad_mask': pad_mask}
 
         return out

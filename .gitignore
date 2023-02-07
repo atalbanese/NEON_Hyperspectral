@@ -30,3 +30,4 @@ ml-runs/729172761721984817/879059526119494fbb8f1c137cd1f290/tags/mlflow.user
 ray_results*
 most_recent_logs*
 old_tuning_logs/*
+trial_runs/*

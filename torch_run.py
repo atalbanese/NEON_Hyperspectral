@@ -9,6 +9,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 
 
+
+
 if __name__ == "__main__":
     pl.seed_everything(42)
 
@@ -35,7 +37,7 @@ if __name__ == "__main__":
         num_synth_trees=5120,
         num_features=372,
         stats='stats/niwo_stats.npz',
-        augments_list=["brightness", "blit", "block", "normalize"]
+        augments_list=["normalize"]
     )
     train_loader = DataLoader(train_set, batch_size=128, num_workers=1)
 
@@ -47,7 +49,7 @@ if __name__ == "__main__":
 
     train_model = SimpleTransformer(
         lr = 6.246186465873744e-05,
-        emb_size = 372,
+        emb_size = 378,
         scheduler=True,
         num_features=372,
         num_heads=12,
@@ -60,16 +62,16 @@ if __name__ == "__main__":
 
     exp_name = 'niwo_synthetic_data_hand_annotated_labels_normalized_class_weights_hp_tuned_trial_1'
     val_callback = ModelCheckpoint(
-        dirpath='ckpts/', 
+        dirpath='trial_ckpts/', 
         filename=exp_name +'{val_ova:.2f}_{epoch}',
-        monitor='val_ova',
+        monitor='val_loss',
         save_on_train_epoch_end=True,
         mode='min',
         save_top_k = 3
         )
 
     logger = pl_loggers.TensorBoardLogger(save_dir=r'C:\Users\tonyt\Documents\Research\dl_model\lidar_hs_unsup_dl_model\trial_runs', name=exp_name)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=2000, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=1000, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
     #trainer.tune(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
