@@ -9,25 +9,13 @@ from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
 
 
-EPOCHS = 50
+EPOCHS = 100
 
 
 def objective(trial: optuna.trial.Trial):
-    lr = trial.suggest_float('lr', 1e-6, 1e-4, log=True)
-    batch_size = trial.suggest_int('batch_size', 128, 2048)
-    emb_size = trial.suggest_int("emb_size", 32, 1024, log=True)
-    augments = trial.suggest_categorical('augments', [0, 1, 2, 3, 4, 5, 6, 7])
-
-    augment_options = {
-        0: [],
-        1: ["brightness"],
-        2: ["brightness", "blit"],
-        3: ["brightness", "block"],
-        4: ["brightness", "blit", "block"],
-        5: ["blit"],
-        6: ["blit", "block"],
-        7: ["block"]
-    }
+    lr = trial.suggest_float('lr', 1e-5, 1e-4, log=True)
+    batch_size = trial.suggest_int('batch_size', 128, 1024)
+    emb_size = trial.suggest_int("emb_size", 350, 512)
 
     niwo = SiteData(
         site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
@@ -47,7 +35,7 @@ def objective(trial: optuna.trial.Trial):
         num_synth_trees=5120,
         num_features=372,
         stats='stats/niwo_stats.npz',
-        augments_list=augment_options[augments] + ["normalize"]
+        augments_list=["normalize"]
     )
     train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=1)
 
@@ -68,7 +56,7 @@ def objective(trial: optuna.trial.Trial):
     )
 
     trainer = pl.Trainer(accelerator='gpu', max_epochs=EPOCHS, log_every_n_steps=10, callbacks=[PyTorchLightningPruningCallback(trial, monitor="val_loss")])
-    hyperparameters = dict(lr=lr, batch_size=batch_size, emb_size=emb_size, augments=augment_options[augments])
+    hyperparameters = dict(lr=lr, batch_size=batch_size, emb_size=emb_size)
     trainer.logger.log_hyperparams(hyperparameters)
     trainer.fit(train_model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
 
@@ -81,7 +69,7 @@ def objective(trial: optuna.trial.Trial):
 
 
 if __name__ == "__main__":
-    pruner = optuna.pruners.MedianPruner(n_warmup_steps=150)
+    pruner = optuna.pruners.MedianPruner()
     study = optuna.create_study(direction="minimize", pruner=pruner)
     study.optimize(objective, n_trials=100)
 
