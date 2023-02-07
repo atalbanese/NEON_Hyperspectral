@@ -73,8 +73,6 @@ class SimpleTransformer(pl.LightningModule):
         ova = np.trace(conf_matrix)/conf_matrix.sum()
         assert conf_matrix.sum() == len(expected), "error calculating confusion matrix"
 
-        #print(conf_matrix)
-
         return ova, conf_matrix
 
 
