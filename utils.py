@@ -1,9 +1,11 @@
-from sre_constants import IN
-from tkinter import N
+# from sre_constants import IN
+# from tkinter import N
+
 import h5_helper as hp
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA, IncrementalPCA, FastICA
+from sklearn.decomposition import PCA, IncrementalPCA, FastICA, MiniBatchNMF
+
 from skimage.segmentation import slic
 from sklearn.neighbors import kneighbors_graph
 from skimage.segmentation import mark_boundaries, find_boundaries, watershed
@@ -15,12 +17,17 @@ import torchvision as tv
 from multiprocessing import Pool
 from pebble import ProcessPool
 from concurrent.futures import TimeoutError
-from einops import rearrange
+from einops import rearrange, reduce
 from skimage.color import rgb2hsv
 from skimage import exposure
 import numpy.ma as ma
 import random 
 import rasterio as rs
+import pickle
+
+import indexes as ixs
+import validator as vd
+
 
 def get_features(inp, feature_band=2):
     return np.reshape(inp, (-1,inp.shape[feature_band]))
@@ -121,7 +128,7 @@ def neighborhood_valley_thresh(image: np.ndarray, neighborhood_length: int):
 
     return best_threshold
 
-#TODO: add dask support for speed up/bulk images
+
 def ward_cluster(inp, n_clusters, mask=None, n_neighbors=4):
     print('getting connectivity graph')
     connectivity = kneighbors_graph(
@@ -224,6 +231,8 @@ def get_extra_bands_shi():
         'swir_3': 2210,
         'swir_4': 2280
     }
+
+
 
 def plot_output_files(dir):
     for file in os.listdir(dir):
@@ -540,19 +549,58 @@ def select_extra_bands(args):
             bands = hp.stack_all(img, axis=2)
             np.save(os.path.join(out_dir, out_file), bands)
 
+def get_all_indexes(args):
+    file, in_dir, out_dir, mask_dir = args
+    if ".h5" in file:
+        out_file = file.split('.')[0] + '_indexbands.npy'
+        mask_file = file.split(".")[0] + '_pca.npy'
+        #
+
+        if not os.path.exists(os.path.join(out_dir, out_file)):
+            mask = np.load(os.path.join(mask_dir, mask_file))
+            mask = mask == mask
+            mask = reduce(mask, 'h w c -> h w ()', 'max').squeeze()
+            img = hp.pre_processing(os.path.join(in_dir, file), wavelength_ranges=ixs.BANDS)['bands']
+            masked_img={}
+            for key, band in img.items():
+                band[~mask] =np.nan
+                band[band == 0] = np.nan
+                masked_img[key] = band
+            to_stack = []
+            for ix_fn in ixs.INDEX_FNS:
+                to_append = ix_fn(masked_img)
+                to_append[to_append == np.inf] = np.nan
+                to_append[to_append == -np.inf] = np.nan
+
+
+                to_stack.append(to_append)
+            
+            out = np.stack(to_stack)
+            np.save(os.path.join(out_dir, out_file), out)
+    
     
 
 def build_inc_pca(args):
     file, in_dir, pca_solver = args
     if ".h5" in file:
-        img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"][:,:,1:]
+        img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"][:,:,5:-5]
+        ndvi = hp.pre_processing(os.path.join(in_dir,file), get_bareness_bands())['bands']
+        ndvi = get_ndvi(ndvi)
+        ndvi_mask = ndvi < 0.5
 
+
+        bad_mask = np.zeros((1000,1000), dtype=bool)
+        for i in range(0, img.shape[-1]):
+                z = img[:,:,i]
+                y = z>1
+                bad_mask += y
+        img[bad_mask] = np.nan
+        img[ndvi_mask] = np.nan
         img = rearrange(img, 'h w c -> (h w) c')
         masked = ma.masked_invalid(img)
         #mask = masked.mask[:, 0:30]
         to_pca = ma.compress_rows(masked)
         pca_solver.partial_fit(to_pca)
-
 
     return pca_solver
 
@@ -561,11 +609,19 @@ def do_inc_pca(args):
     if ".h5" in file:
         pca_file = file.split(".")[0] + '_pca.npy'
         if not os.path.exists(os.path.join(out_dir, pca_file)):
-            img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"][:,:,1:]
+            img = hp.pre_processing(os.path.join(in_dir,file), get_all=True)["bands"][:,:,5:-5]
+
+
+            bad_mask = np.zeros((1000,1000), dtype=bool)
+            for i in range(0, img.shape[-1]):
+                    z = img[:,:,i]
+                    y = z>1
+                    bad_mask += y
+            img[bad_mask] = np.nan
             #bare_mask = np.load(os.path.join(mask_dir, bare_file))
             img = rearrange(img, 'h w c -> (h w) c')
             masked = ma.masked_invalid(img)
-            mask = masked.mask[:, 0:10]
+            mask = masked.mask[:, 0:pca_solver.n_components_]
             to_pca = ma.compress_rows(masked)
             data = pca_solver.transform(to_pca)
             out = np.empty(mask.shape, dtype=np.float64)
@@ -597,7 +653,7 @@ def bulk_process(pool, dirs, fn, **kwargs):
 
     args_list = list(zip(files, *dirs))
 
-    future = pool.map(fn, args_list, timeout=1000)
+    future = pool.map(fn, args_list, timeout=2000)
     iterator = future.result()
     while True:
         try:
@@ -637,13 +693,78 @@ if __name__ == '__main__':
 
     
 
-    FILE = 'NEON_D13_NIWO_DP3_457000_4432000_CHM.tif'
-    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
+    FILE = 'NEON_D13_NIWO_DP3_445000_4432000_reflectance.h5'
+    OUT_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_pca_filtered_ndvi'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
-    PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/harv_masked_10'
+    PCA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked'
     FN = get_extra_bands_all
 
     chm_fold = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
+
+
+    VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
+    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct_de_dupe.csv"
+    PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
+    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
+    AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
+    ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
+    ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
+    RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
+    SHADOW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
+    SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo_chm'
+    INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo/'
+    NUM_CLASSES=12
+
+    # for f in os.listdir(OUT_DIR):
+    #     img = np.load(os.path.join(OUT_DIR, f))
+    #     plt.imshow(img[...,3:6]*10)
+    #     plt.show()
+
+    valid = vd.Validator(file=VALID_FILE, 
+                    pca_dir=PCA_DIR, 
+                    ica_dir=ICA_DIR,
+                    raw_bands=RAW_DIR,
+                    shadow=SHADOW_DIR,
+                    site_name='NIWO', 
+                    num_classes=NUM_CLASSES, 
+                    plot_file=PLOT_FILE, 
+                    struct=True, 
+                    azm=AZM_DIR, 
+                    chm=CHM_DIR, 
+                    curated=CURATED_FILE, 
+                    rescale=False, 
+                    orig=ORIG_DIR, 
+                    superpixel=SP_DIR,
+                    indexes=INDEX_DIR,
+                    prefix='D13',
+                    chm_mean = 4.015508459469479,
+                    chm_std = 4.809300736115787,
+                    use_sp=True,
+                    scholl_filter=False,
+                    scholl_output=True,
+                    filter_species = 'SALIX')
+
+    train_keys = set(valid.orig_dict.keys()) - set(valid.valid_files.keys())
+
+    
+
+    train_list = [valid.orig_dict[k] for k in train_keys]
+
+    # PCA_SOLVER = IncrementalPCA(n_components=16)
+
+    # for f in tqdm(random.sample(train_list, len(train_list)//5)):
+    #     PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
+        
+    with open('inc_pca.pk', 'rb') as f:
+            #pickle.dump(PCA_SOLVER, f)
+            PCA_SOLVER = pickle.load(f)
+
+    # with open('inc_nmf.pk', 'rb') as f:
+    #         PCA_SOLVER = pickle.load(f)
+
+
+    with ProcessPool(3) as pool:
+        bulk_process(pool, [IN_DIR, OUT_DIR, PCA_SOLVER], do_inc_pca)
 
     #make_superpixels_chm((FILE, chm_fold, OUT_DIR, IN_DIR))
 
@@ -665,14 +786,14 @@ if __name__ == '__main__':
     #img_stats_chm(chm_fold)
     #img_stats_min_max('C:/Users/tonyt/Documents/Research/datasets/pca/harv_2022_10_channels', '')
 
-
+    #get_all_indexes((FILE, IN_DIR, OUT_DIR))
     
 
-    with ProcessPool(4) as pool:
-        bulk_process(pool, [IN_DIR, OUT_DIR, FN], select_extra_bands)
+    # with ProcessPool(4) as pool:
+    #     bulk_process(pool, [IN_DIR, OUT_DIR, PCA_DIR], get_all_indexes)
 
-    # # # with ProcessPool(4) as pool:
-    # # #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
+    # with ProcessPool(1) as pool:
+    #     bulk_process(pool, [IN_DIR, ICA_DIR, MASK_DIR], masked_ica)
 
     # with ProcessPool(4) as pool:
     #     bulk_process(pool, [IN_DIR, PCA_DIR, MASK_DIR], masked_pca)
@@ -689,13 +810,7 @@ if __name__ == '__main__':
 
 
 
-    # PCA_SOLVER = IncrementalPCA(n_components=10)
-
-    # for f in tqdm(random.sample(os.listdir(IN_DIR), 40)):
-    #     PCA_SOLVER = build_inc_pca((f, IN_DIR, PCA_SOLVER))
-
-    # with ProcessPool(4) as pool:
-    #     bulk_process(pool, [IN_DIR, OUT_DIR, PCA_SOLVER], do_inc_pca)
+    
 
     # img_stats(OUT_DIR, os.path.join(OUT_DIR, 'stats'), num_channels=10)
 

@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from torchvision import models
 import torch.nn.functional as f
+from transformers import PerceiverForImageClassificationConvProcessing
 import net_gen
 from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange, Reduce
@@ -10,8 +11,37 @@ import numpy as np
 import torchvision.transforms as tt
 import transforms as tr
 
+class UpsamplePredictor(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(UpsamplePredictor, self).__init__()
+        self.up1 = nn.Sequential(nn.ConvTranspose2d(in_channels, in_channels, kernel_size=2, stride=2),
+                                nn.InstanceNorm2d(in_channels),
+                                nn.ReLU())
+        self.up2 = nn.Sequential(nn.ConvTranspose2d(in_channels, in_channels, kernel_size=2, stride=2),
+                                nn.InstanceNorm2d(in_channels),
+                                nn.ReLU())
+        self.max = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv1 = nn.Sequential(nn.Conv2d(in_channels, in_channels//2, kernel_size=3, padding=1),
+                                nn.InstanceNorm2d(in_channels//2),
+                                nn.ReLU())
+        self.conv2 = nn.Sequential(nn.Conv2d(in_channels//2, in_channels//4, kernel_size=3, padding=1),
+                                nn.InstanceNorm2d(in_channels//4),
+                                nn.ReLU())
+        self.up3 = nn.Upsample(scale_factor =2, mode='bilinear')
+        self.classify = nn.Conv2d(in_channels//4, out_channels, kernel_size=1)
+    
+    def forward(self, x):
+        x = self.up1(x)
+        x = self.up2(x)
+        x = self.max(x)
+        x = self.conv1(x)
+        x= self.conv2(x)
+        x = self.up3(x)
+        x = self.classify(x)
+        return x
 
-class SWaVUnified(nn.Module):
+
+class SWaVUnifiedPerPixelPatch(nn.Module):
     def __init__(self, 
                 in_channels,
                 num_classes, 
@@ -21,7 +51,7 @@ class SWaVUnified(nn.Module):
                 temp=0.1, 
                 epsilon=0.05,  
                 sinkhorn_iters=3):
-        super(SWaVUnified, self).__init__()
+        super(SWaVUnifiedPerPixelPatch, self).__init__()
         
         self.transforms_main = tt.Compose([
                                         tr.Blit(p=0.5),
@@ -29,7 +59,10 @@ class SWaVUnified(nn.Module):
                                        ])
 
 
-        self.embed = nn.Linear(in_channels, emb_size)
+        self.embed = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels, emb_size, kernel_size=(3,3), stride=1, padding=0),
+            Rearrange('b c h w -> b (h w) c')
+        )
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=n_head, dim_feedforward=emb_size*2, batch_first=True)
         self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
@@ -120,11 +153,420 @@ class SWaVUnified(nn.Module):
         loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
 
         return loss/b
+    
+    def forward(self, inp):
+       
+        inp = self.embed(inp)
+
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+        return scores
+
+
+class SWaVUnifiedResnet(nn.Module):
+    def __init__(self, 
+                in_channels,
+                num_classes, 
+                n_head = 8,
+                n_layers = 8,
+                emb_size=256, 
+                temp=0.1, 
+                epsilon=0.05,  
+                sinkhorn_iters=3,
+                patch_size=4,
+                positions=False):
+        super(SWaVUnifiedResnet, self).__init__()
+        
+        self.transforms_main = tr.Blit(p=1)
+        
+
+        #self.patches = Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size)
+        #self.use_positions = positions
+
+        #self.positions = nn.Parameter(torch.randn((64, emb_size)))
+
+
+        #self.embed = nn.Linear(in_channels * patch_size**2, emb_size)
+
+        #self.encoder = models.segmentation.fcn_resnet50(pretrained=False, num_classes=emb_size)
+        # self.encoder = models.resnet18(pretrained=False, num_classes=emb_size)
+        #self.encoder = net_gen.UnetGenerator(3, emb_size, 3)
+        self.encoder = net_gen.ResnetEncoder(3, 64, padding_type='zero')
+        
+
+        self.projector= nn.Sequential(nn.Conv2d(emb_size, emb_size, kernel_size=1),
+                                    nn.ReLU(),
+                                    nn.Conv2d(emb_size, emb_size, kernel_size=1),
+                                    nn.ReLU(),
+                                    nn.Conv2d(emb_size, emb_size, kernel_size=1),
+                                    nn.ReLU())
+
+        self.prototypes = nn.Conv2d(emb_size, num_classes, bias=False, kernel_size=3, padding=1)
+
+        self.softmax = nn.LogSoftmax(dim=1)
+        self.temp = temp
+        self.epsilon = epsilon
+        self.niters = sinkhorn_iters
+        self.ra = Rearrange('b c h w -> (b h w) c')
+
+
+    @torch.no_grad()
+    def norm_prototypes(self):
+        w = self.prototypes.weight.data.clone()
+        w = f.normalize(w, dim=1, p=2)
+        self.prototypes.weight.copy_(w)
+
+    @torch.no_grad()
+    def sinkhorn(self, scores):
+        Q = torch.exp(scores/self.epsilon).t()
+        B = Q.shape[1] 
+        K = Q.shape[0]
+
+        sum_Q = torch.sum(Q)
+        Q /= sum_Q
+
+        for it in range(self.niters):
+            # normalize each row: total weight per prototype must be 1/K
+            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+            Q /= sum_of_rows
+            Q /= K
+
+            # normalize each column: total weight per sample must be 1/B
+            Q /= torch.sum(Q, dim=0, keepdim=True)
+            Q /= B
+
+        Q *= B # the colomns must sum to 1 so that Q is an assignment
+        return Q.t()
+
+
+    # def forward_train(self, x, chm, azm):
+    def forward_train(self, x):
+
+        b = x.shape[0]
+
+        x_s = self.transforms_main(x)
+
+
+
+        inp = torch.cat((x, x_s))
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+
+
+        scores_t = scores[:b]
+        scores_s = scores[b:]
+
+        t = scores_t.detach()
+        s = scores_s.detach()
+
+        t = self.ra(t)
+        s = self.ra(s)
+
+        scores_t = self.ra(scores_t)
+        scores_s = self.ra(scores_s)
+
+        b = scores_t.shape[0]
+
+
+        q_t = self.sinkhorn(t)
+        q_s = self.sinkhorn(s)
+
+        p_t = self.softmax(scores_t/self.temp)
+        p_s = self.softmax(scores_s/self.temp)
+
+        loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
+
+        return loss
+    
+    def forward(self, inp):
+
+        # inp = self.patches(inp)
+       
+        # inp = self.embed(inp)
+        # if self.use_positions:
+        #     inp = inp + self.positions
+
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+        return scores
+
+
+class SWaVUnifiedPerPatch(nn.Module):
+    def __init__(self, 
+                in_channels,
+                num_classes, 
+                n_head = 8,
+                n_layers = 8,
+                emb_size=256, 
+                temp=0.1, 
+                epsilon=0.05,  
+                sinkhorn_iters=3,
+                patch_size=4,
+                positions=False):
+        super(SWaVUnifiedPerPatch, self).__init__()
+
+        self.missing = nn.Parameter(torch.randn((1)))
+        
+        self.transforms_main = tt.Compose([
+                                        tr.Blit(self.missing, p=0.5),
+                                        tr.Block(self.missing, p=0.5),
+                                        tr.PatchBlock(self.missing, p=0.5)
+                                       ])
+
+
+        self.patches = Rearrange('b c (h s1) (w s2) -> b (h w) (s1 s2 c)', s1=patch_size, s2=patch_size)
+        self.use_positions = positions
+
+        self.positions = nn.Parameter(torch.randn((64, emb_size)))
+
+
+        self.embed = nn.Linear(in_channels * patch_size**2, emb_size)
+
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=n_head, dim_feedforward=emb_size*2, batch_first=True)
+        self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+
+        self.projector = nn.Sequential(nn.Linear(emb_size, emb_size),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_size, emb_size),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_size, emb_size))
+
+        self.prototypes = nn.Linear(emb_size, num_classes, bias=False)
+
+        self.softmax = nn.LogSoftmax(dim=1)
+        self.temp = temp
+        self.epsilon = epsilon
+        self.niters = sinkhorn_iters
+        self.ra = Rearrange('b s f -> (b s) f')
+
+    @torch.no_grad()
+    def norm_prototypes(self):
+        w = self.prototypes.weight.data.clone()
+        w = f.normalize(w, dim=1, p=2)
+        self.prototypes.weight.copy_(w)
+
+    @torch.no_grad()
+    def sinkhorn(self, scores):
+        Q = torch.exp(scores/self.epsilon).t()
+        B = Q.shape[1] 
+        K = Q.shape[0]
+
+        sum_Q = torch.sum(Q)
+        Q /= sum_Q
+
+        for it in range(self.niters):
+            # normalize each row: total weight per prototype must be 1/K
+            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+            Q /= sum_of_rows
+            Q /= K
+
+            # normalize each column: total weight per sample must be 1/B
+            Q /= torch.sum(Q, dim=0, keepdim=True)
+            Q /= B
+
+        Q *= B # the colomns must sum to 1 so that Q is an assignment
+        return Q.t()
+
+
+    # def forward_train(self, x, chm, azm):
+    def forward_train(self, x):
+
+        b = x.shape[0]
+
+        x = self.patches(x)
+
+        x_s = self.transforms_main(x)
+
+        x = self.embed(x)
+
+        
+        x_s = self.embed(x_s)
+        if self.use_positions:
+            x = x + self.positions
+            x_s = x_s + self.positions
+
+
+        inp = torch.cat((x, x_s))
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+
+
+        scores_t = scores[:b]
+        scores_s = scores[b:]
+
+        t = scores_t.detach()
+        s = scores_s.detach()
+
+        t = self.ra(t)
+        s = self.ra(s)
+
+        scores_t = self.ra(scores_t)
+        scores_s = self.ra(scores_s)
+
+        b = scores_t.shape[0]
+
+
+        q_t = self.sinkhorn(t)
+        q_s = self.sinkhorn(s)
+
+        p_t = self.softmax(scores_t/self.temp)
+        p_s = self.softmax(scores_s/self.temp)
+
+        loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
+
+        return loss
+    
+    def forward(self, inp):
+        inp[inp != inp] = self.missing
+
+        inp = self.patches(inp)
+       
+        inp = self.embed(inp)
+        if self.use_positions:
+            inp = inp + self.positions
+
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+        return scores
+
+
+
+class SWaVUnified(nn.Module):
+    def __init__(self, 
+                in_channels,
+                num_classes, 
+                n_head = 8,
+                n_layers = 8,
+                emb_size=128, 
+                temp=0.1, 
+                epsilon=0.05,  
+                sinkhorn_iters=3,
+                positions=False):
+        super(SWaVUnified, self).__init__()
+        
+        self.transforms_main = tt.Compose([
+                                        tr.Blit(p=0.5),
+                                        tr.Block(p=0.5)
+                                       ])
+
+
+        self.embed = nn.Linear(in_channels, emb_size)
+        self.use_positions = positions
+
+        if positions:
+            self.positions = nn.Parameter(torch.randn((9, emb_size)))
+
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=emb_size, nhead=n_head, dim_feedforward=emb_size*2, batch_first=True)
+        self.encoder = torch.nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+
+        self.projector = nn.Sequential(nn.Linear(emb_size, emb_size),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_size, emb_size),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_size, emb_size))
+
+        self.prototypes = nn.Linear(emb_size, num_classes, bias=False)
+
+        self.softmax = nn.LogSoftmax(dim=1)
+        self.temp = temp
+        self.epsilon = epsilon
+        self.niters = sinkhorn_iters
+        self.ra = Rearrange('b s f -> (b s) f')
+
+    @torch.no_grad()
+    def norm_prototypes(self):
+        w = self.prototypes.weight.data.clone()
+        w = f.normalize(w, dim=1, p=2)
+        self.prototypes.weight.copy_(w)
+
+    @torch.no_grad()
+    def sinkhorn(self, scores):
+        Q = torch.exp(scores/self.epsilon).t()
+        B = Q.shape[1] 
+        K = Q.shape[0]
+
+        sum_Q = torch.sum(Q)
+        Q /= sum_Q
+
+        for it in range(self.niters):
+            # normalize each row: total weight per prototype must be 1/K
+            sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+            Q /= sum_of_rows
+            Q /= K
+
+            # normalize each column: total weight per sample must be 1/B
+            Q /= torch.sum(Q, dim=0, keepdim=True)
+            Q /= B
+
+        Q *= B # the colomns must sum to 1 so that Q is an assignment
+        return Q.t()
+
+
+    # def forward_train(self, x, chm, azm):
+    def forward_train(self, x):
+
+        b = x.shape[0]
+        x_s = self.transforms_main(x)
+
+        x = self.embed(x)
+        x_s = self.embed(x_s)
+        
+
+        inp = torch.cat((x, x_s))
+        inp = self.encoder(inp)
+        inp = self.projector(inp)
+        inp = nn.functional.normalize(inp, dim=1, p=2)
+
+        scores = self.prototypes(inp)
+
+
+        scores_t = scores[:b]
+        scores_s = scores[b:]
+
+        t = scores_t.detach()
+        s = scores_s.detach()
+
+        t = self.ra(t)
+        s = self.ra(s)
+
+        scores_t = self.ra(scores_t)
+        scores_s = self.ra(scores_s)
+
+        b = scores_t.shape[0]
+
+
+        q_t = self.sinkhorn(t)
+        q_s = self.sinkhorn(s)
+
+        p_t = self.softmax(scores_t/self.temp)
+        p_s = self.softmax(scores_s/self.temp)
+
+        loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
+
+        return loss/b
 
 
     def forward(self, inp):
        
         inp = self.embed(inp)
+        if self.use_positions:
+            inp = inp + self.positions
+
 
         inp = self.encoder(inp)
         inp = self.projector(inp)
@@ -1376,8 +1818,8 @@ class C_Dec(nn.Module):
 
 
 if __name__ == "__main__":
-    s = ChainedPool()
-    p = torch.ones(1, 256, 64, 64)
+    s = UpsamplePredictor(256, 4)
+    p = torch.ones(1, 256, 5, 5)
     q = s(p)
     print(q.shape)
 

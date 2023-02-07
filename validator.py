@@ -1,101 +1,348 @@
-from select import select
-from imageio import save
-from matplotlib.widgets import Slider
+from sklearn.preprocessing import StandardScaler
+import skimage.segmentation as skseg 
+
 import geopandas as gpd
-from rasterio.plot import show
+
 import rasterio as rs
 from rasterio.transform import from_origin
 import rasterio.features as rf
-from rasterio.crs import CRS
 import torch
 import pickle
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import h5_helper as hp
-import inference
 import os
-import models
 import utils
 from skimage import exposure
-from scipy.stats import linregress
-from skimage.segmentation import mark_boundaries
+
 from einops import rearrange
-from sklearn.decomposition import PCA, IncrementalPCA
-import torchvision.transforms as tt
 import sklearn.model_selection as ms
 import sklearn.utils.class_weight as cw
-import math
+from shapely.geometry import Polygon
+from rasterio.transform import from_origin
+import matplotlib.style as mplstyle
+from mpfigure import make_tree_plot
+
+mplstyle.use('fast')
+
 
 
 #TODO: Clean this mess up
-#Switch plots to plotly? Good for overlays
+
 class Validator():
-    def __init__(self, struct=False, rescale=False, train_split=0.6, valid_split=0.2, test_split=0.2,  **kwargs):
-        self.rescale=rescale
+    def __init__(self, 
+                train_split=0.6, 
+                valid_split=0.2, 
+                test_split=0.2, 
+                use_tt=True, 
+                scholl_filter=False, 
+                scholl_output=False, 
+                filter_species=None, 
+                object_split=False, 
+                tree_tops_dir="", 
+                rgb_dir = '',
+                stats_loc = '',
+                data_gdf=None, 
+                ttops_search_buffer=5, 
+                crown_diameter_mult = 0.9,
+                constant_diameter = 2,
+                ndvi_filter=None,
+                **kwargs):
         self.file = kwargs["file"]
         self.pca_dir = kwargs["pca_dir"]
-        self.ica_dir = kwargs['ica_dir']
-        self.raw_bands_dir = kwargs['raw_bands']
-        self.shadow_dir = kwargs['shadow']
-        self.sp_dir = kwargs['superpixel']
-        self.struct = struct
+        self.tree_tops_dir = tree_tops_dir
+        self.rgb_dir = rgb_dir
+        self.stats_loc = stats_loc
         self.curated = kwargs['curated']
         self.site_prefix = kwargs['prefix']
-        
+        self.crown_diameter_mult = crown_diameter_mult
+        self.constant_diameter = constant_diameter
+
+        self.ndvi_filter=ndvi_filter
         self.num_classes = kwargs["num_classes"]
         self.site_name = kwargs["site_name"]
         self.plot_file = kwargs['plot_file']
         self.orig_dir = kwargs['orig']
-        self.chm_mean = kwargs['chm_mean']
-        self.chm_std = kwargs['chm_std']
-        self.valid_data, self.data_gdf = self.get_plot_data()
+        self.use_tt = use_tt
+        self.scholl_filter = scholl_filter
+        self.scholl_output = scholl_output
+        self.filter_species = filter_species
+        self.ttops_search_buffer = ttops_search_buffer
+
+        self.data_gdf = self.get_plot_data()
 
         self.valid_files = self.get_valid_files()
 
         self.valid_dict = self.make_valid_dict()
-    
+        self.species_lookup = {'PICOL': 'Lodgepole Pine',
+                                'PIFL2': 'Limber Pine',
+                                'ABLAL': 'Subalpine Fir',
+                                'PIEN': 'Engelmann Spruce'}
+        self.species_colors = {'PICOL': '#e41a1c',
+                                'PIFL2': '#377eb8',
+                                'ABLAL': '#4daf4a',
+                                'PIEN': '#984ea3'}
+        
 
         self.orig_files = [os.path.join(kwargs['orig'], file) for file in os.listdir(kwargs['orig']) if ".h5" in file]
         self.pca_files = [os.path.join(kwargs['pca_dir'], file) for file in os.listdir(kwargs['pca_dir']) if ".npy" in file]
+        self.tree_tops_files = [os.path.join(tree_tops_dir, file) for file in os.listdir(tree_tops_dir) if ".geojson" in file]
+        self.rgb_files = [os.path.join(rgb_dir, file) for file in os.listdir(rgb_dir) if ".tif" in file]
+        self.chm_files = [os.path.join(kwargs['chm'], file) for file in os.listdir(kwargs['chm']) if ".tif" in file]
         
         def make_dict(file_list, param_1, param_2):
             return {f"{file.split('_')[param_1]}_{file.split('_')[param_2]}": file for file in file_list}
 
         self.orig_dict = make_dict(self.orig_files, -3, -2)
         self.pca_dict = make_dict(self.pca_files, -4, -3)
-
-
-
-        self.chm_files = [os.path.join(kwargs['chm'], file) for file in os.listdir(kwargs['chm']) if ".tif" in file]
-        self.azm_files = [os.path.join(kwargs['azm'], file) for file in os.listdir(kwargs['azm']) if ".npy" in file]
-
-        self.sp_files = [os.path.join(self.sp_dir, file) for file in os.listdir(self.sp_dir) if ".npy" in file]
-        self.sp_dict = make_dict(self.sp_files, -4, -3)
-
+        self.tree_tops_dict = make_dict(self.tree_tops_files, -3, -2)
+        self.rgb_dict = make_dict(self.rgb_files, -3, -2)
         self.chm_dict = make_dict(self.chm_files, -3, -2)
-        self.azm_dict = make_dict(self.azm_files, -4, -3)
+        
+        self.rng = np.random.default_rng(42)
+        self.taxa = {key: ix for ix, key in enumerate(sorted(self.data_gdf['taxonID'].unique()))}
+        
+        if use_tt:
+            if not os.path.exists(data_gdf):
+                self.data_gdf = self.pick_ttops()
+                with open(data_gdf, 'wb') as f:
+                    pickle.dump(self.data_gdf, f)
+            else:
+                with open(data_gdf, 'rb') as f:
+                    self.data_gdf = pickle.load(f)
+        
 
-        self.ica_files = [os.path.join(self.ica_dir, file) for file in os.listdir(self.ica_dir) if ".npy" in file]
-        self.extra_files = [os.path.join(self.raw_bands_dir, file) for file in os.listdir(self.raw_bands_dir) if ".npy" in file]
-        self.shadow_files = [os.path.join(self.shadow_dir, file) for file in os.listdir(self.shadow_dir) if ".npy" in file]
+        # self.data_gdf = gpd.GeoDataFrame(self.data_gdf, geometry=gpd.points_from_xy(self.data_gdf.easting_tree, self.data_gdf.northing_tree), crs='EPSG:32613')
+        # self.data_gdf.geometry = self.data_gdf.buffer(self.data_gdf['maxCrownDiameter']*0.9/2)
 
-        self.ica_files_dict = make_dict(self.ica_files, -5, -4)
-        self.extra_files_dict = make_dict(self.extra_files, -4, -3)
-        self.shadow_dict = make_dict(self.shadow_files, -4, -3)
+       
 
-        self.cluster_groups = set()
+        if object_split:
+            self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
+        else:
+            self.train_plots, self.valid_plots, self.test_plots = self.split_plots().values()
+            self.train = self.data_gdf.loc[self.data_gdf.plotID.isin(list(self.train_plots.index))]
+            self.valid = self.data_gdf.loc[self.data_gdf.plotID.isin(list(self.valid_plots.index))]
+            self.test = self.data_gdf.loc[self.data_gdf.plotID.isin(list(self.test_plots.index))]
+        self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=self.train['taxonID'])
 
-        self.last_cluster = {}
+
+    def per_plot_spectro(self, filters={}, scale='Tree', save_dir=None):
+        plot_ids = pd.unique(self.data_gdf['plotID'])
+        for id in plot_ids:
+            df = self.data_gdf.loc[self.data_gdf['plotID'] == id]
+
+            # Takes a dataframe with a single plot id and plots the spectra of all contained trees
+
+            #Holders for legend handles and labels, lets us make a cleaner legend
+            handles = []
+            labels = []
+            
+            key = df.iloc[0]['file_coords']
+
+            west = int(key.split('_')[0])
+            north = int(key.split('_')[1]) + 1000
+            meter_affine = from_origin(west, north, 1, 1)
+            decimeter_affine = from_origin(west, north, .1, .1)
+
+            scene = hp.pre_processing(os.path.join(self.orig_dict[key]), get_all=True)
+
+            tru_color = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_viz_bands())
+            tru_color = utils.make_rgb(tru_color['bands'])
+            tru_color = exposure.adjust_gamma(tru_color, 0.5)
+
+            rgb = rs.open(self.rgb_dict[key])
+            big_img = rgb.read()
+            big_img = rearrange(big_img, 'c h w -> h w c')/255.0
+
+            chm = rs.open(self.chm_dict[key])
+            open_chm = chm.read()
+            open_chm = rearrange(open_chm, 'c h w -> h w c')
+            open_chm = np.squeeze(open_chm)
+                
+
+            s = self._make_plot_outlines(df, make_list=True)
+
+            open_ttops = gpd.read_file(self.tree_tops_dict[key])
+
+            open_ttops = open_ttops.clip(s)
+            
+            row = df.iloc[0]
+            x_min, x_max, y_min, y_max = row.x_min, row.x_max, row.y_min, row.y_max
+            slice_params = (y_min, y_max, x_min, x_max)
+
+            xs = [r.geometry.x - west - x_min for _,r in open_ttops.iterrows()]
+            ys = [(1000 - (r.geometry.y - (north - 1000)))-y_min for _,r in open_ttops.iterrows()]
+
+
+            tc = tru_color[y_min:y_max,x_min:x_max,...]
+            
+            open_chm = open_chm[y_min*10:y_max*10,x_min*10:x_max*10,...]
+
+            big_rgb = big_img[y_min*10:y_max*10,x_min*10:x_max*10,...]
+
+            bands = scene['meta']['spectral_bands'][5:-5]
+            loaded_img = self.process_hs_errors(scene["bands"][:,:,5:-5])
+
+            plotID = df.iloc[0]['plotID']
+
+            if 'ndvi' in filters:
+                ndvi = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_bareness_bands())["bands"]
+                
+                ndvi = utils.get_ndvi(ndvi)
+        
+                ndvi_mask = ndvi < filters['ndvi']
+                loaded_img[ndvi_mask] = np.nan
+            
+            if 'shadow' in filters:
+                shadow = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_shadow_bands())["bands"]
+                
+                shadow = utils.han_2018(shadow)
+                shadow_mask = shadow < filters['shadow']
+                loaded_img[shadow_mask] = np.nan
+            
+            hs_crop = loaded_img[y_min:y_max,x_min:x_max,...]
+
+            if scale == 'Plot':
+                fig, ax = plt.subplots()
+
+            for ix, row in df.iterrows():
+                tree_poly = row.geometry
+                tree_id = self.species_lookup[row.taxonID]
+                tree_color = self.species_colors[row.taxonID]
+                crown_diam = row.maxCrownDiameter
+                
+               
+                if scale == 'Tree':
+                    f_name = f'{row["file_coords"]}_{row["taxonID"]}_{row["individualID"]}.pt'
+                    make_tree_plot(hs_crop, tc, big_rgb, bands, slice_params, tree_poly, meter_affine, decimeter_affine, (xs, ys), plotID, tree_id, save_dir, ix, crown_diam, self.taxa, row.taxonID, f_name, open_chm)
+                    #yield None
+
+            continue
+
+    
+    @staticmethod
+    def process_hs_errors(hs_file):
+        bad_mask = np.zeros((1000,1000), dtype=bool)
+        for i in range(0, hs_file.shape[-1]):
+            z = hs_file[:,:,i]
+            y = z>1
+            bad_mask += y
+        hs_file[bad_mask] = np.nan
+
+        return hs_file
+
+
+    def save_orig_to_geotiff(self, key, save_loc, thresh=None, mode='rgb'):
+        img = self.orig_dict[key]
+
+        if mode == 'rgb':
+            rgb = hp.pre_processing(img, wavelength_ranges=utils.get_viz_bands())
+            rgb = hp.make_rgb(rgb["bands"])
+            rgb = exposure.adjust_gamma(rgb, 0.5)
+            scene = rearrange(rgb, 'h w c -> c h w')
+
+        if mode == 'mpsi':
+            mpsi = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_shadow_bands())["bands"]
+            mpsi = utils.han_2018(mpsi)
+            if thresh is not None:
+                thresh_mask = mpsi>thresh
+                mpsi[thresh_mask] = 1
+                mpsi[~thresh_mask] = 0
+            scene = mpsi[np.newaxis, ...]
+
+        if mode == 'ndvi':
+            ndvi = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_bareness_bands())["bands"]
+                            
+            ndvi = utils.get_ndvi(ndvi)
+            if thresh is not None:
+                thresh_mask = ndvi>thresh
+                ndvi[thresh_mask] = 1
+                ndvi[~thresh_mask] = 0
+            scene = ndvi[np.newaxis, ...]
+
+        west = int(key.split('_')[0])
+        north = int(key.split('_')[1]) + 1000
+        affine = from_origin(west, north, 1, 1)
+
+        new_img = rs.open(
+            save_loc,
+            'w',
+            driver="GTiff",
+            height=1000,
+            width=1000,
+            count=1,
+            dtype=scene.dtype,
+            crs='+proj=utm +zone=13 +datum=WGS84 +units=m +no_defs +type=crs',
+            transform=affine
+        )
+
+        new_img.write(scene)
+        new_img.close()
+
+    def save_pca_to_geotiff(self, key, save_loc):
+        img = self.pca_dict[key]
+        pca = np.load(img).astype(np.float32)
+        pca = rearrange(pca, 'h w c -> c h w')
+
+        west = int(key.split('_')[0])
+        north = int(key.split('_')[1]) + 1000
+        affine = from_origin(west, north, 1, 1)
+
+        new_img = rs.open(
+            save_loc,
+            'w',
+            driver="GTiff",
+            height=1000,
+            width=1000,
+            count=20,
+            dtype=pca.dtype,
+            crs='+proj=utm +zone=13 +datum=WGS84 +units=m +no_defs +type=crs',
+            transform=affine
+        )
+
+        pca[pca!=pca] = 0
+        new_img.write(pca)
+        new_img.close()
+    
+    def save_plot_outlines(self, save_loc, df):
+        grouped_files = df.groupby(['plotID'])
+        to_save = grouped_files.apply(self._make_plot_outlines)
+        to_save = to_save.reset_index()
+        to_save = to_save.rename(mapper={0: 'geometry'}, axis=1)
+        to_save = to_save.set_crs(crs='EPSG:32613')
+        to_save.to_file(save_loc)
+    
+    @staticmethod
+    def _make_plot_outlines(df, make_list=False):
+        row = df.iloc[0]
+        x_min = row['easting_plot']//1 - (row['plotSize']**(1/2)/2)
+        x_max = row['easting_plot']//1 + (row['plotSize']**(1/2)/2)
+
+        y_min = row['northing_plot']//1 - (row['plotSize']**(1/2)/2)
+        y_max = row['northing_plot']//1 + (row['plotSize']**(1/2)/2)
+        if not make_list:
+            x = [x_min, x_max, x_max, x_min, x_min]
+            y = [y_max, y_max, y_min, y_min, y_max]
+            points = list(zip(x, y))
+            s = gpd.GeoSeries([Polygon(points)], crs='EPSG:32613')
+            to_return = gpd.GeoDataFrame(geometry=s)
+        else:
+            to_return = (x_min, y_min, x_max, y_max)
+        return to_return
 
         
 
-        self.data_gdf = self.pick_superpixels()
-        self.taxa = {key: ix for ix, key in enumerate(self.data_gdf['taxonID'].unique())}
-
-        self.train, self.valid, self.test = self.get_splits(train_split, valid_split, test_split)
-        self.class_weights = cw.compute_class_weight(class_weight='balanced', classes=self.data_gdf['taxonID'].unique(), y=self.train['taxonID'])
-        print('here')
+    def save_splits(self, save_dir):
+        to_save = {'train': self.train,
+                    'test': self.test,
+                    'valid': self.valid}
+        for k, v in to_save.items():
+            save_loc = os.path.join(save_dir, f'{k}.shp')
+            v = v[['taxonID', 'geometry']]
+            v['taxonID'] = v['taxonID'].astype(str)
+            v.to_file(save_loc)
 
     @staticmethod
     def get_crop(arr, ix):
@@ -124,8 +371,8 @@ class Validator():
 
             return [(row_pad, row_pad+add_row), (col_pad, col_pad+add_col)]
 
-    #TODO: Check shapes before saving
-    def render_valid_data(self, save_dir, split, out_size=4):
+
+    def render_hs_data(self, save_dir, split, out_size=3, target_size=3):
         if split == 'train':
             data = self.train
         if split == 'valid':
@@ -133,112 +380,234 @@ class Validator():
         if split == 'test':
             data = self.test
 
-
         loaded_key = None
         for ix, row in data.iterrows():
             key = row['file_coords']
             if key != loaded_key:
-                pca = np.load(self.pca_dict[key]).astype(np.float32)
-                
-     
-                #Azimuth
-                azm = np.load(self.azm_dict[key]).astype(np.float32)
-                azm = (azm-180)/180
-                azm[azm != azm] = 0
-
-                #CHM
-                chm_open = rs.open(self.chm_dict[key])
-                chm = chm_open.read().astype(np.float32)
-                chm[chm==-9999] = np.nan
-                chm = chm.squeeze(axis=0)
-                chm[chm != chm] = 0
-
-                #ICA
-                ica = np.load(self.ica_files_dict[key]).astype(np.float32)
-
-                #Shadow Index
-                shadow = np.load(self.shadow_dict[key]).astype(np.float32)
-
-                #Raw bands
-                extra = np.load(self.extra_files_dict[key]).astype(np.float32)
-
-                sp = np.load(self.sp_dict[key])
-                loaded_key = key
+               
+                orig = hp.pre_processing(os.path.join(self.orig_dict[key]), get_all=True)["bands"][:,:,5:-5]
+                bad_mask = np.zeros((1000,1000), dtype=bool)
+                for i in range(0, orig.shape[-1]):
+                    z = orig[:,:,i]
+                    y = z>1
+                    bad_mask += y
+                orig[bad_mask] = np.nan
+            
+            
 
             taxa = row['taxonID']
-            super_pix_num = row['sp']
-            sp_mask = sp == super_pix_num
+            
             height = float(row['height'])
-            diam = float(row['maxCrownDiameter'])
-            #rad = int(diam//2)
-            #Ensure nothing is bigger than 4x4
-            rad = 1 
-            if rad>0:
-                masked_chm = chm * sp_mask
-                max_height = masked_chm.max()
-                height_pix = masked_chm == max_height
-                h_col = np.all(~height_pix, axis=0).argmin()
-                h_row = np.all(~height_pix, axis=1).argmin()
 
 
-                #NEED TO CHECK FOR OVERLAP SOMEHOW
-                bounds = (h_row - rad, h_row+rad+1, h_col-rad, h_col+rad+1)
+            rad = out_size//2 
 
-
-                #Just grabbing 3x3 crops right now
-                #y_pad = out_size - (bounds[1]-bounds[0])
-                #x_pad = out_size - (bounds[3]-bounds[2])
-
-                chm_crop = chm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #chm_crop = np.pad(chm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
+            t_col = int(row['tree_x'])
+            t_row = int(row['tree_y'])
+            #LOOKUP HOW I USED TO DO THIS
+            bounds = (t_row - rad, t_row+rad+1, t_col-rad, t_col+rad+1)
                 
-
-                pca_crop = pca[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
-                #pca_crop = np.pad(pca_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
-
-                #if pca_crop.shape == (4, 4, 10):
-                ica_crop = ica[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
-                #ica_crop = np.pad(ica_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
-                
-                azm_crop = azm[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #azm_crop = np.pad(azm_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
-                shadow_crop = shadow[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #shadow_crop = np.pad(shadow_crop, ((0, y_pad), (0, x_pad)), mode='constant', constant_values=-9999)
-                extra_crop = extra[bounds[0]:bounds[1], bounds[2]:bounds[3]]
-                #extra_crop = np.pad(extra_crop, ((0, y_pad), (0, x_pad), (0, 0)), mode='constant', constant_values=-9999)
+            orig_crop = orig[bounds[0]:bounds[1], bounds[2]:bounds[3],:]
 
 
-                mask = pca_crop != pca_crop
+            mask = orig_crop != orig_crop
 
-                if pca_crop.shape == (3, 3, 10):
+            if orig_crop.shape == (out_size, out_size, orig.shape[-1]):
+                orig_crop = torch.tensor(orig_crop)
+                orig_crop = rearrange(orig_crop, 'h w c -> c h w')
+
+                label = torch.zeros((len(self.taxa.keys()),target_size, target_size), dtype=torch.float32).clone()
+                label[self.taxa[taxa]] = 1.0
+
+                to_save = {
+                    'orig': orig_crop,
+                    'mask': mask,
+                    'target': label,
+                    'height': height,
+                }
+
+                f_name = f'{key}_{row["taxonID"]}_{row["individualID"]}.pt'
+                with open(os.path.join(save_dir, f_name), 'wb') as f:
+                    torch.save(to_save, f)
+            
+        return None
+
+    def render_plots(self, save_dir, split, filetype='pca'):
+        if split == 'train':
+            data = self.train
+        if split == 'valid':
+            data = self.valid
+        if split == 'test':
+            data = self.test
+        grouped_files = data.groupby(['plotID'])
+        grouped_files.apply(self._render_plot, save_dir, self, filetype)
+    
+    @staticmethod
+    def _render_plot(df: pd.DataFrame, save_dir: str, vd, filetype):
+        first_row = df.iloc[0]
+        f_key = first_row['file_coords']
+        plot_id = first_row['plotID']
+        if filetype == 'pca':
+            pca = np.load(vd.pca_dict[f_key]).astype(np.float32)
+        if filetype == 'hs':
+            pca = hp.pre_processing(os.path.join(vd.orig_dict[f_key]), get_all=True)["bands"][:,:,5:-5]
+        taxa = vd.taxa
+
+        plot_bounds = (first_row['y_min'], first_row['y_max'], first_row['x_min'], first_row['x_max'])
+        pca_plot = pca[plot_bounds[0]:plot_bounds[1], plot_bounds[2]:plot_bounds[3], ...]
+        pca_plot = rearrange(pca_plot, 'h w c -> c h w')
+        pca_plot = torch.from_numpy(pca_plot).to(torch.float32)
+
+        key = torch.zeros((pca.shape[0], pca.shape[1]), dtype=torch.float32)
+
+        for ix, row in df.iterrows():
+            taxa_num = taxa[row['taxonID']] + 1
+            tree_x = int(row['tree_x'])
+            tree_y = int(row['tree_y'])
+            radius = int(row['maxCrownDiameter']//2)
+
+            key[tree_y-radius:tree_y+radius+1, tree_x-radius:tree_x+radius+1] = taxa_num
+
+        key = key[plot_bounds[0]:plot_bounds[1], plot_bounds[2]:plot_bounds[3]]
+        
+        mask = key == 0
+        key = key - 1
+        #key[mask] = np.nan
+
+        to_save = {'pca': pca_plot,
+                    'targets': key,
+                    'mask': mask}
+
+        f_name = f'{f_key}_{plot_id}.pt'
+        with open(os.path.join(save_dir, f_name), 'wb') as f:
+            torch.save(to_save, f)
+
+        return None
+
+
+    def get_splits(self, train_prop, valid_prop, test_prop):
+        if valid_prop != 0:
+            train, t_v = ms.train_test_split(self.data_gdf, test_size=(valid_prop+test_prop), train_size=train_prop, random_state=42, stratify=self.data_gdf['taxonID'])
+            test, valid = ms.train_test_split(t_v, test_size=valid_prop/(valid_prop+test_prop), train_size=test_prop/(valid_prop+test_prop), random_state=42, stratify=t_v['taxonID'])
+            return train, valid, test
+        else:
+            train, test = ms.train_test_split(self.data_gdf, test_size=test_prop, train_size=train_prop, random_state=42, stratify=self.data_gdf['taxonID'])
+            return train, None, test
+
+    def render_valid_patch(self, save_dir, split, out_size=20, multi_crop=1, num_channels=16, key_label='pca', filters=[]):
+        if split == 'train':
+            data = self.train
+        if split == 'valid':
+            data = self.valid
+        if split == 'test':
+            data = self.test
+        if split == 'all':
+            data = self.data_gdf
+
+        loaded_key = None
+        ndvi_key = None
+        shadow_key = None
+        rgb_key = None
+        data = data.sort_values('file_coords')
+        for ix, row in data.iterrows():
+            key = row['file_coords']
+            if key != loaded_key:
+                if key_label != 'hs':
+                    pca = np.load(self.pca_dict[key]).astype(np.float32)
+                if key_label == 'hs':
+                    pca = hp.pre_processing(os.path.join(self.orig_dict[key]), get_all=True)["bands"][:,:,5:-5]
+                    bad_mask = np.zeros((1000,1000), dtype=bool)
+                    for i in range(0, pca.shape[-1]):
+                        z = pca[:,:,i]
+                        y = z>1
+                        bad_mask += y
+                    pca[bad_mask] = np.nan
+                loaded_key = key
+
+            west = int(key.split('_')[0])
+            north = int(key.split('_')[1]) + 1000
+            affine = from_origin(west, north, 1, 1)
+            
+            
+            #rad = row['maxCrownDiameter']*self.crown_diameter_mult/2
+            rad=3
+            target_size = 7
+
+            taxa = row['taxonID']
+            
+            height = float(row['height'])
+
+
+            if not self.use_tt:
+                t_col = int(row['tree_x'])
+                t_row = int(row['tree_y'])
+            else:
+                t_col = round(row.geometry.centroid.x) - int(row.file_west_bound)
+                t_row = 1000 - (round(row.geometry.centroid.y) - int(row.file_south_bound))
+
+
+
+            target_bounds = (t_row - rad, t_row+rad+1, t_col-rad, t_col+rad+1)
+
+            for ix in range(multi_crop):
+                neg_x_pad = self.rng.integers(0, out_size-target_size)
+                pos_x_pad = (out_size-target_size) - neg_x_pad
+                neg_y_pad = self.rng.integers(0, out_size-target_size)
+                pos_y_pad = (out_size-target_size) - neg_y_pad
+
+                x_min = target_bounds[2] - neg_x_pad
+                x_max = target_bounds[3] + pos_x_pad
+
+                y_min = target_bounds[0] - neg_y_pad
+                y_max = target_bounds[1] + pos_y_pad
+
+                pca_crop = pca[y_min:y_max, x_min:x_max,:]
+
+                       
+                if pca_crop.shape == (out_size, out_size, num_channels):
                     pca_crop = torch.tensor(pca_crop)
                     pca_crop = rearrange(pca_crop, 'h w c -> c h w')
-                    ica_crop = torch.tensor(ica_crop)
-                    ica_crop = rearrange(ica_crop, 'h w c -> c h w')
-                    shadow_crop = torch.tensor(shadow_crop)
-                    extra_crop = torch.tensor(extra_crop)
-                    extra_crop = rearrange(extra_crop, 'h w c -> c h w')
-                    chm_crop = torch.tensor(chm_crop)
-                    azm_crop = torch.tensor(azm_crop)
-                    mask = torch.tensor(mask)
-                    mask = rearrange(mask, 'h w c -> c h w')
+                    masks = {}
+                    if 'ndvi' in filters:
+                        if key != ndvi_key:
+                            ndvi = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_bareness_bands())["bands"]
+                            
+                            ndvi = utils.get_ndvi(ndvi)
+                            ndvi_key = key
+                        ndvi_clip = ndvi[y_min:y_max, x_min:x_max]
+                        #ndvi_mask = ndvi < self.ndvi_filter
+                        masks['ndvi'] = ndvi_clip
+                    if 'shadow' in filters:
+                        if key != shadow_key:
+                            shadow = hp.pre_processing(os.path.join(self.orig_dict[key]), utils.get_shadow_bands())["bands"]
+                            
+                            shadow = utils.han_2018(shadow)
+                            shadow_key = key
+                        shadow_clip = shadow[y_min:y_max, x_min:x_max]
+                        #shadow_mask = shadow < 0.03
+                        masks['shadow'] = shadow_clip
+                    
+                    #pca_crop[mask] = 0
+                    
 
-                    label = torch.zeros((len(self.taxa.keys()),out_size, out_size), dtype=torch.float32).clone()
-                    label[self.taxa[taxa]] = 1.0
+                    label = torch.zeros((1000, 1000), dtype=torch.float32)
+                    #label[self.taxa[taxa]] = 1.0
+                    label = label - 1
+                    target_mask = rf.geometry_mask([row.geometry], (1000,1000), affine, invert=True, all_touched=True)
+                    label[target_mask] = self.taxa[taxa]
+                    label = label[y_min:y_max, x_min:x_max]
+
+                    #label[neg_y_pad:neg_y_pad+target_size+1, neg_x_pad:neg_x_pad+target_size+1] = self.taxa[taxa]
 
                     to_save = {
-                        'pca': pca_crop,
-                        'ica': ica_crop,
-                        'shadow': shadow_crop,
-                        'raw_bands': extra_crop,
-                        'chm': chm_crop,
-                        'azm': azm_crop,
-                        'mask': mask,
-                        'target': label,
-                        'height': height
+                        key_label: pca_crop,
+                        'mask': masks,
+                        'targets': label,
+                        'height': height,
+                        #'crop_coords': crop_coords
                     }
 
-                    f_name = f'{key}_{row["taxonID"]}_{super_pix_num}.pt'
+                    f_name = f'{key}_{row["taxonID"]}_{row["individualID"]}_multi_crop_{ix}.pt'
                     with open(os.path.join(save_dir, f_name), 'wb') as f:
                         torch.save(to_save, f)
             
@@ -246,42 +615,13 @@ class Validator():
 
 
     def make_valid_dict(self):
-        species = self.valid_data['taxonID'].unique()
+        species = self.data_gdf['taxonID'].unique()
         valid_dict = {}
         for specie in species:
             valid_dict[specie] = {'expected':0,
                                  'found': {i:0 for i in range(self.num_classes)}}
         return valid_dict
 
-    @staticmethod    
-    def _gdf_validate_taxon(df, transform, img, vd):
-        if len(df) >0:
-            taxa = df.iloc[0]['taxonID']
-            tree_outlines = rf.geometry_mask(df.crowns, (1000,1000), transform=transform, invert=True)
-            trees = np.ma.masked_where(tree_outlines == False, tree_outlines)
-            selected = img[trees]
-            vd.valid_dict[taxa]['expected'] += trees.sum()
-            id, counts = np.unique(selected, return_counts=True)
-            for i, count in zip(id, counts):
-                vd.valid_dict[taxa]['found'][i] += count
-        else:
-            print('here')
-            print(df)
-
-        return df
-
-    
-    def validate_from_gdf(self, file_key, img):
-        west, south = file_key.split('_')
-        west, south = int(west), int(south)
-        cur_gdf = self.data_gdf.loc[(self.data_gdf.easting > west) & (self.data_gdf.easting < west+1000) & (self.data_gdf.northing > south) & (self.data_gdf.northing < south+1000)]
-        img_loc = self.valid_files[file_key]
-        transform = from_origin(west, south+1000, 1, 1)
-
-
-        cur_gdf.groupby('taxonID').apply(self._gdf_validate_taxon, transform, img, self) # original, chm)
-
-        
 
     def get_plot_data(self):
        
@@ -290,26 +630,32 @@ class Validator():
                                           'adjNorthing': 'northing'})
         data_with_coords = curated.loc[(curated.easting == curated.easting) & (curated.northing==curated.northing) & (curated.maxCrownDiameter == curated.maxCrownDiameter)]
             
-        #data_with_coords = data_with_coords.merge(data, how='inner', on='individualID')
-        data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting, data_with_coords.northing), crs='EPSG:32618')
+        data_gdf = gpd.GeoDataFrame(data_with_coords, geometry=gpd.points_from_xy(data_with_coords.easting, data_with_coords.northing, data_with_coords.height), crs='EPSG:32613')
+        data_gdf = data_gdf.loc[data_gdf['taxonID'] != self.filter_species]
         data_gdf['crowns'] = data_gdf.geometry.buffer(data_gdf['maxCrownDiameter']/2)
         data_gdf = data_gdf.loc[data_gdf.crowns.area > 2]
+        if self.crown_diameter_mult is not None:
+           data_gdf.geometry = data_gdf.buffer(data_gdf['maxCrownDiameter']*self.crown_diameter_mult/2)
+        else:
+            data_gdf.geometry = data_gdf.buffer(self.constant_diameter)
+        
 
         #TODO: Test with and without this
-        #NEED TO DE-DEDUPE THIS BEFORE RUNNING BECAUSE ALEX
-        # to_remove = set()
-        # for ix, row in data_gdf.iterrows():
-        #     working_copy = data_gdf.loc[data_gdf.index != ix]
-        #     coverage = working_copy.crowns.contains(row.crowns)
-        #     cover_gdf = working_copy.loc[coverage]
-        #     if (cover_gdf['height']>row['height']).sum() > 0:
-        #         to_remove.add(ix)
-        #     intersect = working_copy.crowns.intersects(row.crowns)
-        #     inter_gdf = working_copy.loc[intersect]
-        #     if (inter_gdf['height']>row['height']).sum() > 0:
-        #         to_remove.add(ix)
 
-        # data_gdf =  data_gdf.drop(list(to_remove))
+        if self.scholl_filter:
+            to_remove = set()
+            for ix, row in data_gdf.iterrows():
+                working_copy = data_gdf.loc[data_gdf.index != ix]
+                coverage = working_copy.crowns.contains(row.crowns)
+                cover_gdf = working_copy.loc[coverage]
+                if (cover_gdf['height']>row['height']).sum() > 0:
+                    to_remove.add(ix)
+                intersect = working_copy.crowns.intersects(row.crowns)
+                inter_gdf = working_copy.loc[intersect]
+                if (inter_gdf['height']>row['height']).sum() > 0:
+                    to_remove.add(ix)
+
+            data_gdf =  data_gdf.drop(list(to_remove))
 
         data_gdf["file_west_bound"] = data_gdf["easting"] - data_gdf["easting"] % 1000
         data_gdf["file_south_bound"] = data_gdf["northing"] - data_gdf["northing"] % 1000
@@ -324,60 +670,57 @@ class Validator():
                             
         data_gdf['file_coords'] = data_gdf['file_west_bound'] + '_' + data_gdf['file_south_bound']
 
-        
-        #data['approx_sq_m'] = ((data['maxCrownDiameter']/2)**2) * np.pi
-
-        
+               
         plots = pd.read_csv(self.plot_file, usecols=['plotID', 'siteID', 'subtype', 'easting', 'northing', 'plotSize'])
         plots = plots.loc[plots['siteID'] == self.site_name]
         plots = plots.loc[plots['subtype'] == 'basePlot']
 
-        data = data_gdf.merge(plots, how='left', on='plotID')
+        data_gdf = data_gdf.merge(plots, how='left', on='plotID')
 
-        data = data.rename(columns={
+        data_gdf = data_gdf.rename(columns={
                                     'easting_x': 'easting_tree',
                                     'northing_x': 'northing_tree',
                                     'easting_y': 'easting_plot',
                                     'northing_y': 'northing_plot'
         })
 
-        data["file_west_bound"] = data["easting_plot"] - data["easting_plot"] % 1000
-        data["file_south_bound"] = data["northing_plot"] - data["northing_plot"] % 1000
+        data_gdf["file_west_bound"] = data_gdf["easting_plot"] - data_gdf["easting_plot"] % 1000
+        data_gdf["file_south_bound"] = data_gdf["northing_plot"] - data_gdf["northing_plot"] % 1000
 
-        data = data.loc[data['file_west_bound'] == data['file_west_bound']]
+        data_gdf = data_gdf.loc[data_gdf['file_west_bound'] == data_gdf['file_west_bound']]
 
-        data = data.astype({"file_west_bound": int,
+        data_gdf = data_gdf.astype({"file_west_bound": int,
                             "file_south_bound": int})
 
-        data['x_min'] = (data['easting_plot']//1 - data['file_west_bound']) - (data['plotSize']**(1/2)/2)
-        data['x_max'] = data['x_min'] + data['plotSize']**(1/2)
+        data_gdf['x_min'] = (data_gdf['easting_plot']//1 - data_gdf['file_west_bound']) - (data_gdf['plotSize']**(1/2)/2)
+        data_gdf['x_max'] = data_gdf['x_min'] + data_gdf['plotSize']**(1/2)
 
-        data['y_min'] = 1000- (data['northing_plot']//1 - data['file_south_bound']) - (data['plotSize']**(1/2)/2)
-        data['y_max'] = data['y_min'] + data['plotSize']**(1/2)
+        data_gdf['y_min'] = 1000- (data_gdf['northing_plot']//1 - data_gdf['file_south_bound']) - (data_gdf['plotSize']**(1/2)/2)
+        data_gdf['y_max'] = data_gdf['y_min'] + data_gdf['plotSize']**(1/2)
 
-        data['tree_x'] = data['easting_tree']//1 - data['file_west_bound']
-        data['tree_y'] = 1000 - (data['northing_tree']//1 - data['file_south_bound'])
+        data_gdf['tree_x'] = data_gdf['easting_tree']//1 - data_gdf['file_west_bound']
+        data_gdf['tree_y'] = 1000 - (data_gdf['northing_tree']//1 - data_gdf['file_south_bound'])
 
-        data = data.astype({"file_west_bound": str,
+        data_gdf = data_gdf.astype({"file_west_bound": str,
                             "file_south_bound": str,
                             'x_min':int,
                             'y_min':int,
                             'x_max':int,
                             'y_max': int})
         
-        index_names = data[(data['x_min'] <0) | (data['y_min']<0) | (data['x_max'] >999) | (data['y_max']>999)].index
-        data = data.drop(index_names)
+        index_names = data_gdf[(data_gdf['x_min'] <0) | (data_gdf['y_min']<0) | (data_gdf['x_max'] >999) | (data_gdf['y_max']>999)].index
+        data_gdf = data_gdf.drop(index_names)
 
-        data['file_coords'] = data['file_west_bound'] + '_' + data['file_south_bound']
-        data = pd.DataFrame(data)
+        data_gdf['file_coords'] = data_gdf['file_west_bound'] + '_' + data_gdf['file_south_bound']
+        #data_gdf = pd.DataFrame(data_gdf)
 
-        return data, data_gdf
+        return data_gdf
 
 
 
     def get_valid_files(self):
         if self.pca_dir is not None:
-            coords = list(self.valid_data['file_coords'].unique())
+            coords = list(self.data_gdf['file_coords'].unique())
 
             all_files = os.listdir(self.pca_dir)
             valid_files = {coord:os.path.join(self.pca_dir,file) for file in all_files for coord in coords if coord in file}
@@ -385,29 +728,6 @@ class Validator():
         else:
             return None
 
-    def get_splits(self, train_prop, valid_prop, test_prop):
-        train, t_v = ms.train_test_split(self.data_gdf, test_size=(valid_prop+test_prop), train_size=train_prop, random_state=42, stratify=self.data_gdf['taxonID'])
-        test, valid = ms.train_test_split(t_v, test_size=valid_prop/(valid_prop+test_prop), train_size=test_prop/(valid_prop+test_prop), random_state=42, stratify=t_v['taxonID'])
-        return train, valid, test
-
-
-    def save_valid_df(self, save_dir):
-        class_columns = list(range(self.num_classes))
-        base = ['species', 'expected']
-        columns = base + class_columns
-        df = pd.DataFrame(columns=columns)
-
-        for key, value in self.valid_dict.items():
-            species_dict = {}
-            species_dict['species'] = key
-            species_dict['expected'] = value['expected']
-            for j, l in value['found'].items():
-                if j < self.num_classes:
-                    species_dict[j] = l
-            df = pd.concat((df, pd.Series(species_dict).to_frame().T))
-
-        df.to_csv(os.path.join(save_dir, 'valid_stats.csv'))
-        return df
 
     @staticmethod
     def _extract_plot(df, orig_dict, save_dir):
@@ -420,14 +740,102 @@ class Validator():
         rgb = rgb[first_row['y_min']:first_row['y_max'], first_row['x_min']:first_row['x_max'], :]
         plt.imsave(os.path.join(save_dir, f'{plot}.png'), rgb)
 
-    def extract_plots(self, save_dir):
-        grouped_files = self.valid_data.groupby(['plotID'])
-        grouped_files.apply(self._extract_plot, self.orig_dict, save_dir)
+    @staticmethod
+    def solve_split(df, prop, buffer):
+
+        tracking = {k:False for k in df.columns}
+        solved = False
+
+        working_copy = df.iloc[:0].copy()
+
+        while not solved:
+            if len(df) < 1:
+                break
+            for k, v in tracking.items():
+                if len(df) < 1:
+                    break
+                if v == False:
+                    df = df.sort_values(k, ascending=False)
+                    row = pd.DataFrame(df.iloc[0]).T
+                    good_row = True
+                    for j, i in tracking.items():
+                        if row[j].item() + working_copy[j].sum() > buffer + prop:
+                            good_row = False
+                    df = df.drop(df.iloc[0].name)
+
+                    if good_row:
+                        working_copy = pd.concat((working_copy, row), axis=0)
+
+                m_sum = 0
+                for l, m in tracking.items():
+
+                    if not m:
+                        if working_copy[l].sum() > (prop - buffer):
+                            tracking[l] = True
+                            continue
+                    else:
+                        m_sum += m
+                        if m_sum == len(tracking.values()):
+                            solved = True
+        distance = 0
+        for k in tracking.keys():
+            distance += abs(working_copy[k].sum() - prop)**2
         
+        return {'solution':working_copy, 'dist':distance}
 
     
+    def split_plots(self, splits={'train': 0.7, 'valid':0.0, 'test':0.3}):
+        plot_counts={}
+        grouped_files = self.data_gdf.groupby(['plotID'])
+        grouped_files.apply(self._split_plot, plot_counts)
+        counts = pd.DataFrame.from_dict(plot_counts).T
+        for col in counts.columns:
+            counts[col] = counts[col]/counts[col].sum()
+
+        solved = {}
+        for k, v in splits.items():
+            cur_solutions = {}
+            
+
+            for buffer in range(1, 50):
+                buffer /= 100
+                cur_solutions[buffer] = self.solve_split(counts, v, buffer) 
+
+            best_distance = 1000
+            
+            for buffer, solution in cur_solutions.items():
+                if solution['dist'] < best_distance:
+                    best_distance = solution['dist']
+                    best_solution = solution['solution']
+
+            solved[k] = best_solution
+            counts = counts.drop(best_solution.index)
+
+        if len(counts) != 0:
+            solved['test'] = pd.concat((solved['test'], counts), axis=0)
+
+        return solved
+
+    
+    @staticmethod
+    def _split_plot(df: pd.DataFrame, pc: dict):
+        if len(df) > 0:
+            #counts = df.groupby(['taxonID']).size()
+            pc[df.iloc[0]['plotID']] = {tx:0 for tx in df.taxonID.unique()}
+
+            for tx in df.taxonID.unique():
+                cur = df.loc[df.taxonID == tx]
+                #area= cur.area.sum()
+                #pc[df.iloc[0]['plotID']][tx] = area
+                pc[df.iloc[0]['plotID']][tx] = len(cur)
+
+
+    def extract_plots(self, save_dir):
+        grouped_files = self.data_gdf.groupby(['plotID'])
+        grouped_files.apply(self._extract_plot, self.orig_dict, save_dir)
+            
     def extract_pca_plots(self, save_dir):
-        grouped_files = self.valid_data.groupby(['plotID'])
+        grouped_files = self.data_gdf.groupby(['plotID'])
         grouped_files.apply(self._extract_pca_plot, self.pca_dict, save_dir)
 
     @staticmethod
@@ -468,596 +876,181 @@ class Validator():
         plt.close()
 
     
-    #Fucking this up to test CHM superpixl
     @staticmethod
-    def _select_pixels(df, vd):
-        # fig, ax = plt.subplots(figsize=(10, 10))
-        top_row = df.iloc[0]
-        coords = top_row['file_coords']
-        open_sp = vd.sp_dict[coords]
-        open_chm = vd.chm_dict[coords]
-        chm_open = rs.open(open_chm)
-        chm = chm_open.read().astype(np.float32)
-        chm[chm==-9999] = np.nan
-        chm = chm.squeeze(axis=0)
+    def _select_ttops(df, vd):
+        row = df.iloc[0]
+        coords = row['file_coords']
 
-        sp = np.load(open_sp)
-        c_max = chm.max()
-        chm_scale = chm/c_max
+        x_min = row['easting_plot'] - (row['plotSize']**(1/2)/2)
+        x_max = row['easting_plot'] + (row['plotSize']**(1/2)/2)
 
-        # boundaries = mark_boundaries(chm_scale, sp)
-
-        #rgb = rgb[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
-        # plt.imshow(boundaries)
-
-        trees_df = df.loc[(df['tree_x'] == df['tree_x'])]
-        trees_df['sp'], trees_df['sp_height_dif'] = trees_df.apply(lambda row: vd._select_superpixel(row, sp, chm), axis=1).str
-        trees_df = trees_df.loc[trees_df['sp'] != -1]
-
-        if trees_df['sp'].duplicated().sum() != 0:
-            for pix_num in trees_df['sp'].unique():
-                to_dedupe = []
-                testing = trees_df.loc[trees_df['sp'] == pix_num]
-                if len(testing) > 1:
-                    min_height = testing['sp_height_dif'].min()
-                    #See if there are any with the same height difference
-                    h_testing = testing.loc[testing['sp_height_dif'] == min_height]
-                    #Remove any that aren't the minimum height difference
-                    to_remove = testing.loc[testing['sp_height_dif'] != min_height]
-                    to_dedupe= to_dedupe + list(to_remove.index)
-                    #If there are any with the same height difference, we need to check what species they are
-                    if len(h_testing) > 1:
-                        unique_species = h_testing['taxonID'].unique()
-                        if len(unique_species) == 1:
-                            #If all the species are the same just pick the first one
-                            to_dedupe = to_dedupe + list(h_testing.index[:-1])
-                        else:
-                            #If there are two species with the same height difference we don't have enough info to choose
-                            to_dedupe= to_dedupe + list(h_testing.index)
-                        
-
-                    trees_df = trees_df.drop(to_dedupe)
-
-        if trees_df['sp'].duplicated().sum() != 0:
-            print('here')
-
-        return trees_df
-        # for ix, row in trees_df.iterrows():
-            # ax.plot(row['tree_x'], row['tree_y'], marker="o")
-            # ax.annotate(f'{row["height"]/c_max:.2f}', (row['tree_x'], row['tree_y']), textcoords='offset points', xytext= (0, 5), ha='center', color='red', fontsize='xx-large')
-        # fig.tight_layout()
-        # plt.show()
-        # plt.savefig(os.path.join(save_dir, f'{row["plotID"]}_{coords}_trees.png'))
-        # plt.close()
-
-    @staticmethod
-    def _select_superpixel(row, sp, chm, select_buffer=5, upper_height_bound=5):
-        height = row['height']
-        x = round(row['tree_x'])
-        y = round(row['tree_y'])
-
-        sp_crop = sp[y-select_buffer:y+select_buffer, x-select_buffer:x+select_buffer]
+        y_min = row['northing_plot'] - (row['plotSize']**(1/2)/2)
+        y_max = row['northing_plot'] + (row['plotSize']**(1/2)/2)
+        x = [x_min, x_max, x_max, x_min, x_min]
+        y = [y_max, y_max, y_min, y_min, y_max]
+        points = list(zip(x, y))
+        s = gpd.GeoSeries([Polygon(points)], crs='EPSG:32613')
 
 
-        unique_sp= np.unique(sp_crop)
+        open_ttops = gpd.read_file(vd.tree_tops_dict[coords])
 
-        if unique_sp.sum() == 0:
-            return -1, -1
+        open_ttops = open_ttops.clip(s)
 
-        candidates = {}
-        for pix_num in unique_sp:
-            if pix_num == 0:
-                continue
-            chm_sp = chm[sp==pix_num]
-            sp_height = chm_sp.max()
-            height_dif = abs(sp_height - height)
-            if height_dif <= upper_height_bound:
-                candidates[pix_num] = height_dif
+        df['cur_buffer'] = df.buffer(vd.ttops_search_buffer)
+
+        clip = open_ttops.clip(df.cur_buffer)
+
+
+        #TODO: Switch to spatial index
+
+        def find_match(row, clip):
+            distances = clip.distance(row.geometry)
+            distances = distances.loc[distances<vd.ttops_search_buffer]
+            if len(distances) > 0:
+                distances = distances.sort_values()
+                return distances.index[0], distances.iloc[0]
+            else:
+                return -1, -1
+
+        df['best_match'], df['match_distance'] = df.apply(lambda row: find_match(row, clip), axis=1).str
+
         
-        if len(candidates.keys()) == 0:
-            return -1, -1
 
-        min_dif = 1000
-        top_candidate = None
-        for k, v in candidates.items():
-            if v < min_dif:
-                min_dif = v
-                top_candidate = k
-        if top_candidate is not None:
-            return top_candidate, min_dif
+        df = df.loc[df['best_match'] != -1]
+        if df['best_match'].duplicated().sum() != 0:
+            to_dedupe = []
+            for pix_num in df['best_match'].unique():
+                
+                testing = df.loc[df['best_match'] == pix_num]
+                if len(testing) > 1:
+                    min_dist = testing['match_distance'].min()
+                    to_remove = testing.loc[testing['match_distance'] > min_dist]
+                    to_dedupe = to_dedupe + list(to_remove.index)
+
+                    dist_match = testing.loc[testing['match_distance'] == min_dist]
+                    if len(dist_match) > 1:
+                        unique_species = dist_match['taxonID'].unique()
+                        if len(unique_species) == 1:
+                            to_dedupe = to_dedupe + list(dist_match.index[:-1])
+                        else:
+                            to_dedupe = to_dedupe + list(dist_match.index)
+            df = df.drop(to_dedupe)
+
+        #Work around for just resetting index since that drops geometry
+        select = clip.loc[df.best_match]
+        select.index = df.index
+        df.geometry = select.geometry
+
+        if vd.crown_diameter_mult is not None:
+            df.geometry = df.buffer(df['maxCrownDiameter']*vd.crown_diameter_mult/2)
         else:
-            return -1, -1
+            df.geometry = df.buffer(vd.constant_diameter)
+        if len(df) >0:
+            df['taxa_key'] = df.apply(lambda x: vd.taxa[x.taxonID], axis=1)
+            # fig, ax = plt.subplots(1,1)
+            # df.plot(column='taxa_key', ax=ax, legend=True)
+            # plt.show()
+
+            to_de_intersect = []
+            #df.crown_buffer = df.buffer(df['height'])
+            df = df.sort_values('height', ascending=False)
+            for ix, row in df.iterrows():
+                working = df.loc[df.index != ix]
+                clipper = df.loc[df.index == ix]
+                if len(working) > 1:
+                    inter = working.clip(clipper)
+                    if len(inter)> 0:
+                        all = pd.concat((inter, clipper))
+
+                        all = all.sort_values('height', ascending=False)
+                        top_taxon = all.iloc[0].taxonID
+                        to_remove = all.iloc[1:]
+                        to_de_intersect = to_de_intersect + list(to_remove.index)
+
+            df = df.drop(to_de_intersect)
+
+            # fig, ax = plt.subplots(1,1)
+            # df.plot(column='taxa_key', ax=ax, legend=True)
+            # plt.show()
 
 
-    def pick_superpixels(self):
-        grouped_files = self.data_gdf.groupby(['file_coords', 'plotID'])
-        selected = grouped_files.apply(self._select_pixels, self)
+        return df
+   
+
+    def pick_ttops(self):
+        grouped_files = self.data_gdf.groupby('plotID')
+        selected = grouped_files.apply(self._select_ttops, self)
+        selected = selected.drop('plotID', axis=1).reset_index()
         return selected
 
-    def do_plot_inference(self, save_dir, model):
-        grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
-        grouped_files.apply(self._plot_inference, self, save_dir, model)
-        self.save_valid_df(save_dir)
 
-
-    @staticmethod
-    def _plot_inference(df, validator, save_dir, model, get_stats=True):
-        if len(df)>0:
-            row = df.iloc[0]
-            file_key = row['file_coords']
-            if file_key in validator.valid_files:
-                plot_id = row['plotID']
-                if file_key not in validator.last_cluster:
-                    f = validator.valid_files[file_key]
-                    if not validator.struct:
-                        clustered = inference.swav_inference_big(model, f)
-                    else:
-                        c = validator.chm_dict[file_key]
-                        a = validator.azm_dict[file_key]
-                        clustered = inference.swav_inference_big_struct_4(model, f, c, a, validator.chm_mean, validator.chm_std, rescale=validator.rescale)
-                        if get_stats:
-                            validator.validate_from_gdf(file_key, clustered)
-
-                    validator.last_cluster[file_key] = clustered
-                else:
-                    clustered = validator.last_cluster[file_key]
-                plt.imsave(os.path.join(save_dir, f"{plot_id}_viz_full.png"),clustered, cmap='tab20')
-                np.save(os.path.join(save_dir, f'{plot_id}_clustered.npy'), clustered)
-            
-                clustered = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
-                plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
-                plt.bar(*np.unique(clustered, return_counts=True))
-                
-                plt.title(plot_id)
-                plt.xlabel('Classification')
-                plt.ylabel('Pixel Count')
-                #plt.xlim(0, 10)
-
-                plt.savefig(os.path.join(save_dir, plot_id + "_hist.png"))
-                plt.close()
-        return df
-
-
-        #plt.imsave(os.path.join(save_dir, f"{plot_id}_viz.png"),clustered, cmap='tab20')
-
-    
     def map_plots(self, save_dir):
-        grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
+        grouped_files = self.data_gdf.groupby(['file_coords', 'plotID'])
         grouped_files.apply(self._map_plot, self.orig_dir, save_dir, self.site_name, self.site_prefix)
 
-    def make_taxa_plots(self, save_dir):
-         grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
-         grouped_files.apply(self._make_taxa_plot, save_dir)
-
-
-
-    @staticmethod
-    def _make_taxa_plot(df, save_dir):
-        ax = df.plot.bar(x='taxonID', y='taxonCount')
-        ax.set_title(df.iloc[0]['plotID'])
-        plt.savefig(os.path.join(save_dir, f'{df.iloc[0]["plotID"]}_taxon_count.png'))
-
-        return None    
-
-    def make_taxa_area_hists(self, save_dir):
-        grouped_files = self.valid_data.groupby(['file_coords', 'plotID'])
-        grouped_files.apply(self._make_area_hist, save_dir)
-
-    @staticmethod
-    def _make_area_hist(df, save_dir):
-        df = df.loc[df['approx_sq_m'] == df['approx_sq_m']]
-        
-        taxon_sums = df.groupby('taxonID').sum()
-        taxon_sums = taxon_sums.reset_index()
-        ax = taxon_sums.plot.bar(x='taxonID', y='ninetyCrownDiameter')
-        ax.set_title(df.iloc[0]['plotID'])
-        ax.set_ylabel('Pixel Count')
-        plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, f'{df.iloc[0]["plotID"]}_taxon_area.png'))
-
-        sun_sums = df.groupby('sun').sum()
-        sun_sums = sun_sums.reset_index()
-        sun_sums['sun'].loc[sun_sums['sun'] == True] = 'Sun'
-        sun_sums['sun'].loc[sun_sums['sun'] == False] = 'Shade'
-        ax = sun_sums.plot.bar(x='sun', y='ninetyCrownDiameter')
-        ax.set_title(df.iloc[0]['plotID'])
-        ax.set_ylabel('Pixel Count')
-        plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, f'{df.iloc[0]["plotID"]}_sun_area.png'))
-
-
-
-
-        
-        print('here')
-
-    def plot_tree(self, coord, file, **kwargs):
-     
-        fig, ax = plt.subplots()
-        rgb = hp.pre_processing(file, wavelength_ranges=utils.get_viz_bands())
-        rgb = hp.make_rgb(rgb["bands"])
-        rgb = exposure.adjust_gamma(rgb, 0.6)
-        rgb = exposure.rescale_intensity(rgb)
-        
-        ax.imshow(rgb)
-        if 'predictions' in kwargs:
-            loc = os.path.join(kwargs['predictions'], coord + '.npy')
-            if os.path.isfile(loc):
-                y = np.load(loc)
-                #y[y!=52] = 0
-                im = ax.imshow(y, alpha=.2)
-                slider = self._make_slider(fig, im)
-        data = self.valid_data.loc[self.valid_data['file_coords'] == coord]
-        # for ix, row in data.iterrows():
-        #     # x = [row['x_min'], row['x_max'], row['x_max'], row['x_min'], row['x_min']]
-        #     # y = [row['y_max'], row['y_max'], row['y_min'], row['y_min'], row['y_max']]
-        #     x= (row['x_min'] + row['x_max'])//2
-        #     y= (row['y_min'] + row['y_max'])//2
-        #     ax.plot(x, y, marker="o")
-        #     ax.annotate(row['taxonID'], (x, y), textcoords='offset points', xytext= (0, 5), ha='center')
-        plt.show()
-    
-    @staticmethod
-    def _make_slider(fig, ax):
-        axfreq = plt.axes([0.25, 0.1, 0.65, 0.03])
-        plt.subplots_adjust(left=0.25, bottom=0.25)
-        freq_slider = Slider(
-            ax=axfreq,
-            label='Alpha',
-            valmin=0.0,
-            valmax=1.0,
-            valstep=0.05,
-            valinit=.2,
-        )
-        def update(val):
-            ax.set_alpha(val)
-            fig.canvas.draw_idle()
-        
-        freq_slider.on_changed(update)
-        return freq_slider
-
-
-
-        #for ix, row in self.valid_data.iterrows():
-
-    def plot_trees(self, **kwargs):
-        for key, value in self.valid_files.items():
-            self.plot_tree(key, value, **kwargs)
-
-
-    def validate(self, file_coords, f):
-        valid = self.valid_data.loc[self.valid_data["file_coords"] == file_coords]
-        if len(valid.index>0):
-            if isinstance(f, str):
-                clustered = np.load(f)
-            elif isinstance(f, np.ndarray):
-                clustered = f
-            else:
-                return False
-            plots = valid["plotID"].unique()
-            for plot in plots:
-                valid_plot = valid.loc[valid['plotID'] == plot]
-                row = valid_plot.iloc[0]
-                select = clustered[row['y_min']:row['y_max'], row['x_min']:row['x_max']]
-                groups, counts = np.unique(select, return_counts=True)
-                self.cluster_groups = self.cluster_groups.union(set(groups.astype(int)))
-                for j, group in np.ndenumerate(groups):
-                    self.cluster_dict[plot]['found'][int(group)] = counts[j]
-        return self.cluster_dict
-
-    def make_empty_dict(self):
-        #taxa = self.valid_data["taxonID"].unique()
-        plots = self.valid_data['plotID'].unique()
-
-        template = {plot:{'expected': {}, 'found': {}} for plot in plots}
-        for plot in plots:
-            valid = self.valid_data.loc[self.valid_data['plotID'] == plot]
-            taxa = valid["taxonID"].unique()
-            for taxon in taxa:
-
-                template[plot]['expected'][taxon] = int(valid.loc[valid['taxonID'] == taxon]['approx_sq_m'])
-        return template
-    
-
-    @property
-    def confusion_matrix(self):
-        reformed = {(key, i, k):l for key, value in self.cluster_dict.items() for i, j in value.items() for k, l in j.items()}
-        mi = pd.MultiIndex.from_tuples(reformed.keys())
-        mat = pd.DataFrame(list(reformed.values()), index=mi)
-        
-
-        return mat
-        # df = pd.DataFrame.from_dict(self.cluster_dict, orient='index', dtype=int)
-        # df["sum"] = df.sum(axis=1)
-        # sum_row = pd.DataFrame(df.sum(axis=0)).transpose()
-        # sum_row = sum_row.rename(index={0:'sum'})
-        # df = pd.concat([df, sum_row])
-        # return df
-
-    def kappa(self):
-        return None
-    
-
-def check_predictions(validator: Validator, model, coords, h5_file, save_dir, **kwargs):
-    y = inference.do_inference(model, h5_file, True, True, **kwargs)
-    np.save(os.path.join(save_dir,coords+".npy"), y)
-    validator.validate(coords, y)
-    return None
-
-def check_all(validator: Validator, model, save_dir, **kwargs):
-    for coord, file in validator.valid_files.items():
-        check_predictions(validator, model, coord, file, save_dir, **kwargs)
-    return None
-
-def bulk_validation(ckpts_dir, pca_dir, save_dir, valid_file, model_type, **kwargs):
-    for ckpt in os.listdir(ckpts_dir):
-         if ".ckpt" in ckpt:
-             model = inference.load_ckpt(model_type, os.path.join(ckpts_dir, ckpt), **kwargs)
-             valid = Validator(file=valid_file, pca_dir=pca_dir, **kwargs)
-             ckpt_name = ckpt.replace(".ckpt", "")
-             new_dir = os.path.join(save_dir, ckpt_name)
-             if not os.path.isdir(new_dir):
-                os.mkdir(new_dir)
-             check_all(valid, model, new_dir, n_components=kwargs['num_channels'])
-             valid.confusion_matrix.to_csv(os.path.join(save_dir, ckpt_name + "conf_matrix.csv"))
-    return True
-
-def side_by_side_bar(df, plot_name):
-    fig, ax = plt.subplots(1, 2)
-    cats = ('expected', 'found')
-    for i, y in enumerate(ax):
-        try:
-            df.loc[plot_name, cats[i]].plot.bar(ax=y)
-        except KeyError:
-            continue
-    plt.show()
-    print('here')
-
-def plot_species(validator: Validator, species):
-    df = validator.valid_data
-    groups = list(validator.cluster_groups)
-    plots = df['plotID'].unique()
-    
-    combos = [(species, group) for group in groups]
-    points = {combo:{'x':[], 'y':[]} for combo in combos}
-
-    conf = validator.confusion_matrix
-
-    for plot in plots:
-        pdf = conf.loc[plot]
-        for combo in combos:
-            try: 
-                expect = pdf.loc['expected']
-                found = pdf.loc['found']
-            except KeyError:
-                continue
-            if combo[0] in expect.index and combo[1] in found.index:
-                points[combo]['x'].append(int(expect.loc[combo[0]]))
-                points[combo]['y'].append(int(found.loc[combo[1]]))
-    
-    fig, ax = plt.subplots(6, 5, figsize=(15,15))
-    ax = ax.flatten()
-    for i, (combo, value) in enumerate(points.items()):
-        if len(value['x'])>2:
-            slope, intercept, r , p, se = linregress(value['x'], value['y'])
-            ax[i].scatter(value['x'], value['y'])
-            ax[i].set_title(f'{combo} r2: {r**2:.2f}')
-    plt.tight_layout()
-    plt.show()
-
-def show_file(f):
-    f = np.load(f)
-    plt.imshow(f)
-    plt.show()
-
-def viz_and_save_plot(plot_dict, save_dir):
-    selected = hp.get_selection(plot_dict['bands'], plot_dict['meta']['spectral_bands'], utils.get_viz_bands())
-    rgb = hp.make_rgb(selected)
-    rgb = exposure.adjust_gamma(rgb, 0.5)
-    outname= os.path.join(save_dir, f'{plot_dict["meta"]["plotID"]}_{plot_dict["meta"]["original_file"]}.png')
-    plt.imsave(outname, rgb)
-
-def inc_pca_plots(plot_dir, save_dir):
-    transformer = IncrementalPCA(n_components=10)
-    for f in os.listdir(plot_dir):
-        if ".pk" in f:
-            with open(os.path.join(plot_dir, f), 'rb') as img:
-                plot = pickle.load(img)
-                all = plot['bands']
-                all = rearrange(all, 'h w c -> (h w) c')
-                transformer.fit(all)
-    for f in os.listdir(plot_dir):
-        if ".pk" in f:
-            with open(os.path.join(plot_dir, f), 'rb') as img:
-                plot = pickle.load(img)
-                all = plot['bands']
-                all = rearrange(all, 'h w c -> (h w) c')
-                proc = transformer.transform(all)
-                proc = rearrange(proc, '(h w) c -> h w c', h=40, w=40)
-                np.save(os.path.join(save_dir, f), proc)
-                to_img = (proc - np.min(proc))/np.ptp(proc)
-                plt.imsave(os.path.join(save_dir,'first_three_viz', f"{f.split('.')[0]}.png"),to_img[...,0:3])
-
-def ward_cluster_plots(plot_dir, save_dir):
-    for f in os.listdir(plot_dir):
-        if ".npy" in f:
-            plot = np.load(os.path.join(plot_dir,f))
-            plot = rearrange(plot, 'h w c -> (h w) c')
-            clustered = utils.ward_cluster(plot, n_clusters=6)
-            clustered = rearrange(clustered, '(h w) -> h w', h=40, w=40)
-            np.save(os.path.join(save_dir, f'cluster_{f}'), clustered)
-            plt.imsave(os.path.join(save_dir, 'viz',  f"{f.split('.')[0]}.png"),clustered)
-
-def plot_inference(validator, save_dir, model):
-    for key, f in validator.valid_files.items():
-        clustered = inference.swav_inference_big(model, f)
-        plt.bar(*np.unique(clustered, return_counts=True))
-        plot_id = f.split("_")[2]+ " "+ f.split("_")[3]
-        plt.title(plot_id)
-        plt.xlabel('Classification')
-        plt.ylabel('Pixel Count')
-        #plt.xlim(0, 10)
-
-        plt.savefig(os.path.join(save_dir, plot_id + ".png"))
-        plt.close()
-
-
-        plt.imsave(os.path.join(save_dir, 'viz',  f"{plot_id}.png"),clustered, cmap='tab20')
-
-
-
-def pca_norm_cluster_plots(plot_dir, save_dir):
-    mean = np.load(os.path.join(plot_dir, 'stats/mean.npy')).astype(np.float32)
-    std = np.load(os.path.join(plot_dir, 'stats/std.npy')).astype(np.float32)
-
-    norm = tt.Normalize(mean, std)
-    for f in os.listdir(plot_dir):
-        if ".npy" in f:
-            plot = np.load(os.path.join(plot_dir,f))
-            plot = rearrange(plot, 'h w c -> c h w')
-            img = torch.from_numpy(plot).float()
-            #img = rearrange(img, 'h w c -> c h w')
-            img = norm(img)
-            mp = torch.nn.MaxPool2d(2)
-            img = mp(img)
-            up = torch.nn.UpsamplingBilinear2d(scale_factor=2)
-            img = up(img.unsqueeze(0))
-            img = torch.argmax(img.squeeze(0), dim=0)
-            img = img.numpy()
-            np.save(os.path.join(save_dir, f), img)
-            plt.imsave(os.path.join(save_dir, 'viz',  f"{f.split('.')[0]}.png"),img)
-
-def get_shadow_masks(plot_dict, save_dir):
-    selected = hp.get_selection(plot_dict['bands'], plot_dict['meta']['spectral_bands'], utils.get_shadow_bands())
-    rgb = hp.get_selection(plot_dict['bands'], plot_dict['meta']['spectral_bands'], utils.get_viz_bands())
-    rgb = utils.make_rgb(rgb)
-    mask = utils.han_2018(selected)
-    rgb =exposure.adjust_gamma(rgb, 0.5)
-
-    
-    plot_dict['shadow_mask'] = mask
-
-    return None
-
-def get_spectra_plots(plot_dict, save_dir):
-
-    wavelengths = plot_dict['meta']['spectral_bands']
-    data = plot_dict['bands']
-
-    data = rearrange(data, 'h w c -> (h w) c')
-
-    mean = data.mean(axis=0)
-    plt.plot(wavelengths, mean)
-    plt.xlabel('Wavelength')
-    plt.ylabel('Mean Value')
-    plt.title(plot_dict['meta']['plotID'])
-    plt.ylim(-0.01, 0.6)
-
-    plt.savefig(os.path.join(save_dir, f'{plot_dict["meta"]["plotID"]}.png'))
-    plt.close()
-
-    return None
-
-def cluster_histograms(plot_dir, save_dir):
-    for f in os.listdir(plot_dir):
-        if ".npy" in f:
-            plot = np.load(os.path.join(plot_dir,f))
-            plt.bar(*np.unique(plot, return_counts=True))
-            plot_id = f.split("_")[2]+ " "+ f.split("_")[3]
-            plt.title(plot_id)
-            plt.xlabel('Classification')
-            plt.ylabel('Pixel Count')
-            plt.xlim(0, 10)
-
-            plt.savefig(os.path.join(save_dir, plot_id + ".png"))
-            plt.close()
-
-                
-
-
-
-def handle_each_plot(plot_dir, fn, save_dir):
-    for f in os.listdir(plot_dir):
-        if ".pk" in f:
-            with open(os.path.join(plot_dir, f), 'rb') as img:
-                plot = pickle.load(img)
-                fn(plot, save_dir)
-
-def make_valid_df(valid_dict, num_classes):
-    class_columns = list(range(num_classes))
-    base = ['species', 'expected']
-    columns = base + class_columns
-    df = pd.DataFrame(columns=columns)
-
-    for key, value in valid_dict.items():
-        species_dict = {}
-        species_dict['species'] = key
-        species_dict['expected'] = value['expected']
-        for j, l in value['found'].items():
-            if j < num_classes:
-                species_dict[j] = l
-        df = pd.concat((df, pd.Series(species_dict).to_frame().T))
-
-    df.to_csv('test_kappa.csv')
-    return df
-
-#TODO: add stat saving
-#Make models agnostic
-def validate_config(validator, config_list):
-    for config in config_list:
-        model = models.SWaVModelStruct(**config).load_from_checkpoint(config['ckpt'],**config)
-        try:
-            validator.last_cluster = {}
-            validator.do_plot_inference(config['save_dir'], model)
-        except KeyError as e:
-            print(f'Error: {e}')
-            continue
 
 
 
 if __name__ == "__main__":
     NUM_CLASSES = 12
     NUM_CHANNELS = 10
-    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_masked_10'
+    PCA_DIR= 'C:/Users/tonyt/Documents/Research/datasets/pca/niwo_16_unmasked'
    
     VALID_FILE = "W:/Classes/Research/neon-allsites-appidv-latest.csv"
-    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct.csv"
+    CURATED_FILE = "W:/Classes/Research/neon_niwo_mapped_struct_de_dupe.csv"
     PLOT_FILE = 'W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv'
-    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo'
+    CHM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test'
     AZM_DIR = 'C:/Users/tonyt/Documents/Research/datasets/solar_azimuth/niwo/'
     ORIG_DIR = 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022'
     ICA_DIR = 'C:/Users/tonyt/Documents/Research/datasets/ica/niwo_10_channels'
     RAW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/selected_bands/niwo/all'
     SHADOW_DIR = 'C:/Users/tonyt/Documents/Research/datasets/mpsi/niwo'
     SP_DIR = 'C:/Users/tonyt/Documents/Research/datasets/superpixels/niwo_chm'
+    INDEX_DIR = 'C:/Users/tonyt/Documents/Research/datasets/indexes/niwo/'
+    TREE_TOPS_DIR = 'C:/Users/tonyt/Documents/Research/datasets/lidar/niwo_point_cloud/valid_sites_ttops'
+    RGB_DIR = 'C:/Users/tonyt/Documents/Research/datasets/rgb/NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022/'
 
     valid = Validator(file=VALID_FILE, 
                     pca_dir=PCA_DIR, 
-                    ica_dir=ICA_DIR,
-                    raw_bands=RAW_DIR,
-                    shadow=SHADOW_DIR,
-                    site_name='NIWO', 
+                    site_name='NIWO',
+                    train_split=0.7,
+                    test_split=0.2, 
+                    valid_split=0.1,
                     num_classes=NUM_CLASSES, 
                     plot_file=PLOT_FILE, 
-                    struct=True, 
-                    azm=AZM_DIR, 
-                    chm=CHM_DIR, 
+                    tree_tops_dir=TREE_TOPS_DIR,
                     curated=CURATED_FILE, 
-                    rescale=False, 
                     orig=ORIG_DIR, 
-                    superpixel=SP_DIR,
+                    rgb_dir=RGB_DIR,
+                    chm=CHM_DIR,
+                    stats_loc='C:/Users/tonyt/Documents/Research/datasets/tensors/rgb_blocks/stats/stats.npy',
                     prefix='D13',
-                    chm_mean = 4.015508459469479,
-                    chm_std = 4.809300736115787)
+                    use_tt=True,
+                    scholl_filter=False,
+                    scholl_output=False,
+                    filter_species = 'SALIX',
+                    object_split=True,
+                    data_gdf='3m_search_0.5_crowns_ttops_clipped_to_plot.pkl.pkl',
+                    crown_diameter_mult=0.5,
+                    constant_diameter=1.5,
+                    ttops_search_buffer=3,
+                    ndvi_filter=0.5)
 
-    #valid.pick_superpixels()
+    #valid.make_spectrographs(filters={'ndvi': 0.2, 'shadow': 0.03})
+    #test = 
+    valid.per_plot_spectro(save_dir=r'C:\Users\tonyt\Documents\Research\render_test')
+   # for tree in test:
+      #  print('1')
 
-    #validate_config(valid, configs)
+    #valid.save_orig_to_geotiff('451000_4432000', 'C:/Users/tonyt/Documents/Research/rendered_imgs/451000_4432000_mpsi_threshed_0.03.tif', thresh=0.03, mode='mpsi')
 
-    #NEED TO TEST SCHOLL METHOD AGAIN W/O DUPLICATES
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/label_training', 'train', out_size=3)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/label_valid', 'valid', out_size=3)
-    valid.render_valid_data('C:/Users/tonyt/Documents/Research/datasets/tensors/niwo_2020_pca_ica_shadow_extra_all/label_test', 'test', out_size=3)
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/test', 'test', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
+    # valid.render_valid_patch('C:/Users/tonyt/Documents/Research/datasets/tensors/rf_test/rgb_mask_plot/train', 'train', out_size=20, num_channels=16, key_label='pca', filters=['ndvi', 'shadow'])
+
+
+    # print(valid.taxa)
+    # print(valid.class_weights)
+
 
 
 

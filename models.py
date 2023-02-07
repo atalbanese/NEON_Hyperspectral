@@ -2,52 +2,84 @@ from requests import patch
 import networks
 import net_gen
 import torch
-from torch import layer_norm, nn
+from torch import layer_norm, nn, einsum
 import torch.nn.functional as f
 import torchvision.transforms.functional as TF
 import pytorch_lightning as pl
 import torchvision as tv
 import transforms as tr
+import torch.hub
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 #import cv2 as cv
 import numpy.ma as ma
 import numpy as np
-
+from attrs import define, field
+from dall_e import Encoder, Decoder
+import matplotlib.pyplot as plt
 
 
 #TODO: test out additional augmentations for labelled training
 class SwaVModelUnified(pl.LightningModule):
     def __init__(self, 
                 class_key,
-                chm_mean, 
-                chm_std, 
                 lr, 
-                height_threshold, 
                 class_weights, 
-                trained_backbone, 
                 features_dict, 
                 num_intermediate_classes,
-                pre_training):
+                pre_training,
+                mode='default', 
+                augment_refine = 'false',
+                scheduler=True,
+                positions=False,
+                emb_size=256,
+                augment_bright=False,
+                filters={},
+                patch_size=4):
         super().__init__()
-        self.save_hyperparameters('lr', 'height_threshold', 'trained_backbone', 'features_dict', 'num_intermediate_classes', 'pre_training', 'class_key', 'chm_mean', 'chm_std', 'class_weights')
+        self.save_hyperparameters()
         self.features_dict = features_dict
+        self.filters=filters
         self.num_channels = self.calc_num_channels()
-        self.num_output_classes = len(class_weights)
-        self.class_key = class_key
-        self.chm_mean = chm_mean
-        self.chm_std = chm_std
+        self.num_output_classes = len(class_key.keys())
+        self.missing_data = nn.Parameter(torch.randn((1)))
         self.lr = lr
-        self.height_threshold = height_threshold
-        self.trained_backbone = trained_backbone
-        self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes)
-        self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes*2),
+        self.augment_refine = augment_refine
+        self.augment_bright = augment_bright
+        if self.augment_bright:
+            self.ab = tr.BrightnessAugment(p=1)
+        self.mode = mode
+        self.scheduler = scheduler
+        if self.mode == 'default':
+            self.swav = networks.SWaVUnified(self.num_channels, num_intermediate_classes, n_head=8, n_layers=8, positions=positions)
+        if self.mode == 'patch':
+            self.swav = networks.SWaVUnifiedPerPatch(self.num_channels, num_intermediate_classes, n_head=8, n_layers=8, patch_size=patch_size, positions=positions, emb_size=emb_size)
+        if self.mode == 'pixel_patch':
+            self.swav = networks.SWaVUnifiedPerPixelPatch(self.num_channels, num_intermediate_classes)
+        if self.mode== 'resnet':
+            self.swav = networks.SWaVUnifiedResnet(3, num_classes=num_intermediate_classes, emb_size=emb_size)
+        if self.mode == 'default':
+            self.predict =  nn.Sequential(nn.Linear(num_intermediate_classes, num_intermediate_classes*2),
                                          nn.BatchNorm1d(num_intermediate_classes*2),
                                          nn.ReLU(),
                                          nn.Linear(num_intermediate_classes*2, self.num_output_classes))
-        self.loss = nn.CrossEntropyLoss(weight=torch.tensor(class_weights))
-        self.results = self.make_results_dict(class_key)
-        self.class_key = class_key
+        else:
+            self.predict = networks.UpsamplePredictor(num_intermediate_classes, self.num_output_classes)
+        if class_weights is not None:
+            self.loss = nn.CrossEntropyLoss(weight=torch.tensor(class_weights), label_smoothing=0.2, ignore_index=-1)
+        else:
+            self.loss = nn.CrossEntropyLoss(label_smoothing=0.2, ignore_index=-1)
+            # self.loss = torch.hub.load(
+            # 'adeelh/pytorch-multi-class-focal-loss',
+            # model='FocalLoss',
+            # gamma=2,
+            # reduction='mean',
+            # force_reload=False,
+            # ignore_index=-1
+            # )
+
+        self.class_key = {value:key for key, value in class_key.items()}
+        self.results = self.make_results_dict(self.class_key)
         self.pre_training = pre_training
         self.ra = Rearrange('b c h w -> b (h w) c')
 
@@ -63,15 +95,17 @@ class SwaVModelUnified(pl.LightningModule):
         return out
 
     def update_results(self, inp, target):
-        inp = torch.argmax(inp, dim=1)
+        
+        #target = torch.argmax(target, dim=1)
         pred = list(inp)
         targets = list(target)
 
         for p, t in list(zip(pred, targets)):
-            p_label = self.class_key[int(p)]
-            t_label = self.class_key[int(t)]
+            if (int(t)) != -1:
+                p_label = self.class_key[int(p)]
+                t_label = self.class_key[int(t)]
 
-            self.results[t_label][p_label] += 1
+                self.results[t_label][p_label] += 1
         return None
 
     def calc_ova(self):
@@ -99,88 +133,111 @@ class SwaVModelUnified(pl.LightningModule):
             cur = inp[key]
             if len(cur.shape) != 4:
                 cur = cur.unsqueeze(1)
-            
-            
-            if key == "chm":
-                cur = (cur - self.chm_mean)/self.chm_std
             if cur.shape[1] != value:
                 cur = cur[:,:value,...]
-            to_cat.append(cur)
+            to_cat.append(cur.float())
         return torch.cat(to_cat, dim=1)
 
     def pre_training_step(self, inp):
         inp = self.prep_data(inp)
+        if self.mode != 'resnet':
+            inp[inp != inp] = self.swav.missing
+        else:
+            inp[inp != inp] = self.missing_data
+
         if torch.rand(1) > 0.5:
             inp = TF.vflip(inp)
 
         if torch.rand(1) > 0.5:
             inp = TF.hflip(inp)
 
-        inp = self.ra(inp)
+        if self.mode == 'default':
+            inp = self.ra(inp)
 
         loss = self.swav.forward_train(inp)
         self.log('pre_train_loss', loss)
         return loss
 
     def refine_step(self, inp, validating=False):
-        chm = None
-        mask = None
-        targets = inp['target']
+        targets = inp['targets']
+        #mask = inp['mask']
+        filter_masks = []
+        for f, t in self.filters.items():
+            values = inp['mask'][f]
+            mask = values < t
+            filter_masks.append(mask)
 
-        chm = inp['chm'].unsqueeze(1)
-        height = inp['height']
-        mask = inp['mask']
-        mask = reduce(mask, 'b c h w -> b () h w', 'max')
-
-        height_mask = torch.zeros(chm.shape, dtype=torch.bool, device=torch.device('cuda'))
-
-        for i, h in enumerate(height):
-            height_test = chm[i]
-            add_mask = height_test < (h - self.height_threshold)
-            height_mask[i] = add_mask
-
-        mask += height_mask
-        mask = ~mask
+        crop_coords = None
+        if 'crop_coords' in inp.keys():
+            crop_coords = inp['crop_coords']
         inp = self.prep_data(inp)
 
-        vflipped = False
-        hflipped = False
-        if torch.rand(1) > 0.5:
-            inp = TF.vflip(inp)
-            vflipped = True
+        missing_mask = inp != inp
+        missing_mask = reduce(missing_mask, 'b c h w -> b h w', 'max')
 
-        if torch.rand(1) > 0.5:
-            inp = TF.hflip(inp)
-            hflipped = True
+        if len(filter_masks) > 0:
+            for mask in filter_masks:
+                missing_mask = missing_mask + mask
 
-        inp = self.ra(inp)
 
+
+        if self.mode == 'default':
+            inp = self.ra(inp)
+        if not validating:
+            if self.augment_refine:
+                inp = self.swav.transforms_main(inp)
+            if self.augment_bright:
+                inp = self.ab(inp)
+            if torch.rand(1) > 0.5:
+                inp = TF.vflip(inp)
+                
+                targets=TF.vflip(targets)
+
+            if torch.rand(1) > 0.5:
+                inp = TF.hflip(inp)
+
+                targets=TF.hflip(targets)
+        
+        if self.mode != 'resnet':
+            inp[inp != inp] = self.swav.missing
+        else:
+            inp[inp != inp] = self.missing_data
+            
         inp = self.swav.forward(inp)
-        inp = rearrange(inp, 'b s f -> (b s) f')
-        inp = self.predict(inp)
+        if self.mode == 'default':
+            inp = rearrange(inp, 'b s f -> (b s) f')
+            inp = self.predict(inp)
+        elif self.mode == 'patch':
+            inp = rearrange(inp, 'b (h w) f -> b f h w', h=5, w=5)
+            inp = self.predict(inp)
+
+        elif self.mode == 'resnet':
+            inp = inp['out']
 
         inp = torch.softmax(inp, dim=1)
-        
-        targets= rearrange(targets, 'b c h w -> (b h w) c')
-        targets=torch.argmax(targets, dim=1)
-        
 
-        if mask is not None:
-            if vflipped:
-                mask = TF.vflip(mask)
-            if hflipped:
-                mask = TF.hflip(mask)
-            mask = rearrange(mask, 'b c h w -> (b h w) c').squeeze()
-            inp = inp[mask, :]
-            targets = targets[mask]
+        
+        if crop_coords is None:
+            targets = targets.to(torch.long)
+            targets[missing_mask] = -1
+        else:
+            targets=torch.argmax(targets, dim=1)
+        loss = self.loss(inp, targets)
+
+        inp = torch.argmax(inp, dim=1)
+
+        
 
         if not validating: 
-            loss = self.loss(inp, targets)
-            self.log('refine_loss', loss)
+            self.log('train_loss', loss)
             return loss
         else:
+            self.log('valid_loss', loss)
+
+            inp = inp.flatten()
+            targets = targets.flatten()
             self.update_results(inp, targets)
-            return None
+            return loss
 
 
 
@@ -196,7 +253,7 @@ class SwaVModelUnified(pl.LightningModule):
 
     def validation_step(self, inp, _):
         if not self.pre_training:
-            self.refine_step(inp, validating=True)
+            return self.refine_step(inp, validating=True)
         return None
 
     def validation_epoch_end(self, _):
@@ -241,10 +298,15 @@ class SwaVModelUnified(pl.LightningModule):
         if self.pre_training:
             optimizer = torch.optim.AdamW(self.swav.parameters(), lr=self.lr)
         else:
-            optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
-            print('Optimizing all parameters')
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
-        return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "train_loss"}
+            optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, self.parameters()), lr=self.lr)
+        
+        to_return = {"optimizer": optimizer, "monitor": "train_loss"}
+        if self.scheduler:
+
+            #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 20, eta_min=0)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=40)
+            to_return['lr_scheduler'] = scheduler
+        return to_return
     
     
     def forward(self, x):

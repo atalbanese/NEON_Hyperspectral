@@ -5,6 +5,15 @@ import torchvision.transforms.functional as F
 import random
 import numpy as np
 
+class NormalizeHS(torch.nn.Module):
+    def __init__(self, mean, std):
+        super().__init__()
+        self.mean = mean
+        self.std = std
+    
+    def forward(self, arr):
+        return (arr-self.mean)/self.std
+
 #From https://www.sciencedirect.com/science/article/pii/S0034425721000407
 class BrightnessAugment(torch.nn.Module):
     def __init__(self, p=0.5):
@@ -14,7 +23,7 @@ class BrightnessAugment(torch.nn.Module):
     
     def forward(self, arr):
         if torch.rand(1) < self.p:
-            change = (1.2 - 0.8) * torch.rand(1).cuda() + 0.8
+            change = (1.2 - 0.8) * torch.rand(1) + 0.8
             a = torch.logit(arr) + torch.logit(change-0.5)
             b = torch.sigmoid(a)
             arr = b
@@ -38,8 +47,8 @@ class RandomRectangleMask(torch.nn.Module):
             height = random.randint(0, upper_bound - j)
 
             arr = F.erase(arr, i, j, height, width, zeros)
-            if arr[:,:,middle, middle].sum() == 0:
-                arr[:,:,middle,middle] = 1
+            # if arr[:,:,middle, middle].sum() == 0:
+            #     arr[:,:,middle,middle] = 1
         return arr
 
 class RandomRectangleMaskEven(torch.nn.Module):
@@ -122,47 +131,62 @@ class Blit(torch.nn.Module):
     def __init__(self, p=.5):
         super().__init__()
         self.p = p
+        self.missing = 0
         #self.rng = np.random.default_rng()
     
     def forward(self, arr):
         if torch.rand(1) < self.p:
-            #middle = arr.shape[-1]//2
-            #mask = self.rng.integers(2, size=arr.shape)
             mask = torch.randint_like(arr, 2)
-            #mask[:,middle] = 1
-            #mask = mask.astype(np.float32)
-            arr = arr * mask
+            arr[mask == 0] = self.missing
         return arr
+
+class PatchBlock(torch.nn.Module):
+    def __init__(self,missing, p=0.5):
+        super().__init__()
+        self.p = p
+        self.missing = missing
+        #self.rng = np.random.default_rng()
+    
+    def forward(self, arr):
+        if torch.rand(1) < self.p:
+            b, s, _ = arr.shape
+            mask = torch.rand((b, s), dtype=torch.float32, device=arr.device)
+            mask = mask >= 0.4
+            #mask = mask.unsqueeze(2)
+
+           # arr = arr * mask
+            arr[~mask] = self.missing
+        return arr
+
+
 
 class Block(torch.nn.Module):
     def __init__(self, p=.5):
         super().__init__()
         self.p = p
+        self.missing = 0
         #self.rng = np.random.default_rng()
     
     def forward(self, arr):
         if torch.rand(1) < self.p:
-            #middle = arr.shape[-1]//2
             upper = arr.shape[-1]
-            #bounds = self.rng.integers(upper, size=2)
             bounds = torch.randint(upper, (2,))
             mask = torch.ones_like(arr)
             mask[bounds.min():bounds.max()] = 0
-           # mask[middle] = 1
-            arr = arr * mask
+
+            arr[mask == 0] = self.missing
         return arr
 
 if __name__ == '__main__':
-    flip = Flip(p=1)
-    blit = Blit(p=1)
-    block = Block(p=1)
+    block = PatchBlock(1)
 
-    test = np.array([[1, 2, 3, 4, 5], [5, 6, 7, 8, 9]], dtype=np.float32)
+    test = torch.randint(0, 10, (2, 5, 5), dtype=torch.float32)
+    out = block(test)
 
-    norm = np.array([1, 2, 1, 2, 5])
 
     print(test)
-    print(test/norm)
+    print(out)
+
 
 
             
