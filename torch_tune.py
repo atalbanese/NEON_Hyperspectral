@@ -18,7 +18,7 @@ def objective(trial: optuna.trial.Trial):
     emb_size = trial.suggest_int("emb_size", 350, 512)
 
     niwo = SiteData(
-        site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
+        site_dir = '/home/tony/thesis/data/NIWO',
         random_seed=42,
         train = 0.6,
         test= 0.3,
@@ -34,12 +34,12 @@ def objective(trial: optuna.trial.Trial):
         pad_length=16,
         num_synth_trees=5120,
         num_features=372,
-        stats='stats/niwo_stats.npz',
+        stats='/home/tony/thesis/data/stats/niwo_stats.npz',
         augments_list=["normalize"]
     )
-    train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=1)
+    train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=4)
 
-    valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='stats/niwo_stats.npz', augments_list=["normalize"])
+    valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["normalize"])
     valid_loader = DataLoader(valid_set, batch_size=38)
 
     train_model = SimpleTransformer(

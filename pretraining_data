@@ -1,0 +1,65 @@
+import torch
+from torch.utils.data import Dataset
+import numpy as np
+from einops import rearrange
+from typing import Literal
+import os
+from transforms import NormalizeHS, BrightnessAugment, Blit, Block
+
+
+class PreTrainingData(Dataset):
+    def __init__(self,
+                data_dir,
+                sequence_length,
+                hs_filters,
+                sitename,
+                augments_list,
+                stats
+                ):
+
+        assert (1000*1000/sequence_length) % 1 == 0, "files must be able to divide cleanly into sequences"
+        self.data_files = [f for f in os.scandir(data_dir) if f.name.endswith(".h5")]
+        self.num_files = len(self.data_files)
+        self.hs_filters = hs_filters
+
+        self.num_entries = (len(self.data_files) * 1000 * 1000)/sequence_length
+        self.entries_in_file = 1000*1000/sequence_length
+
+        if len(augments_list) > 0:
+            self.transforms = torch.nn.Sequential(*self.build_augments(stats, augments_list))
+        else:
+            self.transforms = None
+
+    def build_augments(self, stats_loc, augments_list):
+
+        augs = []
+        if "brightness" in augments_list:
+            augs = augs + [BrightnessAugment(0.5)]
+        if "blit" in augments_list:
+            augs = augs + [Blit()]
+        if "block" in augments_list:
+            augs = augs + [Block()]
+        if "normalize" in augments_list:
+            with np.load(stats_loc) as f:
+                augs = augs + [NormalizeHS(torch.from_numpy(f['mean']), torch.from_numpy(f['std']))]
+        
+        return augs
+
+    def __len__(self):
+        return self.num_entries
+
+    def __getitem__(self, index):
+        file_index = index//self.entries_in_file
+        sequence_index = index % self.entries_in_file
+
+        to_open = self.data_files[file_index]
+
+
+
+
+
+        pass
+        
+
+    def filter_hs(self, item):
+        pass

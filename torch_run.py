@@ -2,7 +2,7 @@ from splitting import SiteData
 from torch_data import PaddedTreeDataSet, SyntheticPaddedTreeDataSet
 import pytorch_lightning as pl
 #import torch
-from torch_model import SimpleTransformer
+from torch_model import SimpleTransformer, SimpleLinearModel
 from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -11,9 +11,9 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 if __name__ == "__main__":
     pl.seed_everything(42)
-
+    
     niwo = SiteData(
-        site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
+        site_dir = '/home/tony/thesis/data/NIWO',
         random_seed=42,
         train = 0.6,
         test= 0.3,
@@ -34,42 +34,55 @@ if __name__ == "__main__":
         pad_length=16,
         num_synth_trees=5120,
         num_features=372,
-        stats='stats/niwo_stats.npz',
-        augments_list=["brightness", "blit", "block", "normalize"]
+        stats='/home/tony/thesis/data/stats/niwo_stats.npz',
+        augments_list=["normalize"]
     )
-    train_loader = DataLoader(train_set, batch_size=128, num_workers=1)
+    #train_set = PaddedTreeDataSet(train_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["brightness", "blit", "block", "normalize"])
+    train_loader = DataLoader(train_set, batch_size=512, num_workers=6)
 
-    valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='stats/niwo_stats.npz', augments_list=["normalize"])
+    valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["normalize"])
     valid_loader = DataLoader(valid_set, batch_size=38)
 
-    test_set = PaddedTreeDataSet(test_data, pad_length=16, stats='stats/niwo_stats.npz', augments_list=["normalize"])
+    test_set = PaddedTreeDataSet(test_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["normalize"])
     test_loader = DataLoader(test_set, batch_size = len(test_set))
 
-    train_model = SimpleTransformer(
-        lr = 6.246186465873744e-05,
-        emb_size = 372,
+    # train_model = SimpleTransformer(
+    #     lr = 5e-4,
+    #     emb_size = 128,
+    #     scheduler=True,
+    #     num_features=372,
+    #     num_heads=12,
+    #     num_layers=6,
+    #     num_classes=4,
+    #     sequence_length=16,
+    #     weight = [1.05,0.744,2.75,0.753],
+    #     classes=niwo.key
+    # )
+
+    train_model=SimpleLinearModel(
+        lr =5e-4,
         scheduler=True,
         num_features=372,
-        num_heads=12,
-        num_layers=6,
         num_classes=4,
         sequence_length=16,
-        weight = [1.05,0.744,2.75,0.753],
+        weight=[1.05,0.744,2.75,0.753],
         classes=niwo.key
     )
 
-    exp_name = 'niwo_synthetic_data_hand_annotated_labels_normalized_class_weights_hp_tuned_trial_1'
+    exp_name = 'simple_test'
     val_callback = ModelCheckpoint(
         dirpath='ckpts/', 
         filename=exp_name +'{val_ova:.2f}_{epoch}',
-        monitor='val_ova',
+        monitor='val_loss',
         save_on_train_epoch_end=True,
         mode='min',
         save_top_k = 3
         )
 
-    logger = pl_loggers.TensorBoardLogger(save_dir=r'C:\Users\tonyt\Documents\Research\dl_model\lidar_hs_unsup_dl_model\trial_runs', name=exp_name)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=2000, logger=logger, log_every_n_steps=10, callbacks=[val_callback])
+    logger = pl_loggers.TensorBoardLogger(save_dir = './trial_logs', name=exp_name)
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=100, logger=logger, log_every_n_steps=10, 
+    callbacks=[val_callback]
+    )
     #trainer.tune(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')

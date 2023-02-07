@@ -20,7 +20,10 @@ class BaseTreeDataSet(Dataset):
 
 
         self.tree_list = tree_list
-        self.transforms = torch.nn.Sequential(*self.build_augments(stats, augments_list))
+        if len(augments_list) > 0:
+            self.transforms = torch.nn.Sequential(*self.build_augments(stats, augments_list))
+        else:
+            self.transforms = None
 
     def build_augments(self, stats_loc, augments_list):
 
@@ -43,10 +46,11 @@ class BaseTreeDataSet(Dataset):
         return arr
     
     def handle_transforms(self, arr):
-        if arr.shape[1] == 372:
-            arr = torch.from_numpy(arr).float()
-            arr = self.transforms(arr)
-            arr = arr.numpy()
+        if self.transforms is not None:
+            if arr.shape[1] == 372:
+                arr = torch.from_numpy(arr).float()
+                arr = self.transforms(arr)
+                arr = arr.numpy()
         return arr
 
     def __len__(self):
