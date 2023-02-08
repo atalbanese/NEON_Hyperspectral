@@ -117,7 +117,7 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
         self.pad_length = pad_length
         self.num_synth_trees = num_synth_trees
         self.num_features = num_features
-        self.rng = np.random.default_rng(42)
+        self.rng = np.random.default_rng()
     
     #TODO: Mess around with rng weights to see if we can make up for unbalanced dataset?
 

@@ -19,13 +19,13 @@ class SimpleTransformer(pl.LightningModule):
 
         ):
         super().__init__()
-        self.save_hyperparameters()
+        #self.save_hyperparameters()
         self.lr = lr
         self.emb_size = emb_size
         self.scheduler = scheduler
         self.classes = classes
 
-        self.loss = torch.nn.CrossEntropyLoss(label_smoothing=0.05, weight=torch.FloatTensor(weight))
+        self.loss = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor(weight))
 
         encoder_layer = torch.nn.TransformerEncoderLayer(
             d_model = num_features,
@@ -101,6 +101,8 @@ class SimpleTransformer(pl.LightningModule):
         self.log("val_loss", loss, prog_bar=True)
         ova, _ = self.calc_ova(x, target)
         self.log("val_ova", ova, prog_bar=True)
+        self.log("hp_metric", ova)
+        
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -140,36 +142,40 @@ class SimpleLinearModel(pl.LightningModule):
         num_classes,
         sequence_length,
         weight,
-        classes
+        classes,
+        pre_trained: pl.LightningModule
 
         ):
         super().__init__()
-        self.save_hyperparameters()
+        #self.save_hyperparameters()
         self.lr = lr
         self.scheduler = scheduler
         self.classes = classes
+        self.pre_trained = pre_trained
+        self.pre_trained.freeze()
+        self.pre_trained.eval()
 
         self.loss = torch.nn.CrossEntropyLoss(
             #label_smoothing=0.5, 
-            #weight=torch.FloatTensor(weight)
+            weight=torch.FloatTensor(weight)
             )
 
 
         self.encoder = torch.nn.Sequential(torch.nn.Linear(num_features, num_features//2),
-                                            torch.nn.BatchNorm1d(sequence_length),
+                                            #torch.nn.LayerNorm(num_features//2),
                                             torch.nn.ReLU(),
                                             torch.nn.Linear(num_features//2, num_features//4),
-                                            torch.nn.BatchNorm1d(sequence_length),
+                                            #torch.nn.LayerNorm(num_features//4),
                                             torch.nn.ReLU(),
                                             torch.nn.Flatten(),
                                             torch.nn.Linear((num_features//4)*sequence_length, ((num_features//4)*sequence_length)//2),
-                                            torch.nn.BatchNorm1d(((num_features//4)*sequence_length)//2),
+                                            #torch.nn.LayerNorm(((num_features//4)*sequence_length)//2),
                                             torch.nn.ReLU(),
                                             torch.nn.Linear(((num_features//4)*sequence_length)//2, ((num_features//4)*sequence_length)//4),
-                                            torch.nn.BatchNorm1d(((num_features//4)*sequence_length)//4),
+                                            #torch.nn.LayerNorm(((num_features//4)*sequence_length)//4),
                                             torch.nn.ReLU(),
                                             torch.nn.Linear(((num_features//4)*sequence_length)//4, ((num_features//4)*sequence_length)//8),
-                                            torch.nn.BatchNorm1d(((num_features//4)*sequence_length)//8),
+                                            #torch.nn.LayerNorm(((num_features//4)*sequence_length)//8),
                                             torch.nn.ReLU(),
                                             torch.nn.Linear(((num_features//4)*sequence_length)//8, num_classes),
                                             )
@@ -193,11 +199,11 @@ class SimpleLinearModel(pl.LightningModule):
 
 
     def forward(self, batch, softmax = False):
-        hs = batch['hs']
+        x = batch['hs']
         hs_pad_mask = batch['hs_pad_mask']
         target = batch['target_arr']
-
-        x = self.encoder(hs)
+        #x = self.pre_trained(batch)
+        x = self.encoder(x)
         if softmax:
             x = torch.nn.functional.softmax(x, 1)
         return x, target
