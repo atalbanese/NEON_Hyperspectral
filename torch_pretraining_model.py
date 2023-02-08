@@ -12,7 +12,6 @@ class PreTrainingModel(pl.LightningModule):
         num_features,
         num_heads,
         num_layers,
-        num_classes,
         sequence_length,
         temp=0.1, 
         epsilon=0.05,  
@@ -26,16 +25,15 @@ class PreTrainingModel(pl.LightningModule):
         self.num_features = num_features
         self.num_heads = num_heads
         self.num_layers = num_layers
-        self.num_classes = num_classes
         self.sequence_length = sequence_length
         self.temp = temp
         self.epsilon = epsilon
         self.niters = sinkhorn_iters
 
-        self.transforms_main = torch.nn.Sequential([
+        self.transforms_main = torch.nn.Sequential(
                                         transforms.Blit(p=0.5),
                                         transforms.Block(p=0.5)
-                                       ])
+                                       )
 
         encoder_layer = torch.nn.TransformerEncoderLayer(
             d_model = num_features,
@@ -55,7 +53,7 @@ class PreTrainingModel(pl.LightningModule):
                                         torch.nn.ReLU(),
                                         torch.nn.Linear(num_features, num_features))
 
-        self.prototypes = torch.nn.Linear(num_features, num_classes, bias=False)
+        self.prototypes = torch.nn.Linear(num_features, num_features, bias=False)
 
         self.softmax = torch.nn.LogSoftmax(dim=1)
 
@@ -89,9 +87,7 @@ class PreTrainingModel(pl.LightningModule):
         Q *= B # the colomns must sum to 1 so that Q is an assignment
         return Q.t()
     
-    def trainng_step(self, batch, batch_idx):
-        x = batch['hs']
-
+    def training_step(self, x, batch_idx):
         b = x.shape[0]
         x_s = self.transforms_main(x)
 
@@ -124,8 +120,10 @@ class PreTrainingModel(pl.LightningModule):
         p_s = self.softmax(scores_s/self.temp)
 
         loss = -0.5 * torch.mean(q_t * p_s + q_s * p_t)
-
-        return loss/b
+        loss = loss/b
+        self.log("train_loss", loss)
+        
+        return loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
@@ -138,14 +136,13 @@ class PreTrainingModel(pl.LightningModule):
         return to_return
     
     def on_before_optimizer_step(self, optimizer, optimizer_idx):
-        if (self.current_epoch < 1) and (self.pre_training):
+        if (self.current_epoch < 1):
             for name, p in self.named_parameters():
                     if "prototypes" in name:
                         p.grad = None
     
     def on_train_batch_start(self, batch, batch_idx):
-        if self.pre_training:
-            self.norm_prototypes()
+        self.norm_prototypes()
 
     def forward(self, batch):
         with torch.no_grad():
