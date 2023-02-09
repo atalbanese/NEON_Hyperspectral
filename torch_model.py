@@ -2,6 +2,26 @@ import torch.nn
 import torch
 import pytorch_lightning as pl
 import numpy as np
+import math
+
+class PositionalEncoding(torch.nn.Module):
+
+    def __init__(self, d_model, dropout=0.2, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = torch.nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+
 
 class SimpleTransformer(pl.LightningModule):
     def __init__(
@@ -26,14 +46,19 @@ class SimpleTransformer(pl.LightningModule):
         self.scheduler = scheduler
         self.classes = classes
 
-        self.loss = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor(weight))
+        #self.positions = PositionalEncoding(num_features)
+        #self.embed = torch.nn.Linear(num_features, num_features)
+        if weight is not None:
+            self.loss = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor(weight))
+        else:
+            self.loss = torch.nn.CrossEntropyLoss()
 
         encoder_layer = torch.nn.TransformerEncoderLayer(
             d_model = num_features,
             nhead = num_heads,
             dim_feedforward=emb_size,
             batch_first=True,
-            dropout=0.3
+            dropout=0.1
         )
         self.encoder = torch.nn.TransformerEncoder(
             encoder_layer=encoder_layer,
@@ -86,6 +111,8 @@ class SimpleTransformer(pl.LightningModule):
         hs = batch['hs']
         hs_pad_mask = batch['hs_pad_mask']
         target = batch['target_arr']
+        #hs = self.embed(hs)
+        #hs = self.positions(hs)
 
         x = self.encoder(hs, src_key_padding_mask = hs_pad_mask)
         x = self.decoder(x)

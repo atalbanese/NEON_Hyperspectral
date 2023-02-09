@@ -163,6 +163,21 @@ class SiteData:
     def num_taxa(self):
         return len(self.all_taxa.keys())
 
+    @property
+    def class_weights(self):
+        if self.training_data is not None:
+            class_weights = {}
+            #n_samples / (n_classes * class_count)
+            n_classes = len(self.all_taxa.keys())
+            n_samples = len(self.training_data)
+            for k in self.all_taxa.keys():
+                class_count = len(["x" for tree in self.training_data if tree.taxa == k])
+                class_weights[k] = n_samples/(n_classes*class_count)
+            return class_weights
+            
+        else:
+            return None
+
     def find_all_trees(self):
         all_dirs = [os.scandir(d) for d in os.scandir(self.site_dir) if d.is_dir()]
         return [TreeData.from_npz(f.path) for f in itertools.chain(*all_dirs) if f.name.endswith('.npz')]
@@ -183,7 +198,7 @@ class SiteData:
                 taxa_dict[tree.taxa].append(tree)
             else:
                 taxa_dict[tree.taxa] = [tree]
-        return taxa_dict
+        return {k: taxa_dict[k] for k in sorted(taxa_dict)}
     
     def make_splits(self, split_style: Literal["tree_level", "plot_level"]):
         if split_style == "tree_level":
@@ -299,9 +314,6 @@ class SiteData:
             data_list.append(to_append)
         return data_list
     
-    def get_class_weights(self):
-        pass
-
 
     def make_key(self, tree, out_dim):
         new_key = np.zeros((self.num_taxa), np.float32)

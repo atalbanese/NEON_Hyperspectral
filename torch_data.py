@@ -115,18 +115,28 @@ class PaddedTreeDataSet(BaseTreeDataSet):
         return out
 
 class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
-    def __init__(self, tree_list, pad_length, num_synth_trees, num_features, stats, augments_list):
+    def __init__(self, tree_list, pad_length, num_synth_trees, num_features, stats, augments_list, weights):
         super().__init__(tree_list, stats, augments_list)
         self.pad_length = pad_length
         self.num_synth_trees = num_synth_trees
         self.num_features = num_features
         self.rng = np.random.default_rng()
+        self.weights = weights
+        self.samp_weights = self.get_sampling_weights()
     
     #TODO: Mess around with rng weights to see if we can make up for unbalanced dataset?
 
     def __len__(self):
         return self.num_synth_trees
-    
+    def get_sampling_weights(self):
+        if self.weights is not None:
+            samp_weights = np.zeros((len(self.tree_list)), dtype=np.float32)
+            for ix, tree in enumerate(self.tree_list):
+                samp_weights[ix] = self.weights[int(tree['single_target'].item())]
+            return samp_weights/sum(samp_weights)
+        else:
+            return None
+
     def assemble_tree_pixels(self, tree_samples):
         tree_pixels = []
         tree_targets = []
@@ -150,8 +160,11 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
 
 
     def make_synthetic_tree(self):
-        tree_samples = self.rng.choice(self.tree_list, self.pad_length, replace=False)
 
+        if self.weights is not None:
+            tree_samples = self.rng.choice(self.tree_list, self.pad_length, replace=False, p=self.samp_weights)
+        else:   
+            tree_samples = self.rng.choice(self.tree_list, self.pad_length, replace=False)
         tree_pix, tree_targets = self.assemble_tree_pixels(tree_samples)
         synth_tree = np.concatenate(tree_pix)[:self.pad_length,...]
         synth_tree = self.handle_transforms(synth_tree)

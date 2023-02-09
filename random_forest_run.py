@@ -4,6 +4,7 @@ from sklearn.ensemble import RandomForestClassifier
 import sklearn.metrics as sm
 from torch.utils.data import DataLoader
 from torch_pretraining_model import PreTrainingModel
+from sklearn.decomposition import PCA
 
 
 if __name__ == "__main__":
@@ -39,6 +40,11 @@ if __name__ == "__main__":
 
     test_inp = y['hs'][~y['hs_pad_mask']].numpy()
     inp = x['hs'][~x['hs_pad_mask']].numpy()
+
+    # pca = PCA(n_components=4, svd_solver='full')
+
+    # inp = pca.fit_transform(inp)
+    # test_inp = pca.transform(test_inp)
     targets = x['single_target'][~x['hs_pad_mask']].numpy()
 
     

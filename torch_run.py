@@ -35,10 +35,12 @@ if __name__ == "__main__":
         num_synth_trees=5120,
         num_features=372,
         stats='/home/tony/thesis/data/stats/niwo_stats.npz',
-        augments_list=["normalize"]
+        augments_list=[ "normalize"],
+        weights=list(niwo.class_weights.values())
+        #weights=None
     )
     #train_set = PaddedTreeDataSet(train_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["brightness", "blit", "block", "normalize"])
-    train_loader = DataLoader(train_set, batch_size=1024, num_workers=10)
+    train_loader = DataLoader(train_set, batch_size=512, num_workers=10)
 
     valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["normalize"])
     valid_loader = DataLoader(valid_set, batch_size=38)
@@ -48,14 +50,15 @@ if __name__ == "__main__":
 
     train_model = SimpleTransformer(
         lr = 5e-5,
-        emb_size = 128,
+        emb_size = 1024,
         scheduler=True,
         num_features=372,
         num_heads=4,
-        num_layers=4,
+        num_layers=6,
         num_classes=4,
         sequence_length=16,
-        weight = [1.05,0.744,2.75,0.753],
+        weight = list(niwo.class_weights.values()),
+        #weight=None,
         classes=niwo.key
     )
 
@@ -70,7 +73,7 @@ if __name__ == "__main__":
     #     classes=niwo.key
     # )
 
-    exp_name = 'mlp_test_no_norm_no_weight_ln'
+    exp_name = 'samp_weights_val_loss_min'
     val_callback = ModelCheckpoint(
         dirpath='ckpts/', 
         filename=exp_name +'{val_ova:.2f}_{epoch}',
@@ -81,10 +84,10 @@ if __name__ == "__main__":
         )
 
     logger = pl_loggers.TensorBoardLogger(save_dir = './tuning_logs', name=exp_name)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=100, logger=logger, log_every_n_steps=10, deterministic=True,
-    callbacks=[val_callback]
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=20, logger=logger, log_every_n_steps=10, deterministic=True,
+    #callbacks=[val_callback]
     )
     #trainer.tune(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
-    trainer.test(train_model, dataloaders=test_loader, ckpt_path='best')
+    trainer.test(train_model, dataloaders=test_loader)
 
