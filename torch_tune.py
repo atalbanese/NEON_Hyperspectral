@@ -9,15 +9,16 @@ from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
 
 
-EPOCHS = 100
+EPOCHS = 20
 
 
 def objective(trial: optuna.trial.Trial):
     pl.seed_everything(42, workers=True)
-    lr = trial.suggest_float('lr', 1e-6, 1e-4, log=True)
-    batch_size = trial.suggest_int('batch_size', 64, 1024)
+    lr = trial.suggest_float('lr', 1e-6, 1e-5, log=False)
+    batch_size = trial.suggest_int('batch_size', 128, 1024)
     emb_size = trial.suggest_int("emb_size", 64, 512)
     augments = trial.suggest_categorical('augments', [0, 1, 2, 3, 4, 5, 6, 7])
+    decode_style = trial.suggest_categorical('decode_style', ["layer", "batch", "none", "mlp_batch", "mlp_layer"])
 
     augment_options = {
         0: [],
@@ -48,7 +49,7 @@ def objective(trial: optuna.trial.Trial):
         num_synth_trees=5120,
         num_features=372,
         stats='/home/tony/thesis/data/stats/niwo_stats.npz',
-        augments_list=augments + ["normalize"]
+        augments_list=augment_options[augments] + ["normalize"]
     )
     train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=10)
 
@@ -65,15 +66,16 @@ def objective(trial: optuna.trial.Trial):
         num_classes=4,
         sequence_length=16,
         weight = [1.05,0.744,2.75,0.753],
-        classes=niwo.key
+        classes=niwo.key,
+        decode_style=decode_style
     )
-    logger = pl_loggers.TensorBoardLogger(save_dir = './tuning_logs')
-    trainer = pl.Trainer(accelerator='gpu', max_epochs=EPOCHS, log_every_n_steps=10, callbacks=[PyTorchLightningPruningCallback(trial, monitor="val_ova")], deterministic=True)
-    hyperparameters = dict(lr=lr, batch_size=batch_size, emb_size=emb_size)
+    logger = pl_loggers.TensorBoardLogger(save_dir = '/home/tony/thesis/lidar_hs_unsup_dl_model/tuning_logs/')
+    trainer = pl.Trainer(accelerator='gpu', max_epochs=EPOCHS, log_every_n_steps=10, callbacks=[PyTorchLightningPruningCallback(trial, monitor="val_loss")], deterministic=True, logger=logger, num_sanity_val_steps=0)
+    hyperparameters = dict(lr=lr, batch_size=batch_size, emb_size=emb_size, augments=augment_options[augments], decode_style=decode_style)
     trainer.logger.log_hyperparams(hyperparameters)
     trainer.fit(train_model, train_dataloaders=train_loader, val_dataloaders=valid_loader)
 
-    return trainer.callback_metrics["val_ova"].item()
+    return trainer.callback_metrics["val_loss"].item()
 
 
 
@@ -82,9 +84,9 @@ def objective(trial: optuna.trial.Trial):
 
 
 if __name__ == "__main__":
-    pruner = optuna.pruners.MedianPruner()
-    study = optuna.create_study(direction="maximize", pruner=pruner)
-    study.optimize(objective, n_trials=200)
+    pruner = optuna.pruners.NopPruner()
+    study = optuna.create_study(direction="minimize", pruner=pruner)
+    study.optimize(objective, n_trials=300)
 
     print("Number of finished trials: {}".format(len(study.trials)))
 

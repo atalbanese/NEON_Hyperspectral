@@ -5,6 +5,7 @@ from torch_data import PaddedTreeDataSet, SyntheticPaddedTreeDataSet
 from splitting import SiteData
 from torch.utils.data import DataLoader
 from pytorch_lightning import loggers as pl_loggers
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 if __name__ == "__main__":
 
@@ -31,11 +32,11 @@ if __name__ == "__main__":
         num_synth_trees=5120,
         num_features=372,
         stats='/home/tony/thesis/data/stats/niwo_stats.npz',
-        augments_list=["normalize"]
+        augments_list=[]
     )
 
     #train_set = PaddedTreeDataSet(train_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["brightness", "blit", "block", "normalize"])
-    train_loader = DataLoader(train_set, batch_size=128, num_workers=10)
+    train_loader = DataLoader(train_set, batch_size=1024, num_workers=10)
 
     valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["normalize"])
     valid_loader = DataLoader(valid_set, batch_size=38)
@@ -57,8 +58,8 @@ if __name__ == "__main__":
     # )
 
     train_model = SimpleTransformer(
-        lr = 5e-4,
-        emb_size = 128,
+        lr =0.0000071056,
+        emb_size = 256,
         scheduler=True,
         num_features=372,
         num_heads=12,
@@ -66,21 +67,23 @@ if __name__ == "__main__":
         num_classes=4,
         sequence_length=16,
         weight = [1.05,0.744,2.75,0.753],
-        classes=niwo.key
+        classes=niwo.key,
+        decode_style="batch"
     )
-    exp_name = 'simple_test'
-    # val_callback = ModelCheckpoint(
-    #     dirpath='ckpts/', 
-    #     filename=exp_name +'{val_ova:.2f}_{epoch}',
-    #     monitor='val_loss',
-    #     save_on_train_epoch_end=True,
-    #     mode='min',
-    #     save_top_k = 3
-    #     )
+    exp_name = 'v_28_no_augs'
+    val_callback = ModelCheckpoint(
+        dirpath='ckpts/', 
+        filename=exp_name +'{val_ova:.2f}_{epoch}',
+        monitor='val_loss',
+        save_on_train_epoch_end=True,
+        mode='min',
+        save_top_k = 3
+        )
 
-    logger = pl_loggers.TensorBoardLogger(save_dir = './trial_logs', name=exp_name)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=250, logger=logger, log_every_n_steps=10, deterministic=True
-    #callbacks=[val_callback]
+    logger = pl_loggers.TensorBoardLogger(save_dir = '/home/tony/thesis/lidar_hs_unsup_dl_model/tuning_logs/', name=exp_name)
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=250, logger=logger, log_every_n_steps=10, deterministic=True,
+    callbacks=[val_callback]
     )
     #trainer.tune(train_model, train_loader, val_dataloaders=valid_loader)
     trainer.fit(train_model, train_loader, val_dataloaders=valid_loader)
+    trainer.test(train_model, test_loader)

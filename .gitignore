@@ -31,3 +31,4 @@ ray_results*
 most_recent_logs*
 old_tuning_logs/*
 trial_logs/*
+tuning_logs/*

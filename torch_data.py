@@ -104,7 +104,10 @@ class PaddedTreeDataSet(BaseTreeDataSet):
                 elif v.dtype == np.bool8:
                     pass
                 elif k == 'single_target':
-                    out[k] = torch.from_numpy(v).long()
+                    #out[k] = torch.from_numpy(v).long()
+                    targets = torch.zeros((self.pad_length), dtype=torch.uint8)
+                    targets[~out['hs_pad_mask']] = v.item()
+                    out[k] = targets
                 else:
                     out[k] = torch.from_numpy(v).float()
             else:

@@ -10,7 +10,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 
 if __name__ == "__main__":
-    pl.seed_everything(42)
+    pl.seed_everything(42, workers=True)
     
     niwo = SiteData(
         site_dir = '/home/tony/thesis/data/NIWO',
@@ -38,7 +38,7 @@ if __name__ == "__main__":
         augments_list=["normalize"]
     )
     #train_set = PaddedTreeDataSet(train_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["brightness", "blit", "block", "normalize"])
-    train_loader = DataLoader(train_set, batch_size=512, num_workers=6)
+    train_loader = DataLoader(train_set, batch_size=1024, num_workers=10)
 
     valid_set = PaddedTreeDataSet(valid_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["normalize"])
     valid_loader = DataLoader(valid_set, batch_size=38)
@@ -46,30 +46,31 @@ if __name__ == "__main__":
     test_set = PaddedTreeDataSet(test_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["normalize"])
     test_loader = DataLoader(test_set, batch_size = len(test_set))
 
-    # train_model = SimpleTransformer(
-    #     lr = 5e-4,
-    #     emb_size = 128,
-    #     scheduler=True,
-    #     num_features=372,
-    #     num_heads=12,
-    #     num_layers=6,
-    #     num_classes=4,
-    #     sequence_length=16,
-    #     weight = [1.05,0.744,2.75,0.753],
-    #     classes=niwo.key
-    # )
-
-    train_model=SimpleLinearModel(
-        lr =5e-4,
+    train_model = SimpleTransformer(
+        lr = 5e-5,
+        emb_size = 128,
         scheduler=True,
         num_features=372,
+        num_heads=4,
+        num_layers=4,
         num_classes=4,
         sequence_length=16,
-        weight=[1.05,0.744,2.75,0.753],
+        weight = [1.05,0.744,2.75,0.753],
         classes=niwo.key
     )
 
-    exp_name = 'simple_test'
+    # train_model=SimpleLinearModel(
+    #     lr =5e-4,
+    #     scheduler=True,
+    #     num_features=372,
+    #     num_classes=4,
+    #     sequence_length=16,
+    #     weight=[1.05,0.744,2.75,0.753],
+    #     #weight=None,
+    #     classes=niwo.key
+    # )
+
+    exp_name = 'mlp_test_no_norm_no_weight_ln'
     val_callback = ModelCheckpoint(
         dirpath='ckpts/', 
         filename=exp_name +'{val_ova:.2f}_{epoch}',
@@ -79,8 +80,8 @@ if __name__ == "__main__":
         save_top_k = 3
         )
 
-    logger = pl_loggers.TensorBoardLogger(save_dir = './trial_logs', name=exp_name)
-    trainer = pl.Trainer(accelerator="gpu", max_epochs=100, logger=logger, log_every_n_steps=10, 
+    logger = pl_loggers.TensorBoardLogger(save_dir = './tuning_logs', name=exp_name)
+    trainer = pl.Trainer(accelerator="gpu", max_epochs=100, logger=logger, log_every_n_steps=10, deterministic=True,
     callbacks=[val_callback]
     )
     #trainer.tune(train_model, train_loader, val_dataloaders=valid_loader)

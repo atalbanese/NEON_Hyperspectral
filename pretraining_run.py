@@ -17,22 +17,22 @@ if __name__ == "__main__":
         stats="/home/tony/thesis/data/stats/niwo_stats.npz"
     )
 
-    train_loader = DataLoader(pre_data, batch_size=2048, num_workers=10)
+    train_loader = DataLoader(pre_data, batch_size=512, num_workers=4)
 
     train_model = PreTrainingModel(
-        lr=5e-4,
-        emb_size=128,
+        lr=5e-5,
+        emb_size=512,
         scheduler=True,
         num_features=372,
         sequence_length=16,
         num_heads=12,
-        num_layers=4
+        num_layers=6
     )
 
-    exp_name = "Pre_Training_Test_1"
+    exp_name = "Pre_Training_Test_2"
     logger = pl_loggers.TensorBoardLogger(save_dir = './pre_training_logs', name=exp_name)
     trainer = pl.Trainer(accelerator="gpu", max_epochs=15, logger=logger,)
 
     trainer.fit(train_model, train_loader)
-    trainer.save_checkpoint('/home/tony/thesis/pre_training_ckpts/pre_training_1.ckpt')
+    trainer.save_checkpoint('/home/tony/thesis/pre_training_ckpts/pre_training_2.ckpt')
 
