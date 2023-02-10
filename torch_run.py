@@ -35,9 +35,9 @@ if __name__ == "__main__":
         num_synth_trees=5120,
         num_features=372,
         stats='/home/tony/thesis/data/stats/niwo_stats.npz',
-        augments_list=[ "normalize"],
-        weights=list(niwo.class_weights.values())
-        #weights=None
+        augments_list=["brightness", "normalize"],
+        #weights=list(niwo.class_weights.values())
+        weights=None
     )
     #train_set = PaddedTreeDataSet(train_data, pad_length=16, stats='/home/tony/thesis/data/stats/niwo_stats.npz', augments_list=["brightness", "blit", "block", "normalize"])
     train_loader = DataLoader(train_set, batch_size=512, num_workers=10)
@@ -54,12 +54,13 @@ if __name__ == "__main__":
         scheduler=True,
         num_features=372,
         num_heads=4,
-        num_layers=6,
+        num_layers=12,
         num_classes=4,
         sequence_length=16,
         weight = list(niwo.class_weights.values()),
         #weight=None,
-        classes=niwo.key
+        classes=niwo.key,
+        dropout=0.2
     )
 
     # train_model=SimpleLinearModel(

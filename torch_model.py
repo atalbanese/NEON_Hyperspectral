@@ -36,6 +36,7 @@ class SimpleTransformer(pl.LightningModule):
         sequence_length,
         weight,
         classes,
+        dropout,
         #decode_style
 
         ):
@@ -58,7 +59,7 @@ class SimpleTransformer(pl.LightningModule):
             nhead = num_heads,
             dim_feedforward=emb_size,
             batch_first=True,
-            dropout=0.1
+            dropout=dropout
         )
         self.encoder = torch.nn.TransformerEncoder(
             encoder_layer=encoder_layer,
