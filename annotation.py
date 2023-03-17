@@ -68,6 +68,55 @@ class Plot:
         for tree in self.identified_trees:
             tp = TreePlotter(tree)
 
+    def chm_filter(self, abs_thresh = 2):
+        to_keep = []
+        indexes = self.cm_affine.rowcol(self.potential_trees["easting_tree"], self.potential_trees["northing_tree"])
+        
+        pass
+
+    def find_nearest(self, search_val):
+        diff_arr = np.absolute(self.hyperspectral_bands-search_val)
+        return diff_arr.argmin()
+
+    def plot_me(self):
+        tree_cm = self.cm_affine.rowcol(self.potential_trees.easting_tree, self.potential_trees.northing_tree)
+        tree_m = self.m_affine.rowcol(self.potential_trees.easting_tree, self.potential_trees.northing_tree)
+
+        fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(14, 4.25), layout="constrained")
+        ax[0].imshow(self.rgb)
+        ax[0].set_title('RGB - 10cm resolution')
+        ax[0].scatter(*tree_cm, c='red')
+        ax[0].get_xaxis().set_visible(False)
+        ax[0].get_yaxis().set_visible(False)
+
+        ax[1].imshow(self.hyperspectral[...,[self.find_nearest(x) for x in [630,532,465]]]*12)
+        ax[1].set_title('Hyperspectral - 1m resolution')
+        ax[1].scatter(*tree_m, c='red')
+        ax[1].get_xaxis().set_visible(False)
+        ax[1].get_yaxis().set_visible(False)
+
+
+        im = ax[2].imshow(self.canopy_height_model)
+        ax[2].set_title('CHM - 10 cm resolution')
+        ax[2].get_xaxis().set_visible(False)
+        ax[2].get_yaxis().set_visible(False)
+        # cax = fig.add_axes([ax[2].get_position().x1+0.01,
+        #                     ax[2].get_position().y0 + ax[2].get_position().height*0.1,
+        #                     0.02,
+        #                     ax[2].get_position().height*0.8])
+
+        cbar = fig.colorbar(im)
+        cbar.set_label('Height (m)')
+        ax[2].scatter(*tree_cm, c='red', label='Tree')
+
+
+        fig.suptitle(f"Plot ID: {self.name}\n")
+        fig.legend(loc='upper right', bbox_to_anchor=(0.99,0.98))
+        
+        plt.show()
+
+
+
 
 class Tree:
     def __init__(
@@ -188,7 +237,7 @@ class TileSet:
 
 class PlotBuilder:
     """Takes in known data for a study site and returns Plot object populated with relevant data for that plot. 
-        All plots should be contained within a Study Site object. The goal is total abstraction"""
+        All plots should be contained within a Study Site object"""
     def __init__(
         self,
         sitename: str,
@@ -199,7 +248,8 @@ class PlotBuilder:
         tree_data_file: str,
         epsg: str,
         base_dir: str,
-        completed_plots: list,
+        completed_plots: list = [],
+        plot_hs_dif = False
         ):
         #Static Vars
         self.base_dir = base_dir
@@ -212,13 +262,20 @@ class PlotBuilder:
         self.plot_data_file = gpd.read_file(tree_data_file).sort_values(['easting_plot', 'northing_plot'])
         self.all_plot_ids = list(set(np.unique(self.plot_data_file.plotID)) - set(completed_plots))
 
-        #Will need two affine transforms for 1m and 10cm raster data
-
         #Mutable Vars
         self.current_plot_id = None
         #Caching tree tops files since the other file types can be partially opened
         self.open_tops = None
         self.open_tops_file = ''
+        self.hs_filters = [[410,1320],[1450,1800],[2050,2485]]
+        self.plot_hs_dif = plot_hs_dif
+
+    def get_hs_filter(self, bands):
+        # hs_filter should be a list of [min, max]
+        mask_list = [(bands>=lmin) & (bands<=lmax) for lmin, lmax in self.hs_filters]
+        band_mask = np.logical_or.reduce(mask_list)
+        idxs = np.where(band_mask)[0]
+        return idxs
 
     def build_plots(self):
         for plot_id in self.all_plot_ids:
@@ -230,12 +287,10 @@ class PlotBuilder:
         #Select the relevant data
         selected_plot = self.plot_data_file.loc[self.plot_data_file.plotID == self.current_plot_id]
 
-        #Need to get: Hyperspectral, Canopy Height Model, RGB, Treetops
-        #There are plots that cross file boundaries, this will be the tricky part. We should use gis operations to do as much as possible
 
         first_row = selected_plot.iloc[0]
         #Need to fit things to the nearest 1m since the hyperspectral data is 1m
-        #Centroid is floored instead for consistency with affine transformer
+        #Centroid is floored instead of rounded for consistency with affine transformer
         plot_centroid = math.floor(first_row.easting_plot), math.floor(first_row.northing_plot)
         plot_width = first_row.plotSize ** (1/2)
         min_x, min_y = plot_centroid[0] - (plot_width//2), plot_centroid[1] - (plot_width//2)
@@ -245,10 +300,13 @@ class PlotBuilder:
 
         hs, hs_bands = self.grab_hs(plot_bbox)
         assert hs.shape[0] == plot_width and hs.shape[1] == plot_width, 'hyperspectral plot does not match plot dims'
+        
         chm = self.grab_chm(plot_bbox)
         assert chm.shape[0] == plot_width*10 and chm.shape[1] == plot_width*10, 'chm plot does not match plot dims'
+        
         rgb = self.grab_rgb(plot_bbox)
         assert rgb.shape[0] == plot_width*10 and rgb.shape[1] == plot_width*10, 'rgb plot does not match plot dims'
+        
         ttops = self.grab_ttops(plot_bbox)
 
         origin = min_x, max_y
@@ -293,7 +351,14 @@ class PlotBuilder:
 
 
             bands = hs_file[self.sitename]["Reflectance"]["Metadata"]['Spectral_Data']['Wavelength'][:]
+
+            hs_filter = self.get_hs_filter(bands)
             hs_grab = hs_file[self.sitename]["Reflectance"]["Reflectance_Data"][min_y:max_y,min_x:max_x,...]/10000
+            if self.plot_hs_dif:
+                self.plot_hs_spectra(bands, hs_filter, hs_grab)
+            hs_grab = hs_grab[...,hs_filter]
+            
+            
             hs_grab = hs_grab.astype(np.float32)
             #TODO: Clean up values over/under 1
             hs_grabs.append(hs_grab)
@@ -304,7 +369,26 @@ class PlotBuilder:
         else:
             return self.__concat_plots__(hs_grabs, bounds_list), bands
 
-    
+    def plot_hs_spectra(self, bands, hs_filter, hs_grab):
+        mean_1 = np.mean(hs_grab, axis=(0,1))
+        mean_2 = np.mean(hs_grab[...,hs_filter], axis=(0,1))
+        bands_2 = bands[hs_filter]
+
+        fig, ax = plt.subplots(2, 1, figsize=(8, 6))
+        ax[0].set_ylabel('Reflectance', loc="bottom")
+        ax[1].set_xlabel('Wavelength (nm)')
+        ax[0].plot(bands, mean_1, '.--b')
+        ax[1].plot(bands_2, mean_2, '.--g')
+        ax[0].set_title("Before de-noising")
+
+        ax[0].set_ylim(-0.01, 0.4)
+        ax[1].set_ylim(-0.01, 0.4)
+        ax[1].set_title("After de-noising")
+        plt.suptitle("Mean hyperspectral reflectance from a sample plot before and after de-noising")
+        fig.tight_layout()
+        plt.show()
+
+        pass
     def grab_chm(self, bbox) -> np.ndarray:
         chm_grabs = []
         bounds_list = []
@@ -467,12 +551,6 @@ class TreeBuilder:
 
             label_subset = self.labelled_plot[local_y_min:local_y_max, local_x_min:local_x_max,...]
             label_mask = label_subset == crown_idx +1
-
-            #Potentially do this to clean up labels
-            #label_mask = morphology.remove_small_objects(morphology.erosion(label_mask), min_size=225)
-            #TODO: make this a button on the tree approver
-
-            #Need to get HS and RGB onto same grid to get HS mask. This could all maybe be moved to Tree?
 
             hs_x_min, hs_y_min = math.floor(local_x_min/10), math.floor(local_y_min/10)
             hs_x_max, hs_y_max = math.ceil(local_x_max/10), math.ceil(local_y_max/10)
@@ -693,8 +771,9 @@ class TreePlotter:
 def annotate_all(**kwargs):
     pb = PlotBuilder(**kwargs)
     for plot in pb.build_plots():
-        plot.find_trees()
-        plot.plot_and_check_trees()
+        plot.chm_filter()
+        #plot.find_trees()
+        #plot.plot_and_check_trees()
 
     
 
@@ -707,7 +786,7 @@ if __name__ == "__main__":
         h5_files= 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022',
         chm_files= 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test',
         ttop_files = "C:/Users/tonyt/Documents/Research/datasets/niwo_tree_tops",
-        tree_data_file= 'C:/Users/tonyt/Documents/Research/datasets/tree_locations/NIWO.geojson',
+        tree_data_file= 'C:/Users/tonyt/Documents/Research/datasets/tree_locations/NIWO_by_me.geojson',
         rgb_files =  r'C:\Users\tonyt\Documents\Research\datasets\rgb\NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022',
         epsg='EPSG:32613',
         base_dir=r'C:\Users\tonyt\Documents\Research\thesis_final'

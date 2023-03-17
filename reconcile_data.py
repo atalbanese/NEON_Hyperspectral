@@ -13,7 +13,7 @@ def reconcile_tree_data(
     filter_species: list = ['DAFRF', 'SALIX']
     ):
 
-    curated = pd.read_csv(curated_trees_file, usecols=['plotID', 'individualID', 'adjEasting', 'adjNorthing', 'taxonID', 'height'])
+    curated = pd.read_csv(curated_trees_file, usecols=['plotID', 'individualID', 'adjEasting', 'adjNorthing', 'taxonID', 'height', 'chm_dif'])
     curated = curated.rename(columns={'adjEasting': 'easting',
                                           'adjNorthing': 'northing'})
 
@@ -46,10 +46,10 @@ def reconcile_tree_data(
 if __name__ == "__main__":
 
     reconcile_tree_data(
-        curated_trees_file="W:/Classes/Research/neon_niwo_mapped_struct_de_dupe.csv",
+        curated_trees_file="W:/Classes/Research/Niwo_Canopy_Height_Dif.csv",
         plots_file='W:/Classes/Research/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plots_V8/All_NEON_TOS_Plot_Centroids_V8.csv',
         site_name='NIWO',
-        save_loc='C:/Users/tonyt/Documents/Research/datasets/tree_locations/NIWO.geojson'
+        save_loc='C:/Users/tonyt/Documents/Research/datasets/tree_locations/NIWO_Tree_Locs_With_Height_Dif.geojson'
     )
 
     
