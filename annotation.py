@@ -68,12 +68,6 @@ class Plot:
         for tree in self.identified_trees:
             tp = TreePlotter(tree)
 
-    def chm_filter(self, abs_thresh = 2):
-        to_keep = []
-        indexes = self.cm_affine.rowcol(self.potential_trees["easting_tree"], self.potential_trees["northing_tree"])
-        
-        pass
-
     def find_nearest(self, search_val):
         diff_arr = np.absolute(self.hyperspectral_bands-search_val)
         return diff_arr.argmin()
@@ -190,7 +184,6 @@ class Tree:
 
 class TileSet:
     ##ASSUMES EVERYTHING IS A LOWER LEFT ORIGIN, BECAUSE THAT IS THE NEON CONVENTION
-    ##I AM PERSONALLY MORE OF AN UPPER LEFT ORIGIN GUY SINCE THAT IS THE WAY NUMPY ARRAYS ARE ORDERED 
     def __init__(
         self,
         tile_dir: str,
@@ -202,7 +195,7 @@ class TileSet:
         self.all_files = [f for f in os.scandir(tile_dir) if f.is_file() and f.path.endswith(file_ext)]
         self.epsg = epsg
         self.coord_locs = coord_locs
-        #Assumes square file size. Do we need to know units? 1m vs 10cm
+        #Assumes square file size.
         self.file_width = file_width
 
         self.tile_gdf = self.__make_tile_gdf__()
@@ -336,19 +329,14 @@ class PlotBuilder:
 
         return (min_x, min_y, max_x, max_y)
 
-    #TODO: Filter for selected hyperspectral bands
-    #Drop first and last 5 and water bands
     def grab_hs(self, bbox):
         hs_grabs = []
         bounds_list = []
-        #bands = None
         tiles = self.__get_relevant_entries__(bbox, self.h5_tiles)
         for ix, tile in tiles.iterrows():
             min_x, min_y, max_x, max_y = self.get_crop_values(tile.file_west_bound, tile.file_north_bound, 1, tile.geometry.bounds)
             bounds_list.append((tile.file_west_bound, tile.file_north_bound))
             hs_file = hp.File(tile.filepath.path, 'r')
-            print(tile.filepath.path)
-
 
             bands = hs_file[self.sitename]["Reflectance"]["Metadata"]['Spectral_Data']['Wavelength'][:]
 
@@ -357,6 +345,7 @@ class PlotBuilder:
             if self.plot_hs_dif:
                 self.plot_hs_spectra(bands, hs_filter, hs_grab)
             hs_grab = hs_grab[...,hs_filter]
+            bands = bands[hs_filter]
             
             
             hs_grab = hs_grab.astype(np.float32)
@@ -388,7 +377,6 @@ class PlotBuilder:
         fig.tight_layout()
         plt.show()
 
-        pass
     def grab_chm(self, bbox) -> np.ndarray:
         chm_grabs = []
         bounds_list = []

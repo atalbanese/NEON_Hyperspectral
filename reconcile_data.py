@@ -13,7 +13,7 @@ def reconcile_tree_data(
     filter_species: list = ['DAFRF', 'SALIX']
     ):
 
-    curated = pd.read_csv(curated_trees_file, usecols=['plotID', 'individualID', 'adjEasting', 'adjNorthing', 'taxonID', 'height', 'chm_dif'])
+    curated = pd.read_csv(curated_trees_file, usecols=['plotID', 'individualID', 'adjEasting', 'adjNorthing', 'taxonID', 'height', 'chm_dif', 'ninetyCrownDiameter', 'canopyPosition'])
     curated = curated.rename(columns={'adjEasting': 'easting',
                                           'adjNorthing': 'northing'})
 

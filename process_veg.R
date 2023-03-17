@@ -64,54 +64,21 @@ height_dif_sd <- sd(unfiltered$chm_dif)
 
 filtered <- unfiltered[unfiltered$chm_dif<height_dif_sd,]
 
-before <- ggplot(unfiltered) + geom_point(aes(x=height, y= chm_height))
-after <- ggplot(filtered) + geom_point(aes(x=height, y= chm_height))
 
 
-before+after
+before <- ggplot(unfiltered) + geom_point(aes(x=height, y= chm_height)) +
+          labs(x="Height (m) from Ground Survey", y="Height (m) from Canopy Height Model", title="Before Filtering") + xlim(0, 40)
+after <- ggplot(filtered) + geom_point(aes(x=height, y= chm_height)) +
+  labs(x="Height (m) from Ground Survey", y="", title="After Filtering") + xlim(0, 40)
+
+before+after +plot_annotation(title="Ground Survey Tree Heights vs Canopy Height Model at Same Coordinates at NIWO",
+                              subtitle = "Points filtered to be within one standard deviation of absolute value of height difference")
+
+
+write.csv(unfiltered, "W:/Classes/Research/Niwo_Canopy_Height_Dif.csv", row.names = FALSE)
 
 
 
 
 
 
-
-
-
-
-
-chm <- raster("C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test/NIWO_452000_4432000_chm.tif")                        
-              
-plot(chm)
-
-vegsub <- veg_filtered[which(veg_filtered$adjEasting >= extent(chm)[1] &
-                      veg_filtered$adjEasting <= extent(chm)[2] &
-                      veg_filtered$adjNorthing >= extent(chm)[3] & 
-                      veg_filtered$adjNorthing <= extent(chm)[4]),]
-
-bufferCHM <- extract(chm, 
-                     cbind(vegsub$adjEasting,
-                           vegsub$adjNorthing),
-                     buffer=vegsub$adjCoordinateUncertainty, 
-                     fun=max)
-
-vegsub$chm_height <- extract(chm, 
-                                cbind(vegsub$adjEasting,
-                                      vegsub$adjNorthing),
-                                buffer=vegsub$adjCoordinateUncertainty, 
-                                fun=max)
-
-vegsub$chm_dif <- abs(vegsub$chm_height-vegsub$height)
-
-vegsub_sub <- vegsub[vegsub$chm_dif <2,]
-
-plot(vegsub_sub$chm_height~vegsub_sub$height)
-cor(vegsub_sub$chm_height, vegsub_sub$height, use="complete")
-
-
-plot(bufferCHM~vegsub$height, pch=20, xlab="Height", 
-     ylab="Canopy height model")
-
-lines(c(0,50), c(0,50), col="grey")
-
-cor(bufferCHM, vegsub$height, use="complete")
