@@ -1,4 +1,4 @@
-library(sp)
+require(sp)
 library(raster)
 library(neonUtilities)
 library(neonOS)
@@ -21,20 +21,30 @@ veg <- joinTableNEON(veglist$vst_apparentindividual,
                      name1="vst_apparentindividual",
                      name2="vst_mappingandtagging")
 
+plot_locs <- veglist$vst_perplotperyear %>%
+            select(plotID, easting, northing) %>%
+            rename("easting_plot"=easting, "northing_plot"=northing)
+            group_by(plotID) %>%
+            slice_head(n=1) %>%
+            ungroup() 
+
 veg$date.x <- ymd(veg$date.x)
 
 veg_filtered <- veg %>% filter(grepl("Live", plantStatus)) %>%
-                        filter(!grepl("\\d\\d\\d\\d\\d[A-Z]", individualID)) %>%
-                        filter(!is.na(height)) %>%
-                        filter(!is.na(taxonID)) %>%
-                        filter(!is.na(adjNorthing)) %>%
-                        filter(!is.na(date.x)) %>%
-                        filter(height > 2) %>%
-                        filter(date.x < ymd("2021-01-01")) %>%
-                        arrange(-height) %>%
-                        group_by(individualID) %>%
-                        slice_head(n=1) %>%
-                        ungroup()
+  filter(!grepl("\\d\\d\\d\\d\\d[A-Z]", individualID)) %>%
+  filter(!is.na(height)) %>%
+  filter(!is.na(taxonID)) %>%
+  filter(!is.na(adjNorthing)) %>%
+  filter(!is.na(date.x)) %>%
+  filter(height > 2) %>%
+  filter(date.x < ymd("2021-01-01")) %>%
+  select(plotID, individualID, adjEasting, adjNorthing, taxonID, height, ninetyCrownDiameter, canopyPosition) %>%
+  rename("easting_tree" = adjEasting, "northing_tree" = adjNorthing) %>%
+  arrange(-height) %>%
+  group_by(individualID) %>%
+  slice_head(n=1) %>%
+  ungroup()
+
 
 #write.csv(veg_filtered, "W:/Classes/Research/Niwo_data_by_me.csv", row.names = FALSE)
 
@@ -71,7 +81,7 @@ before <- ggplot(unfiltered) + geom_point(aes(x=height, y= chm_height)) +
 after <- ggplot(filtered) + geom_point(aes(x=height, y= chm_height)) +
   labs(x="Height (m) from Ground Survey", y="", title="After Filtering") + xlim(0, 40)
 
-before+after +plot_annotation(title="Ground Survey Tree Heights vs Canopy Height Model at Same Coordinates at NIWO",
+before+after+plot_annotation(title="Ground Survey Tree Heights vs Canopy Height Model at Same Coordinates at NIWO",
                               subtitle = "Points filtered to be within one standard deviation of absolute value of height difference")
 
 
