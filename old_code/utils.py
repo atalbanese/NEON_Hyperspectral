@@ -1,5 +1,3 @@
-# from sre_constants import IN
-# from tkinter import N
 
 import h5_helper as hp
 import numpy as np
@@ -26,7 +24,7 @@ import rasterio as rs
 import pickle
 
 import indexes as ixs
-import validator as vd
+
 
 
 def get_features(inp, feature_band=2):
@@ -661,7 +659,6 @@ def bulk_process(pool, dirs, fn, **kwargs):
             if isinstance(n, tuple):
                 print(n[0])
                 np.save(*n)
-                #print(n[0])
             else:
                 print(n)
         except TimeoutError as e:
