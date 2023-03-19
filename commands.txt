@@ -3,6 +3,11 @@ Rscript acquire_all_data.R -s RMNP -d C:/Users/tonyt/Documents/Research/final_da
 Rscript acquire_all_data.R -s NIWO -d C:/Users/tonyt/Documents/Research/final_data -y 2020
 Rscript acquire_all_data.R -s HARV -d C:/Users/tonyt/Documents/Research/final_data -y 2019
 
+#Find treetops from CHM --note this is now integrated with the acquire all data script
+Rscript find_tree_tops.R -s NIWO -d C:/Users/tonyt/Documents/Research/final_data
+Rscript find_tree_tops.R -s RMNP -d C:/Users/tonyt/Documents/Research/final_data
+Rscript find_tree_tops.R -s HARV -d C:/Users/tonyt/Documents/Research/final_data
+
 #Create 16 channel PCA images for HS scenes using CHM as a filter for canopy pixels
 python site_pca.py RMNP C:/Users/tonyt/Documents/Research/final_data
 python site_pca.py NIWO C:/Users/tonyt/Documents/Research/final_data

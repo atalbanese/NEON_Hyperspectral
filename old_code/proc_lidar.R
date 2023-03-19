@@ -1,3 +1,27 @@
+suppressPackageStartupMessages(require(optparse))
+
+option_list = list(
+  make_option(c("-s", "--sitename"), type="character", default=NULL, 
+              help="NEON Sitename"),
+  make_option(c("-d", "--savedir"), type="character", default=NULL, 
+              help="Base directory to create site folder in"),
+)
+
+
+opt_parser = OptionParser(option_list=option_list)
+opt = parse_args(opt_parser)
+
+if(is.null(opt$sitename)){
+  print_help(opt_parser)
+  stop("Missing sitename", call.=FALSE)
+}
+
+if(is.null(opt$savedir)){
+  print_help(opt_parser)
+  stop("Missing savedir", call.=FALSE)
+}
+
+
 library(lidR)
 library(raster)
 library(terra)
@@ -8,7 +32,6 @@ library(sf)
 
 
 #Main function
-# Need to filter out v small "trees" in here, there are some that are 5cm sq
 get_crown_stats <- function(chunk) {
   if (is.null(chunk)) {
     return(NULL)
@@ -26,12 +49,6 @@ get_crown_stats <- function(chunk) {
   norm <- lidR::normalize_height(las, knnidw(), na.rm=TRUE)
   norm <- filter_poi(norm, Z>=0, Z<=200)
   ttops <- locate_trees(norm, lmf(ws =3),  uniqueness = "bitmerge")
-  # Handle edges of each chunk. Need to handle edges of whole thing as well :(
-
-  # Get unbuffered bounds of chunk
-
-
- 
 
   return(ttops)
 }

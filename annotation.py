@@ -110,8 +110,6 @@ class Plot:
         plt.show()
 
 
-
-
 class Tree:
     def __init__(
         self,
@@ -767,6 +765,12 @@ def annotate_all(**kwargs):
 
 
 if __name__ == "__main__":
+
+    #TODO: Implement parser to run these commands
+        #Sitename
+        #Basedir
+        #Annotation Style
+        #Completed plots
 
     annotate_all(
         completed_plots = ['NIWO_001', 'NIWO_002', 'NIWO_004', 'NIWO_005', 'NIWO_007', 'NIWO_009', 'NIWO_010', 'NIWO_011', 'NIWO_012', 'NIWO_014', 'NIWO_015', 'NIWO_016', 'NIWO_017', 'NIWO_041'],

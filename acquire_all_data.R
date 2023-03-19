@@ -6,7 +6,9 @@ option_list = list(
   make_option(c("-d", "--savedir"), type="character", default=NULL, 
               help="Base directory to create site folder in"),
   make_option(c("-y", "--year"), type="character", default=NULL, 
-              help="Year for which data will be downloaded")
+              help="Year for which data will be downloaded"),
+  make_option(c("-w", "--windowsize"), type="numeric", default=4, 
+              help="Search window size for treetop id")
 ); 
 
 opt_parser = OptionParser(option_list=option_list)
@@ -28,6 +30,7 @@ if(is.null(opt$year)){
 }
 
 suppressPackageStartupMessages(require(sp))
+suppressPackageStartupMessages(require(sf))
 suppressPackageStartupMessages(require(raster))
 suppressPackageStartupMessages(require(neonUtilities))
 suppressPackageStartupMessages(require(neonOS))
@@ -35,6 +38,7 @@ suppressPackageStartupMessages(require(geoNEON))
 suppressPackageStartupMessages(require(dplyr))
 suppressPackageStartupMessages(require(lubridate))
 suppressPackageStartupMessages(require(fs))
+suppressPackageStartupMessages(require(lidR))
 
 download_and_filter_veg <- function(sitename) {
   veglist <- loadByProduct(dpID="DP1.10098.001", 
@@ -137,6 +141,20 @@ get_chm_dif <- function(veg_filtered){
   return(bind_rows(frames))
 }
 
+get_ttops <- function() {
+  all_chm <- list.files("CHM", full.names=TRUE)
+  frames <- vector(mode="list", length=length(all_chm))
+  
+  for (i in 1:length(all_chm)) {
+    chm <- raster(all_chm[i])
+    ttops <- locate_trees(chm, lmf(ws=opt$windowsize, shape='circular'),  uniqueness = "bitmerge")
+    frames[[i]] <- ttops
+  }
+  
+  return(bind_rows(frames))
+}
+
+
 ##MAIN SCRIPT
 #Change to opt options for command line
 sitename <- opt$sitename
@@ -161,4 +179,11 @@ download_rs_products(sitename, veg_filtered, year)
 veg_filtered <- get_chm_dif(veg_filtered)
 
 write.csv(veg_filtered, paste(sitename,year,"woody_vegetation.csv", sep="_"), row.names = FALSE)
+
+#Get treetops from canopy height model
+all_ttops <- get_ttops()
+
+st_write(all_ttops, paste(opt$sitename, "tree_tops.gpkg", sep="_"))
+
+
 
