@@ -1,0 +1,9 @@
+#Download remote sensing and survey data for site and year
+Rscript acquire_all_data.R -s RMNP -d C:/Users/tonyt/Documents/Research/final_data -y 2020
+Rscript acquire_all_data.R -s NIWO -d C:/Users/tonyt/Documents/Research/final_data -y 2020
+Rscript acquire_all_data.R -s HARV -d C:/Users/tonyt/Documents/Research/final_data -y 2019
+
+#Create 16 channel PCA images for HS scenes using CHM as a filter for canopy pixels
+python site_pca.py RMNP C:/Users/tonyt/Documents/Research/final_data
+python site_pca.py NIWO C:/Users/tonyt/Documents/Research/final_data
+python site_pca.py HARV C:/Users/tonyt/Documents/Research/final_data
