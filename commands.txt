@@ -12,3 +12,17 @@ Rscript find_tree_tops.R -s HARV -d C:/Users/tonyt/Documents/Research/final_data
 python site_pca.py RMNP C:/Users/tonyt/Documents/Research/final_data
 python site_pca.py NIWO C:/Users/tonyt/Documents/Research/final_data
 python site_pca.py HARV C:/Users/tonyt/Documents/Research/final_data
+
+#Filter and annotate data
+python annotation.py NIWO C:\Users\tonyt\Documents\Research\final_data EPSG:32613 filtering -a
+python annotation.py NIWO C:\Users\tonyt\Documents\Research\final_data EPSG:32613 snapping -a
+python annotation.py NIWO C:\Users\tonyt\Documents\Research\final_data EPSG:32613 scholl -a
+
+python annotation.py HARV C:\Users\tonyt\Documents\Research\final_data EPSG:32618 filtering -a
+python annotation.py HARV C:\Users\tonyt\Documents\Research\final_data EPSG:32618 snapping -a
+python annotation.py HARV C:\Users\tonyt\Documents\Research\final_data EPSG:32618 scholl -a
+
+python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 filtering -a
+python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 snapping -a
+python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 scholl -a
+

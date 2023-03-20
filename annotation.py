@@ -18,6 +18,7 @@ from skimage.color import rgb2hsv
 from skimage.transform import resize
 import argparse
 
+
 class Plot:
     def __init__(
         self,
@@ -301,7 +302,8 @@ class PlotBuilder:
         epsg: str,
         base_dir: str,
         completed_plots: list = [],
-        plot_hs_dif = False
+        plot_hs_dif = False,
+        min_taxa = 20,
         ):
         #Static Vars
         self.base_dir = os.path.join(base_dir, sitename)
@@ -313,12 +315,19 @@ class PlotBuilder:
         self.ttop_file = gpd.read_file(os.path.join(self.base_dir, f'{sitename}_tree_tops.gpkg'))
         self.rgb_tiles = TileSet(os.path.join(self.base_dir, "RGB"), epsg, '.tif', (-3, -2))
         temp_df = pd.read_csv(os.path.join(self.base_dir,f'{sitename}_woody_vegetation.csv'))
+        value_counts = temp_df["taxonID"].value_counts()
+        print(f'Loaded taxa survey information with the following taxa counts\n{value_counts}')
+        drop_taxa = '|'.join(list(value_counts[value_counts<min_taxa].index))
+        print(f'Dropping {drop_taxa} as they do not meet minimum taxa count of {min_taxa}')
+
+        temp_df = temp_df[~temp_df['taxonID'].str.contains(drop_taxa)]
         self.plot_data_file = gpd.GeoDataFrame(
                                 temp_df,
                                 crs= epsg,
                                 geometry=gpd.points_from_xy(temp_df['easting_tree'], temp_df['northing_tree'])
                                 ).sort_values(['easting_plot', 'northing_plot'])
-        print(f'Loaded taxa survey information with the following taxa counts\n{temp_df["taxonID"].value_counts()}')
+        
+        
         self.plot_data_file['chm_dif'] = self.plot_data_file['height'] - self.plot_data_file['chm_height']
         #Remove any where detected chm_height is 0
         #TODO: below and the above line calculating dif without abs should be in the R script instead
@@ -836,6 +845,8 @@ class TreePlotter:
 
 
 if __name__ == "__main__":
+    import warnings
+    warnings.filterwarnings('ignore')
     parser = argparse.ArgumentParser()
     parser.add_argument("sitename", help='NEON sitename, e.g. NIWO', type=str)
     parser.add_argument("basedir", help="Base directory storing all NEON data", type=str)
@@ -846,7 +857,9 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--automatic", help="perform automatic annotation",
                     action="store_true")
     parser.add_argument("--skip", help="Any plots from a study site you may want to skip, separated by spaces, eg. NIWO_057 NIWO_019", default="", type=str)
+    parser.add_argument("--min_taxa", help="Minimum number of examples of a taxa required to add to annotate", default=20, type=int)
     args = parser.parse_args()
+
 
     if len(args.skip) > 0:
         skips = args.skip.split(" ")
@@ -858,7 +871,8 @@ if __name__ == "__main__":
         sitename=args.sitename,
         epsg=args.epsg,
         base_dir=BASEDIR,
-        completed_plots=skips
+        completed_plots=skips,
+        min_taxa=args.min_taxa
     )
 
     for plot in pb.build_plots():
@@ -871,13 +885,13 @@ if __name__ == "__main__":
 
 
     # test = PlotBuilder(
-    #     sitename='NIWO',
+    #     sitename='HARV',
     #     epsg='EPSG:32613',
     #     base_dir=r'C:\Users\tonyt\Documents\Research\final_data'
     # )
 
     # niwo_57 = test.__build_plot__('NIWO_057')
     # niwo_57.find_trees('snapping')
-    # niwo_57.plot_before_and_after()
-    # niwo_57.manual_annotation()
-    # print('here')
+    # # niwo_57.plot_before_and_after()
+    # # niwo_57.manual_annotation()
+    # # print('here')
