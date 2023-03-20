@@ -198,13 +198,7 @@ class Tree:
         self.name = f"{plot_id}_{individual_id}_{taxa}"
 
     def make_hs_mask(self):
-        y_shape, x_shape = self.rgb_mask.shape[0]//10, self.rgb_mask.shape[1]//10
-        out = np.zeros((y_shape, x_shape), dtype=np.bool8)
-        for i in range(y_shape):
-            for j in range(x_shape):
-                subset = self.rgb_mask[i*10:(i+1)*10, j*10:(j+1)*10]
-                if subset.sum()>50:
-                    out[i, j] = True
+        out = np.zeros((self.hyperspectral.shape[0], self.hyperspectral.shape[1]), dtype=np.bool8)
         return out
     
     
@@ -229,6 +223,9 @@ class Tree:
         savedir = os.path.join(self.plot.base_dir, self.algo_type, self.anno_type, self.plot.name)
         if not os.path.exists(savedir):
             os.makedirs(savedir)
+
+        if self.anno_type == 'auto':
+            self.hyperspectral_mask = np.ones((self.hyperspectral.shape[0], self.hyperspectral.shape[1]), dtype=np.bool8)
         np.savez(os.path.join(savedir, self.name),
             hyperspectral = self.hyperspectral,
             rgb = self.rgb,
@@ -639,7 +636,7 @@ class TreeBuilderFiltering(TreeBuilderBase):
     def __init__(self, plot: Plot):
         super().__init__(plot)
         self.filtered_trees = self.filter_trees()
-        self.algo_type = 'distance_filtering'
+        self.algo_type = 'filtering'
 
     def filter_trees(self):
         #Filter for trees within 1.5 std of median difference between survey observed tree height and chm observed tree height
