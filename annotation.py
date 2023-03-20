@@ -317,10 +317,11 @@ class PlotBuilder:
         temp_df = pd.read_csv(os.path.join(self.base_dir,f'{sitename}_woody_vegetation.csv'))
         value_counts = temp_df["taxonID"].value_counts()
         print(f'Loaded taxa survey information with the following taxa counts\n{value_counts}')
-        drop_taxa = '|'.join(list(value_counts[value_counts<min_taxa].index))
-        print(f'Dropping {drop_taxa} as they do not meet minimum taxa count of {min_taxa}')
-
-        temp_df = temp_df[~temp_df['taxonID'].str.contains(drop_taxa)]
+        
+        if len(list(value_counts[value_counts<min_taxa].index)) > 0:
+            drop_taxa = '|'.join(list(value_counts[value_counts<min_taxa].index))
+            print(f'Dropping {drop_taxa} as they do not meet minimum taxa count of {min_taxa}')
+            temp_df = temp_df[~temp_df['taxonID'].str.contains(drop_taxa)]
         self.plot_data_file = gpd.GeoDataFrame(
                                 temp_df,
                                 crs= epsg,
