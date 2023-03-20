@@ -178,7 +178,7 @@ download_rs_products(sitename, veg_filtered, year)
 #Find the difference between the canopy height model and the observed height from ground survey
 veg_filtered <- get_chm_dif(veg_filtered)
 
-write.csv(veg_filtered, paste(sitename,year,"woody_vegetation.csv", sep="_"), row.names = FALSE)
+write.csv(veg_filtered, paste(sitename,"woody_vegetation.csv", sep="_"), row.names = FALSE)
 
 #Get treetops from canopy height model
 all_ttops <- get_ttops()

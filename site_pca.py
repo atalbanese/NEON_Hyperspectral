@@ -1,4 +1,4 @@
-from sklearn.decomposition import PCA, IncrementalPCA
+from sklearn.decomposition import IncrementalPCA
 import os
 from einops import rearrange
 import numpy as np
