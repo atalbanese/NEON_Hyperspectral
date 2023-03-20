@@ -883,16 +883,3 @@ if __name__ == "__main__":
         
         if args.automatic:
             plot.automatic_annotation()
-
-
-    # test = PlotBuilder(
-    #     sitename='HARV',
-    #     epsg='EPSG:32613',
-    #     base_dir=r'C:\Users\tonyt\Documents\Research\final_data'
-    # )
-
-    # niwo_57 = test.__build_plot__('NIWO_057')
-    # niwo_57.find_trees('snapping')
-    # # niwo_57.plot_before_and_after()
-    # # niwo_57.manual_annotation()
-    # # print('here')

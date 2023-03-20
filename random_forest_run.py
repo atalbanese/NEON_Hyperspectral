@@ -30,21 +30,10 @@ if __name__ == "__main__":
     for y in test_loader:
         pass
 
-    # pt_model = PreTrainingModel.load_from_checkpoint('/home/tony/thesis/pre_training_ckpts/pre_training_1.ckpt')
-    # enhanced = pt_model(x)
-
-    # inp = enhanced[~x['hs_pad_mask']].numpy()
-    # enhanced_y = pt_model(y)
-
-    # test_inp =enhanced_y[~y['hs_pad_mask']].numpy()
 
     test_inp = y['hs'][~y['hs_pad_mask']].numpy()
     inp = x['hs'][~x['hs_pad_mask']].numpy()
 
-    # pca = PCA(n_components=4, svd_solver='full')
-
-    # inp = pca.fit_transform(inp)
-    # test_inp = pca.transform(test_inp)
     targets = x['single_target'][~x['hs_pad_mask']].numpy()
 
     

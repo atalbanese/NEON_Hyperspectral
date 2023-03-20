@@ -18,6 +18,10 @@ class TreeData:
          taxa,
          plot_id, 
          site_id,
+         mpsi,
+         ndvi,
+         pca,
+         algo_type,
          file_loc
         ):
         self.hyperspectral = hyperspectral
@@ -26,7 +30,11 @@ class TreeData:
         self.hyperspectral_mask = hyperspectral_mask
         self.hyperspectral_bands = hyperspectral_bands
         self.chm = chm
+        self.ndvi = ndvi
+        self.mpsi = mpsi
+        self.pca = pca
         self.utm_origin = utm_origin
+        self.algo_type = algo_type
         self.taxa = str(taxa[()])
         self.plot_id = str(plot_id[()])
         self.site_id = str(site_id[()])
@@ -38,12 +46,6 @@ class TreeData:
             new_instance = cls(**data, file_loc=file_loc)
         return new_instance
 
-    def apply_hs_filter(self, hs_filter):
-        # hs_filter should be a list of [min, max]
-        mask_list = [(self.hyperspectral_bands>=lmin) & (self.hyperspectral_bands<=lmax) for lmin, lmax in hs_filter]
-        band_mask = np.logical_or.reduce(mask_list)
-        idxs = np.where(band_mask)[0]
-        self.hyperspectral = self.hyperspectral[:,:,idxs]
 
     def pad_arr(self, arr, out_dim):
         three_d = len(arr.shape) == 3
@@ -60,24 +62,31 @@ class TreeData:
                 return np.pad(arr, [(0,y_pad), (0,x_pad)])
 
 
-    def get_dict(self, choices, out_dim, hs_filter = None):
+    def get_dict(self, choices, out_dim):
         return_dict = dict()
-
-        if hs_filter is not None:
-            self.apply_hs_filter(hs_filter)
-        
+       
         if "hs" in choices:
             return_dict['hs'] = self.pad_arr(self.hyperspectral, out_dim)
             return_dict['hs_mask'] = self.pad_arr(self.hyperspectral_mask, out_dim)
         
         if "chm" in choices:
-            return_dict['chm'] = self.chm
+            return_dict['chm'] = self.pad_arr(self.chm, out_dim)
         
         if "rgb" in choices:
             return_dict["rgb"] = self.rgb
         
         if "origin" in choices:
             return_dict["utm_origin"] = self.utm_origin
+
+        if "mpsi" in choices:
+            return_dict['mpsi'] = self.pad_arr(self.mpsi, out_dim)
+
+        if "pca" in choices:
+            return_dict['pca'] = self.pad_arr(self.pca, out_dim)
+        
+        if "ndvi" in choices:
+            return_dict['ndvi'] = self.pad_arr(self.ndvi, out_dim)
+
         
         return_dict['taxa'] = self.taxa
 
@@ -298,15 +307,14 @@ class SiteData:
         return solutions_dict
 
     def get_data(self, 
-        data_selection: Literal["training", "testing", "validation", "training and validation" "all"], 
+        data_selection: Literal["training", "testing", "validation", "training and validation", "all"], 
         data_choices, 
         out_dim, 
-        hs_filter=[[410,1357],[1400,1800],[1965,2485]], 
         make_key=False):
         working_data = self.select_working_data(data_selection)
         data_list = []
         for tree in working_data:
-            to_append = tree.get_dict(data_choices, out_dim, hs_filter)
+            to_append = tree.get_dict(data_choices, out_dim)
             if make_key:
                 to_append['target_arr'] = self.make_key(tree, out_dim)
                 to_append['single_target'] = np.array(self.key[tree.taxa], dtype=np.float32)
@@ -343,7 +351,6 @@ if __name__ == "__main__":
         test= 0.1,
         valid = 0.3)
 
-    #test.all_trees[0].apply_hs_filter([[410,1357],[1400,1800],[1965,2490]])
 
     test.make_splits('plot_level')
     for x in test.get_data('training', ['hs', 'chm', 'rgb', 'origin'], 16, make_key=True):
