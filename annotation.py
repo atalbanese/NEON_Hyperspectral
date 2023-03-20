@@ -15,6 +15,7 @@ from skimage.segmentation import watershed, mark_boundaries
 from skimage.color import rgb2gray
 from skimage.filters import sobel
 from skimage.color import rgb2hsv
+from skimage.transform import resize
 import argparse
 
 class Plot:
@@ -69,10 +70,10 @@ class Plot:
         
         if algorithm == 'snapping':
             #This will modifiy some of the data in this object as well. They are intertwined like the forest and the sky
-            #TODO: make them less intertwined
+            #TODO: make them less intertwined?
             tree_builder = TreeBuilderSnapping(self)
-            if len(tree_builder.canopy_segments) >0:
-                self.identified_trees = tree_builder.build_trees()
+
+            self.identified_trees = tree_builder.build_trees()
         
         if algorithm == 'scholl':
             tree_builder = TreeBuilderScholl(self)
@@ -191,6 +192,8 @@ class Tree:
         self.mpsi, self.ndvi = self.gather_filters()
         self.pca = pca
 
+        self.anno_type = 'auto'
+
         self.name = f"{plot_id}_{individual_id}_{taxa}"
 
     def make_hs_mask(self):
@@ -203,10 +206,6 @@ class Tree:
                     out[i, j] = True
         return out
     
-    def clean_label_mask(self):
-        self.old_rgb_mask = self.rgb_mask
-        self.rgb_mask = morphology.remove_small_objects(morphology.erosion(self.rgb_mask), min_size=225)
-        self.hyperspectral_mask = self.make_hs_mask()
     
     def gather_filters(self):
 
@@ -226,7 +225,7 @@ class Tree:
 
     
     def save(self):
-        savedir = os.path.join(self.plot.base_dir, self.algo_type, self.plot.name)
+        savedir = os.path.join(self.plot.base_dir, self.algo_type, self.anno_type, self.plot.name)
         if not os.path.exists(savedir):
             os.makedirs(savedir)
         np.savez(os.path.join(savedir, self.name),
@@ -344,6 +343,7 @@ class PlotBuilder:
 
         #TODO: finish this
         pass
+    
     def build_plots(self):
         for plot_id in self.all_plot_ids:
             yield self.__build_plot__(plot_id)
@@ -532,53 +532,10 @@ class PlotBuilder:
         return tileset.tile_gdf.clip(bbox).sort_values(['file_west_bound', 'file_north_bound'])
 
 
-class CanopySegment:
-    def __init__(
-        self,
-        bbox: np.ndarray,
-        affine,
-        epsg,
-        original_index
-    ):
-
-        self.x_min, self.y_min, self.x_max, self.y_max = self.get_bounds(bbox)
-        self.epsg = epsg
-        self.ttop_index = original_index - 1
-        #Origin = upper left, row-col
-        #Anything local is y-x
-        #Anything utm is x-y
-        #If only there was some way to standardize this!
-        self.local_origin = self.y_min, self.x_min
-
-        self.utm_origin = affine.xy(*self.local_origin)
-        self.utm_x_min, self.utm_y_min = affine.xy(self.y_min, self.x_min)
-        self.utm_x_max, self.utm_y_max = affine.xy(self.y_max, self.x_max)
-
-    def get_bounds(self, bbox: np.ndarray):
-        bbox_min = bbox.min(0)
-        bbox_max = bbox.max(0)
-
-        return bbox_min[1], bbox_min[0], bbox_max[1], bbox_max[0]
-    
-    def to_polygon(self):
-        return shapely.box(self.utm_x_min, self.utm_y_min, self.utm_x_max, self.utm_y_max)
-
-    def to_dict(self):
-        return {'properties':{
-                    'ttop_index': self.ttop_index,
-                    'epsg': self.epsg,
-                    'utm_origin': self.utm_origin,
-                    'local_x_min': self.x_min,
-                    'local_y_min': self.y_min,
-                    'local_x_max': self.x_max,
-                    'local_y_max': self.y_max
-                }, 
-                'geometry': self.to_polygon()}
-
 class TreeBuilderBase:
     def __init__(self, plot:Plot):
         self.plot = plot
-        self.filtered_trees = self.filter_trees()
+        self.filtered_trees = self.plot.potential_trees
         self.algo_type = 'none'
     
     def filter_trees(self) -> gpd.GeoDataFrame:
@@ -682,7 +639,7 @@ class TreeBuilderFiltering(TreeBuilderBase):
         #Grab upper triangle of distance matrix since dist mat is symmetrical
         upper_tri = dist_matrix[np.triu_indices_from(dist_matrix, k=1)]
         #Find a distance threshold for trees that might be too close together
-        thresh = upper_tri.median() - upper_tri.std()*1.5
+        thresh = np.median(upper_tri) - upper_tri.std()*1.5
         #Get index pairs where trees are suspiciously close
         #Sort + Set to remove redundant pairs i.e. (12, 14) and (14, 12) and identical pairs
         sus_indexes = set(tuple(sorted(x)) for x in np.argwhere(dist_matrix<thresh) if x[0] != x[1])
@@ -701,103 +658,22 @@ class TreeBuilderFiltering(TreeBuilderBase):
         return filtered_trees
 
 
-class TreeBuilderSnapping:
+class TreeBuilderSnapping(TreeBuilderBase):
     def __init__(self, plot: Plot):
-        self.plot = plot
-        #Find visible canopies using watershed segmentation + lidar treetops locations
-        self.canopy_segments, self.labelled_plot = self.segment_canopy()
-        if len(self.canopy_segments) > 0: 
-            #Make geodataframe of segment bounding boxes
-            self.canopy_segments_gdf = gpd.GeoDataFrame.from_features([cs.to_dict() for cs in self.canopy_segments])
-
-            #Drop any tree tops that didn't match visible trees
-            self.plot.drop_ttops(self.canopy_segments_gdf['ttop_index'])
-            self.tree_crown_pairs = self.identify_trees()
-            #self.labelled_trees = self.build_trees()
+        super().__init__(plot)
+        self.algo_type = 'snapping'
+        self.tree_crown_pairs = self.identify_trees()        
+        self.filtered_trees = self.filter_trees()
     
-    def build_trees(self):
-        trees = []
-        #For each tree crown pair, assemble all data into Tree object
+    def filter_trees(self):
+        filtered_trees = self.plot.potential_trees.loc[list(self.tree_crown_pairs.keys())]
+        #For each tree crown pair, snap survey geometry to chm geometry
         for tree_idx, crown_idx in self.tree_crown_pairs.items():
-            selected_tree = self.plot.potential_trees.loc[tree_idx]
-            selected_crown = self.canopy_segments_gdf.loc[self.canopy_segments_gdf['ttop_index'] == crown_idx]
+            filtered_trees.loc[tree_idx, ('easting_tree')] = self.plot.tree_tops.loc[crown_idx].geometry.x
+            filtered_trees.loc[tree_idx, ('northing_tree')] = self.plot.tree_tops.loc[crown_idx].geometry.y
 
-            taxa = selected_tree.taxonID
-            plot_id = selected_tree.plotID
-            individual_id = selected_tree.individualID
-            site_id = self.plot.siteID
-
-            local_y_min, local_y_max = int(selected_crown.local_y_min), int(selected_crown.local_y_max)
-            local_x_min, local_x_max = int(selected_crown.local_x_min), int(selected_crown.local_x_max)
-
-            rgb = self.plot.rgb[local_y_min:local_y_max, local_x_min:local_x_max,...]
-            chm = self.plot.canopy_height_model[local_y_min:local_y_max, local_x_min:local_x_max,...]
-
-            label_subset = self.labelled_plot[local_y_min:local_y_max, local_x_min:local_x_max,...]
-            label_mask = label_subset == crown_idx +1
-
-            hs_x_min, hs_y_min = math.floor(local_x_min/10), math.floor(local_y_min/10)
-            hs_x_max, hs_y_max = math.ceil(local_x_max/10), math.ceil(local_y_max/10)
-
-            x_left_pad, x_right_pad = local_x_min-(hs_x_min*10), (hs_x_max*10) - local_x_max
-            y_up_pad, y_down_pad = local_y_min - (hs_y_min*10), (hs_y_max*10) - local_y_max 
-
-            rgb_mask = np.pad(label_mask, ((y_up_pad, y_down_pad), (x_left_pad, x_right_pad)))
-            chm = np.pad(chm, ((y_up_pad, y_down_pad), (x_left_pad, x_right_pad)))
-            rgb = np.pad(rgb, ((y_up_pad, y_down_pad), (x_left_pad, x_right_pad), (0,0)))
-
-            hs = self.plot.hyperspectral[hs_y_min:hs_y_max, hs_x_min:hs_x_max, ...]
-            hs_bands = self.plot.hyperspectral_bands
-            
-            #Fix origin to account for padding
-            #0 is y, 1 is x
-            utm_origin = selected_crown.utm_origin.iat[0]
-            utm_origin = utm_origin[0] + y_up_pad*.1, utm_origin[1] - x_left_pad*.1
-            
-
-            new_tree = Tree(
-                hyperspectral=hs,
-                rgb=rgb,
-                rgb_mask=rgb_mask,
-                hyperspectral_bands=hs_bands,
-                chm=chm,
-                site_id=site_id,
-                plot_id=plot_id,
-                utm_origin=utm_origin,
-                individual_id=individual_id,
-                taxa=taxa,
-                plot=self.plot,
-                algo_type="snapping"
-            )
-            trees.append(new_tree)
-
-
-        return trees
-    
-
-
-    def segment_canopy(self):
-        mask = self.plot.canopy_height_model>2
-
-        mask = morphology.remove_small_holes(mask)
-        mask = morphology.remove_small_objects(mask)
-
-        markers = np.zeros(self.plot.rgb.shape[0:2], dtype=np.int32)
-        for ix, rowcol in enumerate(self.plot.tree_tops_local):
-            #Zero means not a marker so we add 1
-            markers[rowcol] = ix + 1
-
-        labelled = watershed(sobel(rgb2gray(self.plot.rgb)), markers=markers, mask=mask, compactness=0.01)
-        #TODO: downsample this to work with 1m chm
-
-        canopy_segs = []
-        for ix in np.unique(labelled):
-            if ix == 0:
-                continue
-            bbox = np.argwhere(labelled == ix)
-            canopy_segs.append(CanopySegment(bbox, self.plot.cm_affine, self.plot.epsg, ix))
-
-        return canopy_segs, labelled
+        self.plot.filtered_trees = filtered_trees
+        return filtered_trees
     
     def identify_trees(self, search_buffer = 3, max_search = 10):
         tree_skip_list = set()
@@ -861,6 +737,9 @@ class TreePlotter:
         #save_size: int
     ):
         self.tree = tree
+        self.tree.rgb_mask = ~self.tree.rgb_mask
+        self.tree.hyperspectral_mask = self.tree.make_hs_mask()
+        self.tree.old_rgb_mask = self.tree.rgb_mask
         #self.save_size = save_size
 
         self.fig, self.axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 5))
@@ -868,35 +747,33 @@ class TreePlotter:
         self.rgb_ax = self.axes[1]
         self.big_rgb_ax = self.axes[2]
 
-        self.hs_ax.set_title('1m Hyperspectral Mask')
-        self.rgb_ax.set_title('10cm RGB')
-        self.big_rgb_ax.set_title('Full Plot')
-        self.draw_big_rgb()
-
         self.rgb_ticks_x = np.arange(0, self.tree.rgb.shape[1], 10)
         self.rgb_ticks_y = np.arange(0, self.tree.rgb.shape[0], 10)
 
         self.hs_im = self.draw_hs()
         self.rgb_im = self.draw_rgb()
+        self.draw_big_rgb()
+
+        self.hs_ax.set_title('1m Hyperspectral Mask')
+        self.rgb_ax.set_title('10cm RGB')
+        self.big_rgb_ax.set_title('Full Plot')
 
         self.fig.canvas.mpl_connect('key_press_event', self.on_press)
         self.fig.canvas.mpl_connect('pick_event', self.on_click)
-        self.fig.suptitle("A = Accept and Save | R = Reject | C = Clean Up | V = Revert\nClick to toggle pixels")
+        self.fig.suptitle("A = Accept and Save | R = Reject | V = Reset Mask | S = Save Figure\nClick to toggle pixels")
         self.fig.supxlabel(tree.name)
 
         plt.show()
-        print('here')
-        
+
     def on_press(self, event):
         #print('press')
-        if event.key == 'c':
-            self.tree.clean_label_mask()
-            self.update()
         if event.key == 'v':
             self.tree.go_back_to_old_mask()
             self.update()
         if event.key == 'a':
+            self.tree.anno_type = 'manual'
             self.tree.save()
+            self.tree.anno_type = 'auto'
             plt.close()
         if event.key == 'r':
             plt.close()
@@ -917,6 +794,8 @@ class TreePlotter:
         self.rgb_ax.clear()
         self.draw_hs()
         self.draw_rgb()
+        self.hs_ax.set_title('1m Hyperspectral Mask')
+        self.rgb_ax.set_title('10cm RGB')
         self.hs_im.axes.figure.canvas.draw()
         self.rgb_im.axes.figure.canvas.draw()
 
@@ -955,58 +834,50 @@ class TreePlotter:
         y_loc = math.floor(event.mouseevent.ydata/10)
         self.tree.hyperspectral_mask[y_loc, x_loc] = ~self.tree.hyperspectral_mask[y_loc, x_loc]
 
-    
-def annotate_all(**kwargs):
-    pb = PlotBuilder(**kwargs)
-    for plot in pb.build_plots():
-        pass
-        #plot.chm_filter()
-        #plot.find_trees()
-        #plot.plot_and_check_trees()
-
-    
-
 
 if __name__ == "__main__":
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument("-s", "--sitename", help='NEON sitename, e.g. NIWO')
-    # parser.add_argument("-b", "--basedir", help="Base directory storing all NEON data")
-    # parser.add_argument("-e", "--epsg", help='EPSG code, e.g EPSG:32613')
-    # parser.add_argument("-algo", help="Tree selection algorithm to use. One of: filtering, snapping, scholl")
-    # parser.add_argument("-m", "--manual", help="perform manual annotation",
-    #                 action="store_true")
-    # parser.add_argument("-a", "--automatic", help="perform automatic annotation",
-    #                 action="store_true")
-    # parser.add_argument("--skip-plots", help="Any plots from a study site you may want to skip, separated by spaces, eg. NIWO_057 NIWO_019")
-    # parser.add_argument()
-    # args = parser.parse_args()
-    #TODO: Implement parser to run these commands
-        #Sitename
-        #Basedir
-        #Annotation Style
-        #Completed plots
+    parser = argparse.ArgumentParser()
+    parser.add_argument("sitename", help='NEON sitename, e.g. NIWO', type=str)
+    parser.add_argument("basedir", help="Base directory storing all NEON data", type=str)
+    parser.add_argument("epsg", help='EPSG code, e.g EPSG:32613', type=str)
+    parser.add_argument("algo", help="Tree selection algorithm to use. One of: filtering, snapping, scholl", type=str)
+    parser.add_argument("-m", "--manual", help="perform manual annotation",
+                    action="store_true")
+    parser.add_argument("-a", "--automatic", help="perform automatic annotation",
+                    action="store_true")
+    parser.add_argument("--skip", help="Any plots from a study site you may want to skip, separated by spaces, eg. NIWO_057 NIWO_019", default="", type=str)
+    args = parser.parse_args()
 
-    test = PlotBuilder(
-        sitename='NIWO',
-        epsg='EPSG:32613',
-        base_dir=r'C:\Users\tonyt\Documents\Research\final_data'
+    if len(args.skip) > 0:
+        skips = args.skip.split(" ")
+    else: 
+        skips = []
+
+    BASEDIR = fr"{args.basedir}"
+    pb = PlotBuilder(
+        sitename=args.sitename,
+        epsg=args.epsg,
+        base_dir=BASEDIR,
+        completed_plots=skips
     )
 
-    niwo_57 = test.__build_plot__('NIWO_057')
-    niwo_57.find_trees('scholl')
-    niwo_57.plot_before_and_after()
-    niwo_57.automatic_annotation()
-    print('here')
-    
+    for plot in pb.build_plots():
+        plot.find_trees(args.algo)
+        if args.manual:
+            plot.manual_annotation()
+        
+        if args.automatic:
+            plot.automatic_annotation()
 
-    # annotate_all(
-    #     completed_plots = ['NIWO_001', 'NIWO_002', 'NIWO_004', 'NIWO_005', 'NIWO_007', 'NIWO_009', 'NIWO_010', 'NIWO_011', 'NIWO_012', 'NIWO_014', 'NIWO_015', 'NIWO_016', 'NIWO_017', 'NIWO_041'],
-    #     sitename = "NIWO",
-    #     h5_files= 'W:/Classes/Research/datasets/hs/original/NEON.D13.NIWO.DP3.30006.001.2020-08.basic.20220516T164957Z.RELEASE-2022',
-    #     chm_files= 'C:/Users/tonyt/Documents/Research/datasets/chm/niwo_valid_sites_test',
-    #     ttop_files = "C:/Users/tonyt/Documents/Research/datasets/niwo_tree_tops",
-    #     tree_data_file= 'C:/Users/tonyt/Documents/Research/datasets/tree_locations/NIWO_by_me.geojson',
-    #     rgb_files =  r'C:\Users\tonyt\Documents\Research\datasets\rgb\NEON.D13.NIWO.DP3.30010.001.2020-08.basic.20220814T183511Z.RELEASE-2022',
+
+    # test = PlotBuilder(
+    #     sitename='NIWO',
     #     epsg='EPSG:32613',
-    #     base_dir=r'C:\Users\tonyt\Documents\Research\thesis_final'
-    #     )
+    #     base_dir=r'C:\Users\tonyt\Documents\Research\final_data'
+    # )
+
+    # niwo_57 = test.__build_plot__('NIWO_057')
+    # niwo_57.find_trees('snapping')
+    # niwo_57.plot_before_and_after()
+    # niwo_57.manual_annotation()
+    # print('here')
