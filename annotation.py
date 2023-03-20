@@ -33,10 +33,12 @@ class Plot:
         base_dir: str,
         name: str,
         sitename: str,
-        chm_dif_std: float
+        chm_dif_std: float,
+        chm_dif_med: float
     ):
         self.name = name
         self.chm_dif_std = chm_dif_std
+        self.chm_dif_med = chm_dif_med
         self.sitename = sitename
         self.base_dir = base_dir
         self.epsg = epsg
@@ -81,12 +83,14 @@ class Plot:
             self.identified_trees = tree_builder.build_trees()
 
     def manual_annotation(self):
-        for tree in self.identified_trees:
-            tp = TreePlotter(tree)
+        if len(self.identified_trees)>0:
+            for tree in self.identified_trees:
+                tp = TreePlotter(tree)
 
     def automatic_annotation(self):
-        for tree in self.identified_trees:
-            tree.save()
+        if len(self.identified_trees)>0:
+            for tree in self.identified_trees:
+                tree.save()
 
     def find_nearest(self, search_val):
         diff_arr = np.absolute(self.hyperspectral_bands-search_val)
@@ -139,7 +143,7 @@ class Plot:
         #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
         ax[0].get_xaxis().set_visible(False)
         ax[0].get_yaxis().set_visible(False)
-        ax[0].scatter(*self.tree_tops_local_cm, c='blue')
+        #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
 
         ax[1].imshow(self.rgb)
         ax[1].set_title('Tree Locations After Filtering')
@@ -147,7 +151,7 @@ class Plot:
         #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
         ax[1].get_xaxis().set_visible(False)
         ax[1].get_yaxis().set_visible(False)
-        ax[1].scatter(*self.tree_tops_local_cm, c='blue')
+        #ax[1].scatter(*self.tree_tops_local_cm, c='blue')
 
         plt.show()
 
@@ -315,12 +319,17 @@ class PlotBuilder:
                                 crs= epsg,
                                 geometry=gpd.points_from_xy(temp_df['easting_tree'], temp_df['northing_tree'])
                                 ).sort_values(['easting_plot', 'northing_plot'])
-        print(f'loaded species information with the following species counts\n{temp_df["taxonID"].value_counts()}')
-        
+        print(f'Loaded taxa survey information with the following taxa counts\n{temp_df["taxonID"].value_counts()}')
+        self.plot_data_file['chm_dif'] = self.plot_data_file['height'] - self.plot_data_file['chm_height']
+        #Remove any where detected chm_height is 0
+        #TODO: below and the above line calculating dif without abs should be in the R script instead
+        #self.plot_data_file = self.plot_data_file.loc[self.plot_data_file['chm_height'] >= 2]
+
         self.all_plot_ids = sorted(list(set(np.unique(self.plot_data_file.plotID)) - set(completed_plots)))
         self.hs_filters = [[410,1320],[1450,1800],[2050,2485]]
         self.plot_hs_dif = plot_hs_dif
         self.chm_dif_std = self.plot_data_file['chm_dif'].std()
+        self.chm_dif_med = self.plot_data_file['chm_dif'].median()
 
     def get_hs_filter(self, bands):
         # hs_filter should be a list of [min, max]
@@ -329,6 +338,12 @@ class PlotBuilder:
         idxs = np.where(band_mask)[0]
         return idxs
 
+    def plot_before_and_after_height_filter(self):
+
+        filtered = self.plot_data_file.loc[(self.plot_data_file.chm_dif > (self.chm_dif_med-self.chm_dif_std*1.5)) & (self.plot_data_file.chm_dif < (self.chm_dif_med + self.chm_dif_std*1.5))]
+
+        #TODO: finish this
+        pass
     def build_plots(self):
         for plot_id in self.all_plot_ids:
             yield self.__build_plot__(plot_id)
@@ -381,7 +396,8 @@ class PlotBuilder:
             base_dir= self.base_dir,
             name = plot_id,
             sitename=self.sitename,
-            chm_dif_std=self.chm_dif_std
+            chm_dif_std=self.chm_dif_std,
+            chm_dif_med = self.chm_dif_med
         )
 
 
@@ -559,44 +575,16 @@ class CanopySegment:
                 }, 
                 'geometry': self.to_polygon()}
 
-class TreeBuilderScholl:
-    def __init__(self, plot: Plot):
-        self.plot = plot
-
-
-class TreeBuilderFiltering:
-    def __init__(self, plot: Plot):
+class TreeBuilderBase:
+    def __init__(self, plot:Plot):
         self.plot = plot
         self.filtered_trees = self.filter_trees()
-
-    def filter_trees(self) -> gpd.GeoDataFrame:
-        return self.plot.potential_trees.loc[self.plot.potential_trees['chm_dif']<self.plot.chm_dif_std].reset_index(drop=True)
-        #return self.plot.potential_trees.reset_index(drop=True)
+        self.algo_type = 'none'
     
-    def remove_close_trees(self):
-        dist_matrix = self.filtered_trees.geometry.apply(lambda g: self.filtered_trees.distance(g)).to_numpy()
-        upper_tri = dist_matrix[np.triu_indices_from(dist_matrix, k=1)]
-        thresh = upper_tri.mean() - upper_tri.std()*1.5
-        #Get index pairs where trees are suspiciously close
-        sus_indexes = set(tuple(sorted(x)) for x in np.argwhere(dist_matrix<thresh))
-        to_drop = list()
-        for sus in sus_indexes:
-            if sus[0] == sus[1]:
-                continue
-
-            height_0 = self.filtered_trees.loc[sus[0]]['chm_height']
-            height_1 = self.filtered_trees.loc[sus[1]]['chm_height']
-
-            to_add = sus[0] if height_1>=height_0 else sus[1]
-            to_drop.append(to_add)
-
-        to_drop = set(to_drop)
-        self.filtered_trees = self.filtered_trees.drop(to_drop).reset_index(drop=True)
-        self.plot.filtered_trees = self.filtered_trees
-
-
+    def filter_trees(self) -> gpd.GeoDataFrame:
+        return self.plot.potential_trees
+    
     def build_trees(self):
-        self.remove_close_trees()
         trees = list()
         for ix, tree in self.filtered_trees.iterrows():
             taxa = tree.taxonID
@@ -611,6 +599,7 @@ class TreeBuilderFiltering:
             m_buffer = 2
             cm_buffer = 20
 
+            #Clipping square pixels to a circular buffer works poorly so we just take a 4x4 square which contains the central pixel
             y_m_min, y_m_max, x_m_min, x_m_max = m_loc[0] - m_buffer, m_loc[0]+m_buffer, m_loc[1]-m_buffer, m_loc[1]+m_buffer
             y_cm_min, y_cm_max, x_cm_min, x_cm_max = cm_loc[0] - cm_buffer, cm_loc[0]+cm_buffer, cm_loc[1]-cm_buffer, cm_loc[1]+cm_buffer
             utm_origin = tree.easting_tree - m_buffer, tree.northing_tree + m_buffer
@@ -635,12 +624,82 @@ class TreeBuilderFiltering:
                 individual_id=individual_id,
                 taxa=taxa,
                 plot=self.plot,
-                algo_type="distance_filtering",
+                algo_type=self.algo_type,
                 pca=pca
             )
             trees.append(new_tree)
 
         return trees
+
+class TreeBuilderScholl(TreeBuilderBase):
+    def __init__(self, plot: Plot):
+        super().__init__(plot)
+        self.filtered_trees = self.filter_trees()
+        self.algo_type = 'scholl'
+
+    def filter_trees(self):
+        #Needs crown diameter so we drop any rows where crown diameter is NA
+        filtered_trees = self.plot.potential_trees.loc[self.plot.potential_trees.ninetyCrownDiameter == self.plot.potential_trees.ninetyCrownDiameter]
+
+        #Make Crown geometry
+        filtered_trees['crowns'] = filtered_trees.geometry.buffer(filtered_trees.ninetyCrownDiameter/2)
+        #Filtering for crowns bigger than 2 sq m
+        #TODO: check if this is in the scholl paper or an artifact from my old code
+        filtered_trees = filtered_trees.loc[filtered_trees.crowns.area > 2]
+        to_drop = set()
+        
+        
+        for ix, row in filtered_trees.iterrows():
+            #Get list of trees without current tree
+            working_copy = filtered_trees.loc[filtered_trees.index != ix]
+            #See if current tree is fully contained by any higher trees
+            coverage = working_copy.crowns.contains(row.crowns)
+            cover_gdf = working_copy.loc[coverage]
+            if (cover_gdf['height']>row['height']).sum() > 0:
+                to_drop.add(ix)
+            #See if current tree intersects with any higher trees
+            intersect = working_copy.crowns.intersects(row.crowns)
+            inter_gdf = working_copy.loc[intersect]
+            if (inter_gdf['height']>row['height']).sum() > 0:
+                to_drop.add(ix)
+
+        filtered_trees =  filtered_trees.drop(to_drop).reset_index(drop=True)
+        self.plot.filtered_trees = filtered_trees
+        return filtered_trees
+
+
+class TreeBuilderFiltering(TreeBuilderBase):
+    def __init__(self, plot: Plot):
+        super().__init__(plot)
+        self.filtered_trees = self.filter_trees()
+        self.algo_type = 'distance_filtering'
+
+    def filter_trees(self):
+        #Filter for trees within 1.5 std of median difference between survey observed tree height and chm observed tree height
+        filtered_trees = self.plot.potential_trees.loc[(self.plot.potential_trees.chm_dif > (self.plot.chm_dif_med-self.plot.chm_dif_std*1.5)) & (self.plot.potential_trees.chm_dif < (self.plot.chm_dif_med + self.plot.chm_dif_std*1.5))].reset_index(drop=True)
+        #Calculate distance matrix between all trees
+        dist_matrix = filtered_trees.geometry.apply(lambda g: filtered_trees.distance(g)).to_numpy()
+        #Grab upper triangle of distance matrix since dist mat is symmetrical
+        upper_tri = dist_matrix[np.triu_indices_from(dist_matrix, k=1)]
+        #Find a distance threshold for trees that might be too close together
+        thresh = upper_tri.median() - upper_tri.std()*1.5
+        #Get index pairs where trees are suspiciously close
+        #Sort + Set to remove redundant pairs i.e. (12, 14) and (14, 12) and identical pairs
+        sus_indexes = set(tuple(sorted(x)) for x in np.argwhere(dist_matrix<thresh) if x[0] != x[1])
+        to_drop = list()
+        for sus in sus_indexes:
+
+            height_0 = filtered_trees.loc[sus[0]]['height']
+            height_1 = filtered_trees.loc[sus[1]]['height']
+            #When two trees are very close, pick the higher one as observed from ground survey (not chm for consistency with scholl), drop the shorter one
+            to_add = sus[0] if height_1>=height_0 else sus[1]
+            to_drop.append(to_add)
+
+        to_drop = set(to_drop)
+        filtered_trees = filtered_trees.drop(to_drop).reset_index(drop=True)
+        self.plot.filtered_trees = filtered_trees
+        return filtered_trees
+
 
 class TreeBuilderSnapping:
     def __init__(self, plot: Plot):
@@ -649,7 +708,6 @@ class TreeBuilderSnapping:
         self.canopy_segments, self.labelled_plot = self.segment_canopy()
         if len(self.canopy_segments) > 0: 
             #Make geodataframe of segment bounding boxes
-            #Need to get actual label geometry in here somehow
             self.canopy_segments_gdf = gpd.GeoDataFrame.from_features([cs.to_dict() for cs in self.canopy_segments])
 
             #Drop any tree tops that didn't match visible trees
@@ -667,7 +725,7 @@ class TreeBuilderSnapping:
             taxa = selected_tree.taxonID
             plot_id = selected_tree.plotID
             individual_id = selected_tree.individualID
-            site_id = selected_tree.siteID
+            site_id = self.plot.siteID
 
             local_y_min, local_y_max = int(selected_crown.local_y_min), int(selected_crown.local_y_max)
             local_x_min, local_x_max = int(selected_crown.local_x_min), int(selected_crown.local_x_max)
@@ -721,7 +779,6 @@ class TreeBuilderSnapping:
     def segment_canopy(self):
         mask = self.plot.canopy_height_model>2
 
-        #CAN ALSO TRY SCIPY METHODS HERE
         mask = morphology.remove_small_holes(mask)
         mask = morphology.remove_small_objects(mask)
 
@@ -773,8 +830,6 @@ class TreeBuilderSnapping:
         
         return labelled_pairs
         
-        print('here')
-                
 
     #Find the closest tree top/crown pair based on distance to potential labelled tree
     def find_best_crown(self, tree, search_buffer, selected_crowns):
@@ -938,7 +993,7 @@ if __name__ == "__main__":
     )
 
     niwo_57 = test.__build_plot__('NIWO_057')
-    niwo_57.find_trees('filtering')
+    niwo_57.find_trees('scholl')
     niwo_57.plot_before_and_after()
     niwo_57.automatic_annotation()
     print('here')
