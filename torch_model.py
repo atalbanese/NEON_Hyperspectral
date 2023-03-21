@@ -3,6 +3,7 @@ import torch
 import pytorch_lightning as pl
 import numpy as np
 import math
+from einops import rearrange
 
 class PositionalEncoding(torch.nn.Module):
 
@@ -73,7 +74,8 @@ class SimpleTransformer(pl.LightningModule):
 
     def calc_ova(self, x, target):
         predicted = torch.argmax(x, dim=1)
-        expected = torch.argmax(target, dim=1)
+        #expected = torch.argmax(target, dim=1)
+        expected = target
 
         conf_matrix = np.zeros((len(self.classes.keys()), len(self.classes.keys())), dtype=np.int32)
         #conf_matrix is: rows-predicted, columns-expected
@@ -90,10 +92,11 @@ class SimpleTransformer(pl.LightningModule):
     def forward(self, batch, softmax = False):
         inp = batch['input']
         pad_mask= batch['pad_mask']
-        target = batch['target']
+        target = rearrange(batch['target'], 'b p -> (b p)')
 
         x = self.encoder(inp, src_key_padding_mask = pad_mask)
         x = self.decoder(x)
+        x = rearrange(x, 'b p c -> (b p) c')
         if softmax:
             x = torch.nn.functional.softmax(x, 1)
         return x, target

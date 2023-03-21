@@ -33,3 +33,4 @@ old_tuning_logs/*
 trial_logs/*
 tuning_logs/*
 trial_runs/*
+experiment_logs*

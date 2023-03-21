@@ -74,8 +74,8 @@ class PCATreeDataSet(BaseTreeDataSet):
         pad_mask = item['pca_pad_mask']
 
         out['input'] = torch.from_numpy(pca).float()
-        out['target'] = torch.from_numpy(target).float()
-        out['pad_mask'] = torch.from_numpy(pad_mask).float()
+        out['target'] = torch.from_numpy(target).long()
+        out['pad_mask'] = torch.from_numpy(pad_mask).bool()
 
         return out
     

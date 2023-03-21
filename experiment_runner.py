@@ -200,6 +200,7 @@ class Experiment:
 
     def mask_data(self):
         for dset in [self.training, self.testing, self.validation]:
+            
             for ix, tree in enumerate(dset):
                 chm_mask = tree['chm'] > 1.99
 
