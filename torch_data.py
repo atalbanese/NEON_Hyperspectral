@@ -34,20 +34,14 @@ class BaseTreeDataSet(Dataset):
         if "block" in augments_list:
             augs = augs + [Block()]
         if "normalize" in augments_list:
-            augs = augs + [NormalizeHS(torch.from_numpy(stats['mean']), torch.from_numpy(stats['std']))]
+            augs = augs + [NormalizeHS(torch.from_numpy(stats['mean']).float(), torch.from_numpy(stats['std']).float())]
         
         return augs
 
-    def handle_masking(self, arr, mask):
-        if arr.shape[0] == mask.shape[0] and arr.shape[1] == mask.shape[1]:
-            arr = arr[mask]
-        return arr
     
     def handle_transforms(self, arr):
         if self.transforms is not None:
-            arr = torch.from_numpy(arr).float()
             arr = self.transforms(arr)
-            arr = arr.numpy()
         return arr
 
     def __len__(self):
@@ -75,7 +69,7 @@ class BasicTreeDataSet(BaseTreeDataSet):
         target = item['pixel_target']
         pad_mask = item['pad_mask']
 
-        out['input'] = torch.from_numpy(inp).float()
+        out['input'] = self.handle_transforms(torch.from_numpy(inp).float())
         out['target'] = torch.from_numpy(target).long()
         out['pad_mask'] = torch.from_numpy(pad_mask).bool()
 
@@ -83,60 +77,6 @@ class BasicTreeDataSet(BaseTreeDataSet):
     
 
 
-class PaddedTreeDataSet(BaseTreeDataSet):
-    def __init__(self, 
-                tree_list,
-                pad_length,
-                stats,
-                augments_list
-                ):
-        super().__init__(tree_list, stats, augments_list)
-        self.pad_length = pad_length
-    
-    def calculate_max_pad(self):
-        max_pad = 0
-        for tree in self.tree_list:
-            tree_sum = tree['hs_mask'].sum()
-            max_pad = tree_sum if tree_sum > max_pad else max_pad
-        return max_pad
-    
-    def handle_padding(self, arr):
-        pad_diff = self.pad_length - arr.shape[0]
-        #0 = pay attention, 1= ignore
-        pad_mask = np.ones((self.pad_length,), dtype=np.bool8)
-        pad_mask[:arr.shape[0]] = False
-
-        arr = np.pad(arr, ((0, pad_diff), (0,0)))
-
-        return arr, pad_mask
-
-    def __getitem__(self, index):
-        item = self.tree_list[index]
-        assert 'hs_mask' in item, 'no mask found to select pixels'
-        out = dict()
-        hs_mask = item['hs_mask']
-
-        for k,v in item.items():
-            if isinstance(v, np.ndarray):
-                if len(v.shape)>1 and v.dtype != np.bool8:
-                    v = self.handle_masking(v, hs_mask)
-                    v, pad_mask = self.handle_padding(v)
-                    v = self.handle_transforms(v)
-                    assert v.shape[0] == self.pad_length, 'incorrect padding occured'
-                    out[k] = torch.from_numpy(v).float()
-                    out[k+'_pad_mask'] = torch.from_numpy(pad_mask).bool()
-                elif v.dtype == np.bool8:
-                    pass
-                elif k == 'single_target':
-                    #out[k] = torch.from_numpy(v).long()
-                    targets = torch.zeros((self.pad_length), dtype=torch.uint8)
-                    targets[~out['hs_pad_mask']] = v.item()
-                    out[k] = targets
-                else:
-                    out[k] = torch.from_numpy(v).float()
-            else:
-                out[k] = v
-        return out
 
 class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
     def __init__(self, tree_list, pad_length, num_synth_trees, stats, augments_list, weights=None):
@@ -208,102 +148,50 @@ class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
 
 class PixelTreeDataSet(BaseTreeDataSet):
     def __init__(self, 
-                tree_list,
+                all_data,
                 stats,
-                augments_list
+                augments_list,
+                sequence_length,
+                inp_key,
                 ):
-        super().__init__(tree_list, stats, augments_list)
+        super().__init__(all_data, stats, augments_list)
+        self.all_data = all_data
+        self.tree_data = all_data[inp_key]
+        self.sequence_length = sequence_length
+        self.inp_key = inp_key
+
+        self.num_whole_trees = self.tree_data.shape[0]//sequence_length
+        self.num_partial_trees = 1 if self.tree_data.shape[0] % sequence_length != 0 else 0
+
+    def __len__(self):
+        return self.num_whole_trees + self.num_partial_trees
     
     def __getitem__(self, index):
-        item = self.tree_list[index]
-        assert 'hs_mask' in item, 'no mask found to select pixels'
         out = dict()
-        hs_mask = item['hs_mask']
-        #scaled_mask = scipy.ndimage.zoom(hs_mask, 10.0)
+        if index + 1 <= self.num_whole_trees:
+            inp = self.tree_data[index*self.sequence_length:index*self.sequence_length+self.sequence_length]
+            pad_mask = np.zeros((self.sequence_length,), dtype=np.bool_)
+            target = self.all_data['pixel_target'][index*self.sequence_length:index*self.sequence_length+self.sequence_length]
 
-        for k,v in item.items():
-            if isinstance(v, np.ndarray):
-                if len(v.shape)>1 and v.dtype != np.bool8:
-                    v = self.handle_masking(v, hs_mask)
-                    v = self.handle_transforms(v)
-                    out[k] = torch.from_numpy(v).float()
-                else:
-                    out[k] = torch.from_numpy(v).float()
-            else:
-                out[k] = v
-        return out
+        else:
+            inp = self.tree_data[index*self.sequence_length:]
+            target = self.all_data['pixel_target'][index*self.sequence_length:]
+            pad_dif = self.sequence_length - inp.shape[0]
 
-class FullTreeDataSet(BaseTreeDataSet):
-    def __init__(self, 
-                tree_list,
-                stats,
-                augments_list
-                ):
-        super().__init__(tree_list, stats, augments_list)
-
-    def fix_3d(self, item):
-        item = rearrange(item, 'h w c -> c h w')
-        return torch.from_numpy(item).float()
-    
-    def fix_2d(self, item):
-        return torch.from_numpy(item).float()
-    
-    def __getitem__(self, index):
-        item = self.tree_list[index]
-        out = dict()
-        for k, v in item.items():
-            if isinstance(v, np.ndarray):
-                if len(v.shape) == 2:
-                    out[k] = self.fix_2d(v)
-                if len(v.shape) == 3:
-                    out[k] = self.fix_3d(v)
-                else:
-                    out[k] = torch.from_numpy(v).float()
-            else:
-                out[k] = v
+            inp = np.pad(inp, ((0, pad_dif), (0,0)))
+            target = np.pad(target, ((0, pad_dif)))
+            pad_mask = np.zeros((self.sequence_length,), dtype=np.bool_)
+            if pad_dif > 0:
+                pad_mask[-pad_dif:] = True
         
+        out['input'] = self.handle_transforms(torch.from_numpy(inp).float())
+        out['target'] = torch.from_numpy(target).long()
+        out['pad_mask'] = torch.from_numpy(pad_mask).bool()
+
+
         return out
 
-def calc_stats(full_batch_dl, save_loc):
-    for x in full_batch_dl:
-        pass
-    masked = x['hs'][~x['hs_pad_mask']]
-    hs_mean = masked.mean(dim=0)
-    hs_std = masked.std(dim=0)
 
-    hs_mean = hs_mean.numpy()
-    hs_std = hs_std.numpy()
-
-    np.savez(save_loc, mean=hs_mean, std=hs_std)
-
-
-
-# if __name__ == "__main__":
-#     test = SiteData(
-#         site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
-#         random_seed=42,
-#         train = 0.6,
-#         test= 0.1,
-#         valid = 0.3)
-
-#     #test.all_trees[0].apply_hs_filter([[410,1357],[1400,1800],[1965,2490]])
-
-#     test.make_splits('plot_level')
-#     tree_data = test.get_data('training', ['hs', 'origin'], 16, make_key=True)
-
-#     test_set = SyntheticPaddedTreeDataSet(tree_list = tree_data, pad_length=16, num_synth_trees=5000, num_features=372, stats = 'stats/niwo_stats.npz')
-
-#     #test_set = PaddedTreeDataSet(tree_data, 16, 'stats/niwo_stats.npz')
-#     test_loader = DataLoader(test_set, batch_size=len(test_set), num_workers=1)
-
-#     #calc_stats(test_loader, 'stats/niwo_stats.npz')
-
-#     for x in test_loader:
-#         print(x.keys())
-
-#     x = test_set.__getitem__(69)
-
-#     print(x)
 
 
 

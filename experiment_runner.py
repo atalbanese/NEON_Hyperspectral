@@ -3,7 +3,7 @@ import os
 import numpy as np
 from splitting import SiteData
 from einops import rearrange
-from torch_data import PaddedTreeDataSet, SyntheticPaddedTreeDataSet, BasicTreeDataSet
+from torch_data import PixelTreeDataSet, BasicTreeDataSet
 from torch_model import SimpleTransformer
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
@@ -65,11 +65,17 @@ class Experiment:
         self.num_workers = num_workers
 
         self.site_data = self.gather_data()
-        self.training, self.testing, self.validation = self.split_data()      
-        self.num_features = self.training[0][self.inp_key].shape[-1]
+        self.training, self.testing, self.validation = self.split_data()
+        if split_method != 'pixel':      
+            self.num_features = self.training[0][self.inp_key].shape[-1]
+        else:
+            self.num_features = self.training[self.inp_key].shape[-1]
 
         self.training_stats = self.calc_stats()
-        self.mask_and_pad_data()
+        if split_method != 'pixel':
+            self.mask_and_pad_data()
+        else:
+            self.mask_pixel()
         
         #RF doesn't need batched data
         #TBH maybe we could do this for all of them, max batch size
@@ -118,9 +124,12 @@ class Experiment:
                 flattened[k] = flat
                 length = flat.shape[0]
 
+        #Splitting samples
         num_train = int(length*self.train_prop)
         num_valid = int(length*self.valid_prop)
         all_idxs = np.arange(length)
+
+        
         train_samples = self.rng.choice(all_idxs, size=num_train, replace=False)
         remain_idxs = np.setdiff1d(all_idxs, train_samples)
         valid_samples = self.rng.choice(remain_idxs, size=num_valid, replace=False)
@@ -132,6 +141,8 @@ class Experiment:
             test[k] = v[test_samples]
             valid[k] = v[valid_samples]
         
+        #Swapping valid and test to avoid getting a test set where there aren't pixels from one class. Happens with NIWO/Scholl
+        #TODO: Fix sampling to ensure this can't happen
         return train, test, valid
 
     def collate_data(self, data_list):
@@ -147,10 +158,14 @@ class Experiment:
         return out_dict
 
     def calc_stats(self):
-        collated = self.collate_data(self.training)
-        pca = collated['pca']
-        mean = np.nanmean(pca, axis=(0,1,2))
-        std = np.nanstd(pca, axis=(0,1,2))
+        if self.split_method != 'pixel':
+            collated = self.collate_data(self.training)
+            inp = collated[self.inp_key]
+            mean = np.nanmean(inp, axis=(0,1,2))
+            std = np.nanstd(inp, axis=(0,1,2))
+        else:
+            mean = np.nanmean(self.training[self.inp_key], axis=0)
+            std = np.nanstd(self.training[self.inp_key], axis=0)
 
         return {'mean': mean, 'std': std}
     
@@ -165,28 +180,7 @@ class Experiment:
         return self.init_basic_loaders()
 
     def init_synth_loaders(self):
-        train_set = SyntheticPaddedTreeDataSet(self.training,
-                                      pad_length=16,
-                                      num_synth_trees=5120,
-                                      stats = os.path.join(self.datadir,self.sitename,self.split_method,'stats.npz'),
-                                      augments_list=self.augments)
-        train_loader = DataLoader(train_set, batch_size=self.batch_size, num_workers=self.num_workers)
-
-        valid_set = PaddedTreeDataSet(self.validation,
-                                      pad_length=16,
-                                      stats = os.path.join(self.datadir,self.sitename,self.split_method,'stats.npz'),
-                                      augments_list=self.augments)
-        
-        valid_loader = DataLoader(valid_set, batch_size=len(self.validation))
-
-        test_set = PaddedTreeDataSet(self.testing,
-                                      pad_length=16,
-                                      stats = os.path.join(self.datadir,self.sitename,self.split_method,'stats.npz'),
-                                      augments_list=self.augments)
-        
-        test_loader = DataLoader(test_set, batch_size=len(self.testing))
-
-        return train_loader, test_loader, valid_loader
+        pass
 
     def init_basic_loaders(self):
         train_set = BasicTreeDataSet(self.training,
@@ -229,8 +223,42 @@ class Experiment:
                 tree['pad_mask'] = pad_mask
                 tree['mask'] = chm_mask
 
+    def mask_pixel(self):
+        for dset in [self.training, self.testing, self.validation]:
+            chm_mask = dset['chm'] > 1.99
+            if self.apply_filters:
+                ndvi_mask = dset['ndvi'] > self.ndvi_filter
+                mpsi_mask = dset['mpsi'] > self.mpsi_filter
+                chm_mask = chm_mask * ndvi_mask * mpsi_mask
+            dset[self.inp_key] = dset[self.inp_key][chm_mask]
+            dset['pixel_target'] = dset['pixel_target'][chm_mask]
+
     def init_pixel_loaders(self):
-        pass
+        train_set = PixelTreeDataSet(self.training,
+                                      stats = self.training_stats,
+                                      augments_list=self.augments,
+                                      inp_key=self.inp_key,
+                                      sequence_length=self.sequence_length)
+
+        batch_size = train_set.__len__() if self.model_type == 'RF' else self.batch_size
+        train_loader = DataLoader(train_set, batch_size=batch_size, num_workers=self.num_workers)
+
+        valid_set = PixelTreeDataSet(self.validation,
+                                      stats = self.training_stats,
+                                      augments_list=self.augments,
+                                      inp_key=self.inp_key,
+                                      sequence_length=self.sequence_length)
+        
+        valid_loader = DataLoader(valid_set, batch_size=valid_set.__len__())
+
+        test_set = PixelTreeDataSet(self.testing,
+                                      stats = self.training_stats,
+                                      augments_list=self.augments,
+                                      inp_key=self.inp_key,
+                                      sequence_length=self.sequence_length)
+        
+        test_loader = DataLoader(test_set, batch_size=test_set.__len__())
+        return train_loader, test_loader, valid_loader
 
     def init_model(self):
         if self.model_type == 'RF':
@@ -245,7 +273,22 @@ class Experiment:
     def init_rf_model(self):
         return RandomForestClassifier()
 
+    def pixel_weights(self):
+        class_weights = dict()
+        n_classes = len(self.site_data.all_taxa.keys())
+        n_samples = self.training[self.inp_key].shape[0]
+        for k, v in self.site_data.key.items():
+            class_count = (self.training['pixel_target'] == v).sum()
+            class_weights[k] = n_samples/(n_classes*class_count)
+        return list(class_weights.values())
+
+
     def init_dl_model(self):
+        if self.split_method != 'pixel':
+            weight = list(self.site_data.class_weights.values())
+        else:
+            weight = self.pixel_weights()
+
         model = SimpleTransformer(
             lr = self.learning_rate,
             emb_size = 128,
@@ -254,7 +297,7 @@ class Experiment:
             num_heads=4,
             num_layers=12,
             num_classes=len(self.site_data.key.values()),
-            weight = list(self.site_data.class_weights.values()),
+            weight = weight,
             classes=self.site_data.key,
             dropout=0.2,
             savedir=self.savedir,
@@ -294,8 +337,7 @@ class Experiment:
             ]
             )
         trainer.fit(self.model, self.train_loader, val_dataloaders=self.valid_loader)
-        #TODO: make sure this is 'best' not just last model
-        return trainer.test(self.model, dataloaders=self.test_loader)
+        return trainer.test(self.model, dataloaders=self.test_loader, ckpt_path='best')
     
     def run_rf_model(self):
         #Somewhat ridiculous but using pytorch dataloaders to collate + normalize the data because the code is in place to do so
@@ -338,29 +380,36 @@ if __name__ == '__main__':
             exp_writer = csv.DictWriter(csvlog, fieldnames=exp_reader.fieldnames + ['test_ova'])
             exp_writer.writeheader()
             for exp in exp_reader:
-                new_exp = Experiment(**exp, savedir=savedir, logfile=logfile, datadir=datadir)
-                results = new_exp.run()
-                if isinstance(results, list):
-                    results = results[0]
-                exp['test_ova'] = results['test_ova']
-                exp_writer.writerow(exp)
+                try:
+                    new_exp = Experiment(**exp, savedir=savedir, logfile=logfile, datadir=datadir)
+                    results = new_exp.run()
+                    if isinstance(results, list):
+                        results = results[0]
+                    exp['test_ova'] = results['test_ova']
+                    exp_writer.writerow(exp)
 
-                if 'conf_matrix' in results:
-                    rows = []
-                    for row in results['conf_matrix']:
-                        rows = rows + [[f'{num}' for num in row]]
-                    classes = list(new_exp.site_data.key.keys())
-                    num_classes = len(classes)
-                    with open(os.path.join(savedir,exp['exp_number'],'conf_matrix.csv'), 'w') as conf_file:
-                        conf_writer = csv.writer(conf_file)
-                        header = ['' for x in range(num_classes+1)]
-                        header[1] = 'Expected'
-                        conf_writer.writerow(header)
-                        header_2 = ['Predicted'] + classes
-                        conf_writer.writerow(header_2)
-                        for ix, row in enumerate(rows):
-                            to_write = [classes[ix]] + row
-                            conf_writer.writerow(to_write)
+                    if 'conf_matrix' in results:
+                        rows = []
+                        for row in results['conf_matrix']:
+                            rows = rows + [[f'{num}' for num in row]]
+                        classes = list(new_exp.site_data.key.keys())
+                        num_classes = len(classes)
+                        with open(os.path.join(savedir,exp['exp_number'],'conf_matrix.csv'), 'w') as conf_file:
+                            conf_writer = csv.writer(conf_file)
+                            header = ['' for x in range(num_classes+1)]
+                            header[1] = 'Expected'
+                            conf_writer.writerow(header)
+                            header_2 = ['Predicted'] + classes
+                            conf_writer.writerow(header_2)
+                            for ix, row in enumerate(rows):
+                                to_write = [classes[ix]] + row
+                                conf_writer.writerow(to_write)
+                except Exception as e:
+                    print(e)
+                    with open(os.path.join(savedir, 'error_logs.txt'), 'a') as f:
+                        f.write(f'Error running {exp["exp_number"]}')
+                        f.write(e)
+
 
 
 
