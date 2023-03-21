@@ -209,10 +209,10 @@ class SiteData:
                 taxa_dict[tree.taxa] = [tree]
         return {k: taxa_dict[k] for k in sorted(taxa_dict)}
     
-    def make_splits(self, split_style: Literal["tree_level", "plot_level"]):
-        if split_style == "tree_level":
+    def make_splits(self, split_style: Literal["tree", "plot"]):
+        if split_style == "tree":
             self.make_tree_level_splits()
-        if split_style == "plot_level":
+        if split_style == "plot":
             self.make_plot_level_splits()
 
     def make_tree_level_splits(self):
@@ -318,6 +318,10 @@ class SiteData:
             if make_key:
                 to_append['target_arr'] = self.make_key(tree, out_dim)
                 to_append['single_target'] = np.array(self.key[tree.taxa], dtype=np.float32)
+                to_append['pixel_target'] = np.ones((out_dim, out_dim), dtype=np.float32)*self.key[tree.taxa]
+                channel_target = np.zeros((out_dim, out_dim, len(self.key.values())), dtype=np.float32)
+                channel_target[...,self.key[tree.taxa]] = 1.0
+                to_append['channel_target'] = channel_target
         
             data_list.append(to_append)
         return data_list

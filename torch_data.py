@@ -2,7 +2,6 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 from einops import rearrange
-from typing import Literal
 from transforms import NormalizeHS, BrightnessAugment, Blit, Block
 #These are just needed for testing
 from splitting import SiteData
@@ -25,7 +24,7 @@ class BaseTreeDataSet(Dataset):
         else:
             self.transforms = None
 
-    def build_augments(self, stats_loc, augments_list):
+    def build_augments(self, stats, augments_list):
 
         augs = []
         if "brightness" in augments_list:
@@ -35,8 +34,7 @@ class BaseTreeDataSet(Dataset):
         if "block" in augments_list:
             augs = augs + [Block()]
         if "normalize" in augments_list:
-            with np.load(stats_loc) as f:
-                augs = augs + [NormalizeHS(torch.from_numpy(f['mean']), torch.from_numpy(f['std']))]
+            augs = augs + [NormalizeHS(torch.from_numpy(stats['mean']), torch.from_numpy(stats['std']))]
         
         return augs
 
@@ -47,10 +45,9 @@ class BaseTreeDataSet(Dataset):
     
     def handle_transforms(self, arr):
         if self.transforms is not None:
-            if arr.shape[1] == 372:
-                arr = torch.from_numpy(arr).float()
-                arr = self.transforms(arr)
-                arr = arr.numpy()
+            arr = torch.from_numpy(arr).float()
+            arr = self.transforms(arr)
+            arr = arr.numpy()
         return arr
 
     def __len__(self):
@@ -58,6 +55,31 @@ class BaseTreeDataSet(Dataset):
     
     def __getitem__(self, index):
         pass
+
+
+class PCATreeDataSet(BaseTreeDataSet):
+    def __init__(self, 
+                tree_list,
+                stats,
+                augments_list
+                ):
+        super().__init__(tree_list, stats, augments_list)
+    
+
+    def __getitem__(self, index):
+        item = self.tree_list[index]
+        out = dict()
+        pca = item['pca']
+        target = item['pixel_target']
+        pad_mask = item['pca_pad_mask']
+
+        out['input'] = torch.from_numpy(pca).float()
+        out['target'] = torch.from_numpy(target).float()
+        out['pad_mask'] = torch.from_numpy(pad_mask).float()
+
+        return out
+    
+
 
 class PaddedTreeDataSet(BaseTreeDataSet):
     def __init__(self, 
@@ -115,11 +137,10 @@ class PaddedTreeDataSet(BaseTreeDataSet):
         return out
 
 class SyntheticPaddedTreeDataSet(BaseTreeDataSet):
-    def __init__(self, tree_list, pad_length, num_synth_trees, num_features, stats, augments_list, weights):
+    def __init__(self, tree_list, pad_length, num_synth_trees, stats, augments_list, weights=None):
         super().__init__(tree_list, stats, augments_list)
         self.pad_length = pad_length
         self.num_synth_trees = num_synth_trees
-        self.num_features = num_features
         self.rng = np.random.default_rng()
         self.weights = weights
         self.samp_weights = self.get_sampling_weights()

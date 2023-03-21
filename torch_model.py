@@ -37,18 +37,14 @@ class SimpleTransformer(pl.LightningModule):
         weight,
         classes,
         dropout,
-        #decode_style
-
         ):
         super().__init__()
-        #self.save_hyperparameters()
+        self.save_hyperparameters()
         self.lr = lr
         self.emb_size = emb_size
         self.scheduler = scheduler
         self.classes = classes
 
-        #self.positions = PositionalEncoding(num_features)
-        #self.embed = torch.nn.Linear(num_features, num_features)
         if weight is not None:
             self.loss = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor(weight))
         else:
@@ -68,27 +64,11 @@ class SimpleTransformer(pl.LightningModule):
         )
 
 
-
         self.decoder = torch.nn.Sequential(torch.nn.Linear(num_features, num_features//2),
                                             torch.nn.BatchNorm1d(sequence_length),
                                             torch.nn.ReLU(),
-                                            torch.nn.Linear(num_features//2, num_features//4),
-                                            torch.nn.BatchNorm1d(sequence_length),
-                                            torch.nn.ReLU(),
-                                            torch.nn.Flatten(),
-                                            torch.nn.Linear((num_features//4)*sequence_length, ((num_features//4)*sequence_length)//2),
-                                            torch.nn.BatchNorm1d(((num_features//4)*sequence_length)//2),
-                                            torch.nn.ReLU(),
-                                            torch.nn.Linear(((num_features//4)*sequence_length)//2, ((num_features//4)*sequence_length)//4),
-                                            torch.nn.BatchNorm1d(((num_features//4)*sequence_length)//4),
-                                            torch.nn.ReLU(),
-                                            torch.nn.Linear(((num_features//4)*sequence_length)//4, ((num_features//4)*sequence_length)//8),
-                                            torch.nn.BatchNorm1d(((num_features//4)*sequence_length)//8),
-                                            torch.nn.ReLU(),
-                                            torch.nn.Linear(((num_features//4)*sequence_length)//8, num_classes),
+                                            torch.nn.Linear(num_features//2, num_classes),
                                             )
-
-
 
 
     def calc_ova(self, x, target):
@@ -107,15 +87,12 @@ class SimpleTransformer(pl.LightningModule):
 
         return ova, conf_matrix
 
-
     def forward(self, batch, softmax = False):
-        hs = batch['hs']
-        hs_pad_mask = batch['hs_pad_mask']
-        target = batch['target_arr']
-        #hs = self.embed(hs)
-        #hs = self.positions(hs)
+        inp = batch['input']
+        pad_mask= batch['pad_mask']
+        target = batch['target']
 
-        x = self.encoder(hs, src_key_padding_mask = hs_pad_mask)
+        x = self.encoder(inp, src_key_padding_mask = pad_mask)
         x = self.decoder(x)
         if softmax:
             x = torch.nn.functional.softmax(x, 1)
