@@ -62,15 +62,15 @@ class TreeData:
                 return np.pad(arr, [(0,y_pad), (0,x_pad)])
 
 
-    def get_dict(self, choices, out_dim):
+    def get_dict(self, choices):
         return_dict = dict()
        
         if "hs" in choices:
-            return_dict['hs'] = self.pad_arr(self.hyperspectral, out_dim)
-            return_dict['hs_mask'] = self.pad_arr(self.hyperspectral_mask, out_dim)
+            return_dict['hs'] = self.hyperspectral
+            return_dict['hs_mask'] = self.hyperspectral_mask
         
         if "chm" in choices:
-            return_dict['chm'] = self.pad_arr(self.chm, out_dim)
+            return_dict['chm'] = self.chm
         
         if "rgb" in choices:
             return_dict["rgb"] = self.rgb
@@ -79,13 +79,13 @@ class TreeData:
             return_dict["utm_origin"] = self.utm_origin
 
         if "mpsi" in choices:
-            return_dict['mpsi'] = self.pad_arr(self.mpsi, out_dim)
+            return_dict['mpsi'] = self.mpsi
 
         if "pca" in choices:
-            return_dict['pca'] = self.pad_arr(self.pca, out_dim)
+            return_dict['pca'] = self.pca
         
         if "ndvi" in choices:
-            return_dict['ndvi'] = self.pad_arr(self.ndvi, out_dim)
+            return_dict['ndvi'] = self.ndvi
 
         
         return_dict['taxa'] = self.taxa
@@ -137,11 +137,14 @@ class SiteData:
         train: float,
         test: float,
         valid: float,
-        
+        ndvi_filter = 0.2,
+        mpsi_filter = 0.03,
+        apply_filters = False
         ):
 
         self.site_dir = site_dir
         self.all_trees = self.find_all_trees()
+        self.filter_trees(ndvi_filter, mpsi_filter, apply_filters)
         self.all_taxa = self.find_all_taxa()
         self.all_plots = self.find_all_plots()
         self.key = {k: ix for ix, k in enumerate(sorted(self.all_taxa.keys()))}
@@ -155,7 +158,6 @@ class SiteData:
         self.testing_data = None
         self.validation_data = None
         self.split_solution = None
-
 
     @property
     def taxa_counts(self):
@@ -190,6 +192,26 @@ class SiteData:
     def find_all_trees(self):
         all_dirs = [os.scandir(d) for d in os.scandir(self.site_dir) if d.is_dir()]
         return [TreeData.from_npz(f.path) for f in itertools.chain(*all_dirs) if f.name.endswith('.npz')]
+    
+    def filter_trees(self, ndvi_filter, mpsi_filter, apply_filters):
+        #This acts as a check if apply_filters is false, this operation should have been done when trees were made
+        to_drop = []
+        for ix, tree in enumerate(self.all_trees):
+            tree = tree.get_dict(['chm', 'pca', 'ndvi'])
+            chm_mask = tree['chm'] > 1.99
+
+            if apply_filters:
+                ndvi_mask = tree['ndvi'] > ndvi_filter
+                #Todo: check this is the right direction for mpsi
+                mpsi_mask = tree['mpsi'] > mpsi_filter
+                chm_mask = chm_mask * ndvi_mask * mpsi_mask
+            
+            if chm_mask.sum() <= 0:
+                to_drop.append[ix]
+        to_drop = set(to_drop)
+        filtered_trees = [i for j, i in enumerate(self.all_trees) if j not in to_drop]
+        self.all_trees = filtered_trees
+
 
     def find_all_plots(self):
         plots_dict = dict()
@@ -309,17 +331,16 @@ class SiteData:
     def get_data(self, 
         data_selection: Literal["training", "testing", "validation", "training and validation", "all"], 
         data_choices, 
-        out_dim, 
         make_key=False):
         working_data = self.select_working_data(data_selection)
         data_list = []
         for tree in working_data:
-            to_append = tree.get_dict(data_choices, out_dim)
+            to_append = tree.get_dict(data_choices)
             if make_key:
-                to_append['target_arr'] = self.make_key(tree, out_dim)
+                to_append['target_arr'] = self.make_key(tree)
                 to_append['single_target'] = np.array(self.key[tree.taxa], dtype=np.float32)
-                to_append['pixel_target'] = np.ones((out_dim, out_dim), dtype=np.float32)*self.key[tree.taxa]
-                channel_target = np.zeros((out_dim, out_dim, len(self.key.values())), dtype=np.float32)
+                to_append['pixel_target'] = np.ones((self.num_taxa, self.num_taxa), dtype=np.float32)*self.key[tree.taxa]
+                channel_target = np.zeros((self.num_taxa, self.num_taxa, len(self.key.values())), dtype=np.float32)
                 channel_target[...,self.key[tree.taxa]] = 1.0
                 to_append['channel_target'] = channel_target
         
@@ -327,7 +348,7 @@ class SiteData:
         return data_list
     
 
-    def make_key(self, tree, out_dim):
+    def make_key(self, tree):
         new_key = np.zeros((self.num_taxa), np.float32)
 
         this_tree = tree.taxa

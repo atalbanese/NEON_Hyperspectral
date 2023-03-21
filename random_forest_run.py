@@ -7,6 +7,7 @@ from torch_pretraining_model import PreTrainingModel
 from sklearn.decomposition import PCA
 
 
+
 if __name__ == "__main__":
     niwo = SiteData(
         site_dir = '/home/tony/thesis/data/NIWO',

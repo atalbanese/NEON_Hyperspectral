@@ -4,6 +4,8 @@ import pytorch_lightning as pl
 import numpy as np
 import math
 from einops import rearrange
+import os
+import csv
 
 class PositionalEncoding(torch.nn.Module):
 
@@ -34,10 +36,11 @@ class SimpleTransformer(pl.LightningModule):
         num_heads,
         num_layers,
         num_classes,
-        sequence_length,
         weight,
         classes,
         dropout,
+        savedir,
+        exp_number
         ):
         super().__init__()
         self.save_hyperparameters()
@@ -45,6 +48,8 @@ class SimpleTransformer(pl.LightningModule):
         self.emb_size = emb_size
         self.scheduler = scheduler
         self.classes = classes
+        self.savedir = savedir
+        self.exp_number = exp_number
 
         if weight is not None:
             self.loss = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor(weight))
@@ -65,10 +70,14 @@ class SimpleTransformer(pl.LightningModule):
         )
 
 
-        self.decoder = torch.nn.Sequential(torch.nn.Linear(num_features, num_features//2),
-                                            torch.nn.BatchNorm1d(sequence_length),
+        self.decoder = torch.nn.Sequential(torch.nn.Flatten(start_dim=0, end_dim=1),
+                                            torch.nn.Linear(num_features, num_features),
+                                            torch.nn.LazyBatchNorm1d(),
                                             torch.nn.ReLU(),
-                                            torch.nn.Linear(num_features//2, num_classes),
+                                            torch.nn.Linear(num_features, num_features),
+                                            torch.nn.LazyBatchNorm1d(),
+                                            torch.nn.ReLU(),
+                                            torch.nn.Linear(num_features, num_classes),
                                             )
 
 
@@ -92,11 +101,14 @@ class SimpleTransformer(pl.LightningModule):
     def forward(self, batch, softmax = False):
         inp = batch['input']
         pad_mask= batch['pad_mask']
-        target = rearrange(batch['target'], 'b p -> (b p)')
+        target = batch['target']
 
         x = self.encoder(inp, src_key_padding_mask = pad_mask)
         x = self.decoder(x)
-        x = rearrange(x, 'b p c -> (b p) c')
+
+        pad_mask = rearrange(~pad_mask, 'b p -> (b p)')
+        target = rearrange(target, 'b p -> (b p)')[pad_mask]
+        x = x[pad_mask]
         if softmax:
             x = torch.nn.functional.softmax(x, 1)
         return x, target
@@ -129,6 +141,7 @@ class SimpleTransformer(pl.LightningModule):
         self.log("test_ova", ova)
         print(self.classes)
         print(conf_matrix)
+        self.write_conf_matrix(conf_matrix)
         tb = self.logger.experiment
         tb.add_text("class_labels", str(self.classes))
         tb.add_text("confusion_matrix", str(conf_matrix).replace("\n", "  \n"))
@@ -145,6 +158,24 @@ class SimpleTransformer(pl.LightningModule):
             to_return['lr_scheduler'] = scheduler
 
         return to_return
+    
+    def write_conf_matrix(self, conf_matrix):
+        rows = []
+        for row in conf_matrix:
+            rows = rows + [[f'{num}' for num in row]]
+        classes = list(self.classes.keys())
+        num_classes = len(classes)
+        with open(os.path.join(self.savedir,self.exp_number,'conf_matrix.csv'), 'w') as conf_file:
+            conf_writer = csv.writer(conf_file)
+            header = ['' for x in range(num_classes+1)]
+            header[1] = 'Expected'
+            conf_writer.writerow(header)
+            header_2 = ['Predicted'] + classes
+            conf_writer.writerow(header_2)
+            for ix, row in enumerate(rows):
+                to_write = [classes[ix]] + row
+                conf_writer.writerow(to_write)
+
 
 
 class SimpleLinearModel(pl.LightningModule):

@@ -57,23 +57,25 @@ class BaseTreeDataSet(Dataset):
         pass
 
 
-class PCATreeDataSet(BaseTreeDataSet):
+class BasicTreeDataSet(BaseTreeDataSet):
     def __init__(self, 
                 tree_list,
                 stats,
-                augments_list
+                augments_list,
+                inp_key
                 ):
         super().__init__(tree_list, stats, augments_list)
+        self.inp_key = inp_key
     
 
     def __getitem__(self, index):
         item = self.tree_list[index]
         out = dict()
-        pca = item['pca']
+        inp = item[self.inp_key]
         target = item['pixel_target']
-        pad_mask = item['pca_pad_mask']
+        pad_mask = item['pad_mask']
 
-        out['input'] = torch.from_numpy(pca).float()
+        out['input'] = torch.from_numpy(inp).float()
         out['target'] = torch.from_numpy(target).long()
         out['pad_mask'] = torch.from_numpy(pad_mask).bool()
 
