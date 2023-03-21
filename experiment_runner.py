@@ -409,7 +409,7 @@ if __name__ == '__main__':
                             rows = rows + [[f'{num}' for num in row]]
                         classes = list(new_exp.site_data.key.keys())
                         num_classes = len(classes)
-                        with open(os.path.join(savedir,exp['exp_number'],'conf_matrix.csv'), 'w') as conf_file:
+                        with open(os.path.join(savedir,f'{exp["exp_number"]}_conf_matrix.csv'), 'w') as conf_file:
                             conf_writer = csv.writer(conf_file)
                             header = ['' for x in range(num_classes+1)]
                             header[1] = 'Expected'
@@ -422,8 +422,9 @@ if __name__ == '__main__':
                 except Exception as e:
                     print(e)
                     with open(os.path.join(savedir, 'error_logs.txt'), 'a') as f:
-                        f.write(f'Error running {exp["exp_number"]}')
-                        f.write(e)
+                        f.write(f'Error running {exp["exp_number"]}\n')
+                        f.write(str(e))
+                        f.write('\n')
 
 
 

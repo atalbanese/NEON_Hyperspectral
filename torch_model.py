@@ -165,7 +165,7 @@ class SimpleTransformer(pl.LightningModule):
             rows = rows + [[f'{num}' for num in row]]
         classes = list(self.classes.keys())
         num_classes = len(classes)
-        with open(os.path.join(self.savedir,self.exp_number,'conf_matrix.csv'), 'w') as conf_file:
+        with open(os.path.join(self.savedir,f'{self.exp_number}_conf_matrix.csv'), 'w') as conf_file:
             conf_writer = csv.writer(conf_file)
             header = ['' for x in range(num_classes+1)]
             header[1] = 'Expected'
