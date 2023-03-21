@@ -11,6 +11,7 @@ from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
 from sklearn.ensemble import RandomForestClassifier
 import sklearn.metrics as sm
+import argparse
 
 class Experiment:
     def __init__(self,
@@ -369,10 +370,23 @@ class Experiment:
 if __name__ == '__main__':
     pl.seed_everything(42, workers=True)
     os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
-    #TODO: switch to argparse
-    savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs'
-    logfile = 'exp_logs.csv'
-    datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
+
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
+    parser.add_argument("logfile", help="File to log experiment results", type=str)
+    parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
+
+    args = parser.parse_args()
+
+    # savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs'
+    # logfile = 'exp_logs.csv'
+    # datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
+
+    datadir = args.datadir
+    logfile = args.logfile
+    savedir = args.savedir
+
     with open('experiments_test.csv') as csvfile:
         with open(logfile, 'w') as csvlog:
             #exp_writer = csv.DictWriter(csvlog)
