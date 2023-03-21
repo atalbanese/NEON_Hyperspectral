@@ -376,6 +376,7 @@ if __name__ == '__main__':
     parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
     parser.add_argument("logfile", help="File to log experiment results", type=str)
     parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
+    parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
 
     args = parser.parse_args()
 
@@ -387,7 +388,7 @@ if __name__ == '__main__':
     logfile = args.logfile
     savedir = args.savedir
 
-    with open('experiments_test.csv') as csvfile:
+    with open(args.exp_file) as csvfile:
         with open(logfile, 'w') as csvlog:
             #exp_writer = csv.DictWriter(csvlog)
             exp_reader = csv.DictReader(csvfile)
