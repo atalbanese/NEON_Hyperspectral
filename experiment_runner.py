@@ -290,12 +290,13 @@ class Experiment:
         else:
             weight = self.pixel_weights()
 
+        num_heads = 4 if self.inp_key == 'pca' else 13
         model = SimpleTransformer(
             lr = self.learning_rate,
             emb_size = 128,
             scheduler=True,
             num_features=self.num_features,
-            num_heads=4,
+            num_heads=num_heads,
             num_layers=12,
             num_classes=len(self.site_data.key.values()),
             weight = weight,
@@ -372,23 +373,27 @@ if __name__ == '__main__':
     os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
-    parser.add_argument("logfile", help="File to log experiment results", type=str)
-    parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
-    parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
+    # parser.add_argument("logfile", help="File to log experiment results", type=str)
+    # parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
+    # parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
 
-    args = parser.parse_args()
+    # args = parser.parse_args()
 
-    # savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs'
-    # logfile = 'exp_logs.csv'
-    # datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
 
-    datadir = args.datadir
-    logfile = args.logfile
-    savedir = args.savedir
 
-    with open(args.exp_file) as csvfile:
+    # datadir = args.datadir
+    # logfile = args.logfile
+    # savedir = args.savedir
+    # exp_file = args.exp_file
+
+    savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs'
+    logfile = 'exp_logs.csv'
+    datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
+    exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
+
+    with open(exp_file) as csvfile:
         with open(logfile, 'w') as csvlog:
             #exp_writer = csv.DictWriter(csvlog)
             exp_reader = csv.DictReader(csvfile)
