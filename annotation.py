@@ -220,28 +220,32 @@ class Tree:
 
     
     def save(self):
-        savedir = os.path.join(self.plot.base_dir, self.algo_type, self.anno_type, self.plot.name)
-        if not os.path.exists(savedir):
-            os.makedirs(savedir)
 
-        if self.anno_type == 'auto':
-            self.hyperspectral_mask = np.ones((self.hyperspectral.shape[0], self.hyperspectral.shape[1]), dtype=np.bool8)
-        np.savez(os.path.join(savedir, self.name),
-            hyperspectral = self.hyperspectral,
-            rgb = self.rgb,
-            rgb_mask = self.rgb_mask,
-            hyperspectral_mask = self.hyperspectral_mask,
-            hyperspectral_bands = self.hyperspectral_bands,
-            chm = self.chm,
-            utm_origin = np.array(self.utm_origin),
-            taxa = self.taxa,
-            plot_id = self.plot_id,
-            site_id = self.site_id,
-            algo_type = self.algo_type,
-            mpsi = self.mpsi,
-            ndvi = self.ndvi,
-            pca = self.pca
-            )
+        chm_check = self.chm > 0
+        #If we don't have chm then there won't be PCA, if we don't have PCA then we don't have anything
+        if chm_check.sum() > 0:
+            savedir = os.path.join(self.plot.base_dir, self.algo_type, self.anno_type, self.plot.name)
+            if not os.path.exists(savedir):
+                os.makedirs(savedir)
+
+            if self.anno_type == 'auto':
+                self.hyperspectral_mask = np.ones((self.hyperspectral.shape[0], self.hyperspectral.shape[1]), dtype=np.bool8)
+            np.savez(os.path.join(savedir, self.name),
+                hyperspectral = self.hyperspectral,
+                rgb = self.rgb,
+                rgb_mask = self.rgb_mask,
+                hyperspectral_mask = self.hyperspectral_mask,
+                hyperspectral_bands = self.hyperspectral_bands,
+                chm = self.chm,
+                utm_origin = np.array(self.utm_origin),
+                taxa = self.taxa,
+                plot_id = self.plot_id,
+                site_id = self.site_id,
+                algo_type = self.algo_type,
+                mpsi = self.mpsi,
+                ndvi = self.ndvi,
+                pca = self.pca
+                )
 
 
 class TileSet:
