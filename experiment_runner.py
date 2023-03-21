@@ -402,6 +402,7 @@ if __name__ == '__main__':
                         results = results[0]
                     exp['test_ova'] = results['test_ova']
                     exp_writer.writerow(exp)
+                    csvlog.flush()
 
                     if 'conf_matrix' in results:
                         rows = []
