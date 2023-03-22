@@ -386,28 +386,28 @@ if __name__ == '__main__':
     os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
-    # parser.add_argument("logfile", help="File to log experiment results", type=str)
-    # parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
-    # parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
-    # parser.add_argument("-f", "--fixed_seed", help="Use a fixed seed for all rngs", action="store_true")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
+    parser.add_argument("logfile", help="File to log experiment results", type=str)
+    parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
+    parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
+    parser.add_argument("-f", "--fixed_seed", help="Use a fixed seed for all rngs", action="store_true")
 
-    # args = parser.parse_args()
+    args = parser.parse_args()
 
-    # if args.fixed_seed:
-    #     pl.seed_everything(42, workers=True)
+    if args.fixed_seed:
+        pl.seed_everything(42, workers=True)
 
-    # datadir = args.datadir
-    # logfile = args.logfile
-    # savedir = args.savedir
-    # exp_file = args.exp_file
+    datadir = args.datadir
+    logfile = args.logfile
+    savedir = args.savedir
+    exp_file = args.exp_file
 
     #pl.seed_everything(42, workers=True)
-    savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs'
-    logfile = 'exp_logs.csv'
-    datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
-    exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
+    # savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs'
+    # logfile = 'exp_logs.csv'
+    # datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
+    # exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
 
     with open(exp_file) as csvfile:
         with open(logfile, 'w') as csvlog:
