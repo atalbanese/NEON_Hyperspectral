@@ -39,9 +39,11 @@ class Experiment:
         ndvi_filter = 0.2,
         mpsi_filter = 0.03,
         sequence_length = 16,
+        data_dim = 4,
         **kwargs,
     ):
         self.rng = np.random.default_rng()
+        self.data_dim = data_dim
         self.exp_number = exp_number
         self.sitename = sitename
         self.anno_method = anno_method
@@ -94,8 +96,11 @@ class Experiment:
             site_dir=os.path.join(self.datadir, self.sitename, self.anno_method, self.man_or_auto),
             train = self.train_prop,
             test = self.test_prop,
-            valid = self.valid_prop
+            valid = self.valid_prop,
+            out_dim = self.data_dim,
+            apply_filters=self.apply_filters
         )
+        site_data.taxa_plot_counts
         if self.split_method != 'pixel':
             site_data.make_splits(self.split_method)
 

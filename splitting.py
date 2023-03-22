@@ -39,28 +39,13 @@ class TreeData:
         self.plot_id = str(plot_id[()])
         self.site_id = str(site_id[()])
         self.file_loc = file_loc
+        
 
     @classmethod
     def from_npz(cls, file_loc):
         with np.load(file_loc) as data:
             new_instance = cls(**data, file_loc=file_loc)
         return new_instance
-
-
-    def pad_arr(self, arr, out_dim):
-        three_d = len(arr.shape) == 3
-        y_pad = out_dim - arr.shape[0]
-        x_pad = out_dim - arr.shape[1]
-
-        if y_pad <0 or x_pad<0:
-            print(f"{self.file_loc}larger than given dimension, cropping..")
-            return arr[:out_dim, :out_dim,...]
-        else:
-            if three_d:
-                return np.pad(arr, [(0,y_pad), (0,x_pad), (0,0)], mode='mean')
-            else:
-                return np.pad(arr, [(0,y_pad), (0,x_pad)])
-
 
     def get_dict(self, choices):
         return_dict = dict()
@@ -138,12 +123,23 @@ class SiteData:
         valid: float,
         ndvi_filter = 0.2,
         mpsi_filter = 0.03,
-        apply_filters = False
+        apply_filters = False,
+        out_dim = 4,
+        taxa_to_drop = [],
+        filter_plots = True,
+        merge_taxa = {},        
         ):
 
+        self.out_dim = out_dim
         self.site_dir = site_dir
         self.all_trees = self.find_all_trees()
+        if len(merge_taxa)> 0:
+            self.rename_taxa(merge_taxa)
+        if len(taxa_to_drop) > 0:
+            self.drop_taxa(taxa_to_drop)
         self.filter_trees(ndvi_filter, mpsi_filter, apply_filters)
+        if filter_plots:
+            self.filter_plots()
         self.all_taxa = self.find_all_taxa()
         self.all_plots = self.find_all_plots()
         self.key = {k: ix for ix, k in enumerate(sorted(self.all_taxa.keys()))}
@@ -187,6 +183,44 @@ class SiteData:
             
         else:
             return None
+    @property 
+    def taxa_plot_counts(self):
+        taxa_counts = dict()
+        for tree in self.all_trees:
+            if tree.taxa in taxa_counts:
+                taxa_counts[tree.taxa].add(tree.plot_id)
+            else:
+                taxa_counts[tree.taxa] = set((tree.plot_id,))
+        taxa_counts = {t: len(v) for t,v in taxa_counts.items()}
+        return taxa_counts
+
+    def rename_taxa(self, merge_dict):
+        #UNTESTED
+        #K = Taxa to Merge
+        #V = Name to Merge to
+        #This just renames taxa and you can rename multiple things to the same name to merge them
+
+        for tree in self.all_trees:
+            if tree.taxa in merge_dict:
+                tree.taxa = merge_dict[tree.taxa]
+
+    def filter_plots(self):
+        taxa_to_drop = [k for k, v in self.taxa_plot_counts.items() if v < 3]
+        if len(taxa_to_drop)>0:
+            self.drop_taxa(taxa_to_drop)
+        
+
+    def drop_taxa(self, taxa_to_drop):
+        taxa_to_drop = set(taxa_to_drop)
+        trees_to_drop = set()
+        for ix, tree in enumerate(self.all_trees):
+            if tree.taxa in taxa_to_drop:
+                trees_to_drop.add(ix)
+        
+        filtered_trees = [i for j, i in enumerate(self.all_trees) if j not in trees_to_drop]
+        self.all_trees = filtered_trees
+
+
 
     def find_all_trees(self):
         all_dirs = [os.scandir(d) for d in os.scandir(self.site_dir) if d.is_dir()]
@@ -297,6 +331,7 @@ class SiteData:
 
                 #Make sure things dont go too high or too low above the goal, theres no precise solution usually so we need to create a zone of constraints
                 #Theres definitely a way to do this by minimizing squared or absolute value difference instead but ortools is confusing
+
                 #Sum of taxa in a category must be less than the goal + buffer
                 solver.Add(solver.Sum([vars_dict[k, i] * taxa_counts[k][j] for k in range(num_plots)]) <= goals_array[i][j] + max_buffer)
                 #Sum of taxa in a category must be greater than the goal + buffer
@@ -338,8 +373,8 @@ class SiteData:
             if make_key:
                 to_append['target_arr'] = self.make_key(tree)
                 to_append['single_target'] = np.array(self.key[tree.taxa], dtype=np.float32)
-                to_append['pixel_target'] = np.ones((self.num_taxa, self.num_taxa), dtype=np.float32)*self.key[tree.taxa]
-                channel_target = np.zeros((self.num_taxa, self.num_taxa, len(self.key.values())), dtype=np.float32)
+                to_append['pixel_target'] = np.ones((self.out_dim, self.out_dim), dtype=np.float32)*self.key[tree.taxa]
+                channel_target = np.zeros((self.out_dim, self.out_dim, self.num_taxa), dtype=np.float32)
                 channel_target[...,self.key[tree.taxa]] = 1.0
                 to_append['channel_target'] = channel_target
         
@@ -367,16 +402,16 @@ class SiteData:
             return self.training_data + self.validation_data
 
 
-if __name__ == "__main__":
-    test = SiteData(
-        site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
-        train = 0.6,
-        test= 0.1,
-        valid = 0.3)
+# if __name__ == "__main__":
+#     test = SiteData(
+#         site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
+#         train = 0.6,
+#         test= 0.1,
+#         valid = 0.3)
 
 
-    test.make_splits('plot_level')
-    for x in test.get_data('training', ['hs', 'chm', 'rgb', 'origin'], 16, make_key=True):
-        print(x)
+#     test.make_splits('plot_level')
+#     for x in test.get_data('training', ['hs', 'chm', 'rgb', 'origin'], 16, make_key=True):
+#         print(x)
 
    
