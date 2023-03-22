@@ -11,6 +11,7 @@ from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
 from sklearn.ensemble import RandomForestClassifier
 import sklearn.metrics as sm
+import traceback
 import argparse
 
 class Experiment:
@@ -30,16 +31,17 @@ class Experiment:
         test_prop = 0.2,
         valid_prop = 0.2,
         synth_loader = False,
-        num_epochs = 100,
+        num_epochs = 2,
         learning_rate = 5e-4,
         batch_size = 128,
         augments = ['normalize'],
         num_workers = 10,
         ndvi_filter = 0.2,
         mpsi_filter = 0.03,
-        sequence_length = 16
+        sequence_length = 16,
+        **kwargs,
     ):
-        self.rng = np.random.default_rng(42)
+        self.rng = np.random.default_rng()
         self.exp_number = exp_number
         self.sitename = sitename
         self.anno_method = anno_method
@@ -90,7 +92,6 @@ class Experiment:
     def gather_data(self):
         site_data = SiteData(
             site_dir=os.path.join(self.datadir, self.sitename, self.anno_method, self.man_or_auto),
-            random_seed=42,
             train = self.train_prop,
             test = self.test_prop,
             valid = self.valid_prop
@@ -369,7 +370,7 @@ class Experiment:
 
 
 if __name__ == '__main__':
-    pl.seed_everything(42, workers=True)
+
     os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 
@@ -378,16 +379,19 @@ if __name__ == '__main__':
     # parser.add_argument("logfile", help="File to log experiment results", type=str)
     # parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
     # parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
+    # parser.add_argument("-f", "--fixed_seed", help="Use a fixed seed for all rngs", action="store_true")
 
     # args = parser.parse_args()
 
-
+    # if args.fixed_seed:
+    #     pl.seed_everything(42, workers=True)
 
     # datadir = args.datadir
     # logfile = args.logfile
     # savedir = args.savedir
     # exp_file = args.exp_file
 
+    #pl.seed_everything(42, workers=True)
     savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs'
     logfile = 'exp_logs.csv'
     datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
@@ -395,42 +399,51 @@ if __name__ == '__main__':
 
     with open(exp_file) as csvfile:
         with open(logfile, 'w') as csvlog:
-            #exp_writer = csv.DictWriter(csvlog)
             exp_reader = csv.DictReader(csvfile)
-            exp_writer = csv.DictWriter(csvlog, fieldnames=exp_reader.fieldnames + ['test_ova'])
+            fixed_names = [fname.replace('num_trials', 'trial_num') for fname in exp_reader.fieldnames] + ['test_ova']
+            exp_writer = csv.DictWriter(csvlog, fieldnames=fixed_names)
             exp_writer.writeheader()
+            csvlog.flush()
             for exp in exp_reader:
-                try:
-                    new_exp = Experiment(**exp, savedir=savedir, logfile=logfile, datadir=datadir)
-                    results = new_exp.run()
-                    if isinstance(results, list):
-                        results = results[0]
-                    exp['test_ova'] = results['test_ova']
-                    exp_writer.writerow(exp)
-                    csvlog.flush()
+                exp['num_trials'] = int(exp['num_trials'])
+                for trial in range(exp['num_trials']):
+                    
+                    try:
+                        exp['trial_num'] = trial + 1
+                        print(f'Starting trial {exp["trial_num"]} of experiment {exp["exp_number"]} with params: {exp}')
+                        new_exp = Experiment(**exp, savedir=savedir, logfile=logfile, datadir=datadir)
+                        results = new_exp.run()
+                        if isinstance(results, list):
+                            results = results[0]
+                        exp['test_ova'] = results['test_ova']
+                        exp_line = exp.copy()
+                        del exp_line['num_trials']
+                        exp_writer.writerow(exp_line)
+                        csvlog.flush()
 
-                    if 'conf_matrix' in results:
-                        rows = []
-                        for row in results['conf_matrix']:
-                            rows = rows + [[f'{num}' for num in row]]
-                        classes = list(new_exp.site_data.key.keys())
-                        num_classes = len(classes)
-                        with open(os.path.join(savedir,f'{exp["exp_number"]}_conf_matrix.csv'), 'w') as conf_file:
-                            conf_writer = csv.writer(conf_file)
-                            header = ['' for x in range(num_classes+1)]
-                            header[1] = 'Expected'
-                            conf_writer.writerow(header)
-                            header_2 = ['Predicted'] + classes
-                            conf_writer.writerow(header_2)
-                            for ix, row in enumerate(rows):
-                                to_write = [classes[ix]] + row
-                                conf_writer.writerow(to_write)
-                except Exception as e:
-                    print(e)
-                    with open(os.path.join(savedir, 'error_logs.txt'), 'a') as f:
-                        f.write(f'Error running {exp["exp_number"]}\n')
-                        f.write(str(e))
-                        f.write('\n')
+                        if 'conf_matrix' in results:
+                            rows = []
+                            for row in results['conf_matrix']:
+                                rows = rows + [[f'{num}' for num in row]]
+                            classes = list(new_exp.site_data.key.keys())
+                            num_classes = len(classes)
+                            with open(os.path.join(savedir,f'{exp["exp_number"]}_{exp["trial_num"]}_conf_matrix.csv'), 'w') as conf_file:
+                                conf_writer = csv.writer(conf_file)
+                                header = ['' for x in range(num_classes+1)]
+                                header[1] = 'Expected'
+                                conf_writer.writerow(header)
+                                header_2 = ['Predicted'] + classes
+                                conf_writer.writerow(header_2)
+                                for ix, row in enumerate(rows):
+                                    to_write = [classes[ix]] + row
+                                    conf_writer.writerow(to_write)
+                    except Exception as e:
+                        print(e)
+                        traceback.print_exc()
+                        with open(os.path.join(savedir, 'error_logs.txt'), 'a') as f:
+                            f.write(f'Error running exp: {exp["exp_number"]} trial: {exp["trial_num"]}\n')
+                            f.write(str(e))
+                            f.write('\n')
 
 
 

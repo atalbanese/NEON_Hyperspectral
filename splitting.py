@@ -133,7 +133,6 @@ class SiteData:
     def __init__(
         self,
         site_dir: str,
-        random_seed: int,
         train: float,
         test: float,
         valid: float,
@@ -149,7 +148,7 @@ class SiteData:
         self.all_plots = self.find_all_plots()
         self.key = {k: ix for ix, k in enumerate(sorted(self.all_taxa.keys()))}
 
-        self.rng = np.random.default_rng(random_seed)
+        self.rng = np.random.default_rng()
         self.train_proportion = train
         self.test_proportion = test
         self.valid_proportion = valid
@@ -371,7 +370,6 @@ class SiteData:
 if __name__ == "__main__":
     test = SiteData(
         site_dir = r'C:\Users\tonyt\Documents\Research\thesis_final\NIWO',
-        random_seed=42,
         train = 0.6,
         test= 0.1,
         valid = 0.3)
