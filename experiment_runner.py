@@ -340,7 +340,7 @@ class Experiment:
 
         val_callback = ModelCheckpoint(
         dirpath=os.path.join(self.datadir,'ckpts'), 
-        filename=f'exp_{self.exp_number}_trial_{self.trial_num}' +'_{val_ova:.2f}_{epoch}',
+        filename=f'{self.sitename}_exp_{self.exp_number}_trial_{self.trial_num}' +'_{val_ova:.2f}_{epoch}',
         monitor='val_loss',
         save_on_train_epoch_end=True,
         mode='min',
@@ -425,6 +425,7 @@ if __name__ == '__main__':
                     
                     try:
                         exp['trial_num'] = trial + 1
+                        del exp['test_ova']
                         print(f'Starting trial {exp["trial_num"]} of experiment {exp["exp_number"]} with params: {exp}')
                         new_exp = Experiment(**exp, savedir=savedir, logfile=logfile, datadir=datadir)
                         results = new_exp.run()
