@@ -340,7 +340,7 @@ class Experiment:
 
         val_callback = ModelCheckpoint(
         dirpath=os.path.join(self.datadir,'ckpts'), 
-        filename=self.exp_number +'_{val_ova:.2f}_{epoch}',
+        filename=f'exp_{self.exp_number}_trial_{self.trial_num}' +'_{val_ova:.2f}_{epoch}',
         monitor='val_loss',
         save_on_train_epoch_end=True,
         mode='min',
