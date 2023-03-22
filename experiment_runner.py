@@ -27,6 +27,7 @@ class Experiment:
         datadir,
         apply_filters,
         inp_key,
+        trial_num,
         train_prop = 0.6,
         test_prop = 0.2,
         valid_prop = 0.2,
@@ -45,6 +46,7 @@ class Experiment:
     ):
         self.rng = np.random.default_rng()
         self.data_dim = data_dim
+        self.trial_num = trial_num
         self.exp_number = exp_number
         self.sitename = sitename
         self.anno_method = anno_method
@@ -316,7 +318,8 @@ class Experiment:
             classes=self.site_data.key,
             dropout=0.2,
             savedir=self.savedir,
-            exp_number=self.exp_number
+            exp_number=self.exp_number,
+            trial_number=self.trial_num
             )
         return model
 
