@@ -360,6 +360,9 @@ class SiteData:
         print(sol_text)
         solutions_dict['sol_text'] = sol_text
 
+        if status != 0:
+            raise Exception("No solution to plot level split found. You may need to merge/remove certain taxa")
+
         return solutions_dict
 
     def get_data(self, 

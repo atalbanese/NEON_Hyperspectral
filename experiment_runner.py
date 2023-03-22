@@ -40,6 +40,7 @@ class Experiment:
         mpsi_filter = 0.03,
         sequence_length = 16,
         data_dim = 4,
+        remove_taxa = '',
         **kwargs,
     ):
         self.rng = np.random.default_rng()
@@ -61,6 +62,10 @@ class Experiment:
         self.apply_filters = True if apply_filters == 'T' else False
         self.inp_key = inp_key
         self.sequence_length = sequence_length
+        if len(remove_taxa)>0:
+            self.remove_taxa = remove_taxa.split(';')
+        else:
+            self.remove_taxa = []
 
         self.synth_loader = synth_loader
         self.num_epochs = num_epochs
@@ -98,7 +103,8 @@ class Experiment:
             test = self.test_prop,
             valid = self.valid_prop,
             out_dim = self.data_dim,
-            apply_filters=self.apply_filters
+            apply_filters=self.apply_filters,
+            taxa_to_drop=self.remove_taxa
         )
         site_data.taxa_plot_counts
         if self.split_method != 'pixel':
@@ -173,6 +179,7 @@ class Experiment:
         else:
             mean = np.nanmean(self.training[self.inp_key], axis=0)
             std = np.nanstd(self.training[self.inp_key], axis=0)
+        #Hack to prevent divide by 0 in case there is a channel with 0 standard deviation - it occured once I swear it!
         std[std == 0] = 0.00001
         return {'mean': mean, 'std': std}
     
