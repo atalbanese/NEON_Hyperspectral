@@ -425,7 +425,6 @@ if __name__ == '__main__':
                     
                     try:
                         exp['trial_num'] = trial + 1
-                        del exp['test_ova']
                         print(f'Starting trial {exp["trial_num"]} of experiment {exp["exp_number"]} with params: {exp}')
                         new_exp = Experiment(**exp, savedir=savedir, logfile=logfile, datadir=datadir)
                         results = new_exp.run()
@@ -436,6 +435,7 @@ if __name__ == '__main__':
                         del exp_line['num_trials']
                         exp_writer.writerow(exp_line)
                         csvlog.flush()
+                        del exp['test_ova']
 
                         if 'conf_matrix' in results:
                             rows = []
