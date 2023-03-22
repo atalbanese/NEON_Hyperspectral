@@ -173,7 +173,7 @@ class Experiment:
         else:
             mean = np.nanmean(self.training[self.inp_key], axis=0)
             std = np.nanstd(self.training[self.inp_key], axis=0)
-
+        std[std == 0] = 0.00001
         return {'mean': mean, 'std': std}
     
     def init_dataloaders(self):
@@ -296,7 +296,7 @@ class Experiment:
         else:
             weight = self.pixel_weights()
 
-        num_heads = 4 if self.inp_key == 'pca' else 13
+        num_heads = 4 if self.inp_key == 'pca' else 12
         model = SimpleTransformer(
             lr = self.learning_rate,
             emb_size = 128,
