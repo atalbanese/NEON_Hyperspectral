@@ -31,7 +31,7 @@ class Experiment:
         test_prop = 0.2,
         valid_prop = 0.2,
         synth_loader = False,
-        num_epochs = 2,
+        num_epochs = 200,
         learning_rate = 5e-4,
         batch_size = 128,
         augments = ['normalize'],
