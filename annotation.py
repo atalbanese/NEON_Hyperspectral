@@ -336,7 +336,7 @@ class PlotBuilder:
         #self.plot_data_file = self.plot_data_file.loc[self.plot_data_file['chm_height'] >= 2]
 
         self.all_plot_ids = sorted(list(set(np.unique(self.plot_data_file.plotID)) - set(completed_plots)))
-        self.hs_filters = [[410,1320],[1450,1800],[2050,2485]]
+        self.hs_filters = [[410,1320],[1450,1800],[2050,2475]]
         self.plot_hs_dif = plot_hs_dif
         self.chm_dif_std = self.plot_data_file['chm_dif'].std()
         self.chm_dif_med = self.plot_data_file['chm_dif'].median()
@@ -894,8 +894,8 @@ if __name__ == "__main__":
     #     plot.find_trees('scholl')
     #     print('here')
 
-    # # niwo_57 = test.__build_plot__('NIWO_057')
-    # # niwo_57.find_trees('snapping')
-    # # # niwo_57.plot_before_and_after()
-    # # niwo_57.automatic_annotation()
-    # # # print('here')
+    # niwo_57 = test.__build_plot__('NIWO_057')
+    # niwo_57.find_trees('snapping')
+    # # niwo_57.plot_before_and_after()
+    # niwo_57.automatic_annotation()
+    # # print('here')

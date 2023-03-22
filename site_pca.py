@@ -117,7 +117,7 @@ if __name__ == "__main__":
     #Windows dir string trick
     BASEDIR = fr"{args.basedir}"
 
-    HS_FILTERS = [[410,1320],[1450,1800],[2050,2485]]
+    HS_FILTERS = [[410,1320],[1450,1800],[2050,2475]]
     CHM_DIR = os.path.join(BASEDIR, SITENAME, "CHM")
     HS_DIR = os.path.join(BASEDIR, SITENAME, "HS")
     PCA_DIR = os.path.join(BASEDIR, SITENAME, "PCA")
