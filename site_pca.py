@@ -65,7 +65,7 @@ def build_inc_pca(hs_file, chm_file):
 def do_inc_pca(args):
     hs_file, chm_file, pca_dir, pca_solver, hs_dir, chm_dir, sitename = args
 
-    HS_FILTERS = [[410,1320],[1450,1800],[2050,2485]]
+    HS_FILTERS = [[410,1320],[1450,1800],[2050,2475]]
     def get_hs_filter(bands):
         mask_list = [(bands>=lmin) & (bands<=lmax) for lmin, lmax in HS_FILTERS]
         band_mask = np.logical_or.reduce(mask_list)

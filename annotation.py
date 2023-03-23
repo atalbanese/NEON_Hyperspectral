@@ -896,6 +896,7 @@ if __name__ == "__main__":
 
     # niwo_57 = test.__build_plot__('NIWO_057')
     # niwo_57.find_trees('snapping')
-    # # niwo_57.plot_before_and_after()
-    # niwo_57.automatic_annotation()
-    # # print('here')
+    # niwo_57.plot_me()
+    # niwo_57.plot_before_and_after()
+    #niwo_57.automatic_annotation()
+    # print('here')
