@@ -4,13 +4,11 @@ import numpy as np
 from einops import rearrange
 import os
 from transforms import NormalizeHS, BrightnessAugment, Blit, Block
-import h5py as hp
 
 class PreTrainingData(Dataset):
     def __init__(self,
                 data_dir: str,
                 sequence_length: int,
-                hs_filters: list,
                 sitename: str,
                 augments_list: list,
                 stats: str,
@@ -23,9 +21,8 @@ class PreTrainingData(Dataset):
         self.file_dim = file_dim
         self.sequence_sqrt = int(np.sqrt(sequence_length))
         
-        self.data_files = [hp.File(f.path, 'r') for f in os.scandir(data_dir) if f.name.endswith(".h5")]
+        self.data_files = [f for f in os.scandir(data_dir) if f.name.endswith(".npy")]
         self.num_files = len(self.data_files)
-        self.hs_filters = hs_filters
         self.sitename = sitename
         self.sequence_length = sequence_length
 
@@ -39,10 +36,10 @@ class PreTrainingData(Dataset):
 
         self.columns = int(np.sqrt((self.file_dim*self.file_dim)/self.sequence_length))
         self.rows = int(np.sqrt((self.file_dim*self.file_dim)/self.sequence_length))
+        self.good_idxs = self.find_good_segments()
 
-        self.hs_indexes = self.get_hs_filter(self.data_files[0][self.sitename]["Reflectance"]["Metadata"]['Spectral_Data']['Wavelength'][:])
 
-    def build_augments(self, stats_loc, augments_list):
+    def build_augments(self, stats, augments_list):
 
         augs = []
         if "brightness" in augments_list:
@@ -52,33 +49,61 @@ class PreTrainingData(Dataset):
         if "block" in augments_list:
             augs = augs + [Block()]
         if "normalize" in augments_list:
-            with np.load(stats_loc) as f:
-                augs = augs + [NormalizeHS(torch.from_numpy(f['mean']), torch.from_numpy(f['std']))]
+            augs = augs + [NormalizeHS(torch.from_numpy(stats['mean']).float(), torch.from_numpy(stats['std']).float())]
         
         return augs
+    
+    def find_good_segments(self):
+        good_idxs = []
+        for ix in range(self.num_entries):
+            chunk = self.grab_chunk(ix)
+            missing_data_mask = self.get_mask(chunk)
+            if missing_data_mask.sum()>self.sequence_length//2:
+                good_idxs.append(ix)
+        return good_idxs
 
-    def __len__(self):
-        return self.num_entries
+    def get_mask(self, chunk):
+        missing_data_mask = chunk == chunk
+        return np.logical_and.reduce(missing_data_mask, axis=(2))
 
-    def __getitem__(self, index):
+
+    def grab_chunk(self, index):
         file_index = index//self.entries_in_file
         sequence_index = index % self.entries_in_file
-
-        hs_file = self.data_files[file_index]
+        open_file = self.data_files[file_index]
 
         min_y, max_y, min_x, max_x = self.get_bounds(sequence_index)
 
-        #with hp.File(to_open.path, 'r') as hs_file:
-        #bands = hs_file[self.sitename]["Reflectance"]["Metadata"]['Spectral_Data']['Wavelength'][:]
-        #hs_indexes = self.get_hs_filter(bands)
-        hs_grab = hs_file[self.sitename]["Reflectance"]["Reflectance_Data"][min_y:max_y,min_x:max_x, self.hs_indexes]/10000
-        hs_grab[hs_grab<0] = 0
-        hs_grab[hs_grab>1] = 1
+        grab = np.load(open_file, mmap_mode='r')[min_y:max_y,min_x:max_x,...]
+        return grab
 
-        hs_grab = torch.from_numpy(hs_grab).float()
+
+    def __len__(self):
+        return len(self.good_idxs)
+
+    def __getitem__(self, index):
+        out = dict()
+
+        index = self.good_idxs[index]
+        grab = self.grab_chunk(index)
+
+        #TODO: Add masking and padding
+        mask = self.get_mask(self, grab)
+        pad_dif = np.count_nonzero(~mask)
+        grab = np.pad(grab[mask], ((0, pad_dif), (0,0)))
+
+        pad_mask = np.zeros((self.sequence_length,), dtype=np.bool_)
+        if pad_dif > 0:
+            pad_mask[-pad_dif:] = True
+
+        pad_mask = torch.from_numpy(pad_mask).bool()
+        grab = torch.from_numpy(grab).float()
         if self.transforms is not None:
-            hs_grab = self.transforms(hs_grab)
-        return rearrange(hs_grab, 'h w c -> (h w) c')
+            grab = self.transforms(grab)
+        flat_grab = (grab, 'h w c -> (h w) c')
+        out['input'] = flat_grab
+        out['pad_mask'] = pad_mask
+
 
     def get_bounds(self, sequence_index):
         row_start = (sequence_index//self.columns) * self.sequence_sqrt
@@ -90,22 +115,14 @@ class PreTrainingData(Dataset):
         return row_start, row_end, col_start, col_end
         
 
-    def get_hs_filter(self, bands):
-        # hs_filter should be a list of [min, max]
-        mask_list = [(bands>=lmin) & (bands<=lmax) for lmin, lmax in self.hs_filters]
-        band_mask = np.logical_or.reduce(mask_list)
-        idxs = np.where(band_mask)[0]
-        return idxs
-
 if __name__ == "__main__":
     test = PreTrainingData(
-        data_dir="/home/tony/thesis/data/NIWO_unlabeled",
+        data_dir="/home/tony/thesis/lidar_hs_unsup_dl_model/final_data/STEI/PCA",
         sequence_length=16,
-        hs_filters=[[410,1357],[1400,1800],[1965,2485]],
-        sitename="NIWO",
+        sitename="STEI",
         augments_list=["normalize"],
         file_dim=1000,
-        stats="/home/tony/thesis/data/stats/niwo_stats.npz"
+        stats={'mean': np.arange(16), 'std':np.arange(16)}
     )
 
     test.__getitem__(250)

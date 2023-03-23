@@ -88,18 +88,22 @@ class PreTrainingModel(pl.LightningModule):
         return Q.t()
     
     def training_step(self, x, batch_idx):
+
+        x = x['input']
+        pad_mask = x['pad_mask']
+
         b = x.shape[0]
         x_s = self.transforms_main(x)
 
         inp = torch.cat((x, x_s))
-        inp = self.encoder(inp)
+        inp = self.encoder(inp, src_key_padding_mask = pad_mask)
         inp = self.projector(inp)
         inp = torch.nn.functional.normalize(inp, dim=1, p=2)
 
         scores = self.prototypes(inp)
 
-        scores_t = scores[:b]
-        scores_s = scores[b:]
+        scores_t = scores[:b][~pad_mask]
+        scores_s = scores[b:][~pad_mask]
 
         t = scores_t.detach()
         s = scores_s.detach()
