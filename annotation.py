@@ -234,7 +234,7 @@ class Tree:
                 hyperspectral = self.hyperspectral,
                 rgb = self.rgb,
                 rgb_mask = self.rgb_mask,
-                hyperspectral_mask = self.hyperspectral_mask,
+                mask = self.hyperspectral_mask,
                 hyperspectral_bands = self.hyperspectral_bands,
                 chm = self.chm,
                 utm_origin = np.array(self.utm_origin),
