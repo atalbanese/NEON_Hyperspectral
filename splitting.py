@@ -126,6 +126,7 @@ class SiteData:
         apply_filters = False,
         out_dim = 4,
         taxa_to_drop = [],
+        taxa_to_keep = [],
         filter_plots = True,
         merge_taxa = {},        
         ):
@@ -136,6 +137,11 @@ class SiteData:
         if len(merge_taxa)> 0:
             self.rename_taxa(merge_taxa)
         if len(taxa_to_drop) > 0:
+            self.drop_taxa(taxa_to_drop)
+        if len(taxa_to_keep) > 0:
+            taxa_to_keep = set(taxa_to_keep)
+            all_taxa = set(self.find_all_taxa())
+            taxa_to_drop = list(all_taxa-taxa_to_keep)
             self.drop_taxa(taxa_to_drop)
         self.filter_trees(ndvi_filter, mpsi_filter, apply_filters)
         if filter_plots:

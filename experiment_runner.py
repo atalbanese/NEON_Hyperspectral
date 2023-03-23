@@ -28,14 +28,16 @@ class Experiment:
         apply_filters,
         inp_key,
         trial_num,
+        test_site = '',
         train_prop = 0.6,
         test_prop = 0.2,
         valid_prop = 0.2,
         synth_loader = False,
-        num_epochs = 200,
+        num_epochs = 300,
         learning_rate = 5e-4,
         batch_size = 128,
-        augments = ['normalize'],
+        augments = ['normalize', 'blit', 'block'],
+        #augments=[''],
         num_workers = 10,
         ndvi_filter = 0.2,
         mpsi_filter = 0.03,
@@ -64,6 +66,8 @@ class Experiment:
         self.apply_filters = True if apply_filters == 'T' else False
         self.inp_key = inp_key
         self.sequence_length = sequence_length
+        self.test_site = test_site if test_site != '' else None
+
         if len(remove_taxa)>0:
             self.remove_taxa = remove_taxa.split(';')
         else:
@@ -89,7 +93,6 @@ class Experiment:
         else:
             self.mask_pixel()
         
-        #RF doesn't need batched data
         #TBH maybe we could do this for all of them, max batch size
         if self.model_type == 'RF':
             self.batch_size = len(self.training)
@@ -106,11 +109,24 @@ class Experiment:
             valid = self.valid_prop,
             out_dim = self.data_dim,
             apply_filters=self.apply_filters,
-            taxa_to_drop=self.remove_taxa
+            taxa_to_drop=self.remove_taxa,
         )
-        site_data.taxa_plot_counts
+
         if self.split_method != 'pixel':
             site_data.make_splits(self.split_method)
+
+        if self.test_site is not None:
+            test_data = SiteData(
+            site_dir=os.path.join(self.datadir, self.test_site, self.anno_method, self.man_or_auto),
+            train = self.train_prop,
+            test = self.test_prop,
+            valid = self.valid_prop,
+            out_dim = self.data_dim,
+            apply_filters=self.apply_filters,
+            taxa_to_keep = list(site_data.all_taxa.keys())
+            )
+
+            self.test_site = test_data
 
         return site_data
     
@@ -119,6 +135,9 @@ class Experiment:
             train = self.site_data.get_data('training', ['hs', 'pca', 'chm', 'ndvi', 'mpsi'], make_key=True)
             test = self.site_data.get_data('testing', ['hs', 'pca', 'chm', 'ndvi', 'mpsi'],make_key=True)
             valid = self.site_data.get_data('validation', ['hs', 'pca', 'chm', 'ndvi', 'mpsi'],  make_key=True)
+
+            if self.test_site is not None:
+                test = self.test_site.get_data('all', ['hs', 'pca', 'chm', 'ndvi', 'mpsi'],make_key=True)
 
             return train, test, valid
         else:
@@ -190,13 +209,7 @@ class Experiment:
         if self.split_method == 'pixel':
             return self.init_pixel_loaders()
         
-        if self.synth_loader:
-            return self.init_synth_loaders()
-
         return self.init_basic_loaders()
-
-    def init_synth_loaders(self):
-        pass
 
     def init_basic_loaders(self):
         train_set = BasicTreeDataSet(self.training,
@@ -207,14 +220,16 @@ class Experiment:
 
         valid_set = BasicTreeDataSet(self.validation,
                                       stats = self.training_stats,
-                                      augments_list=self.augments,
+                                      augments_list=['normalize'],
+                                      #augments_list=self.augments,
                                       inp_key=self.inp_key)
         
         valid_loader = DataLoader(valid_set, batch_size=len(self.validation))
 
         test_set = BasicTreeDataSet(self.testing,
                                       stats = self.training_stats,
-                                      augments_list=self.augments,
+                                      augments_list=['normalize'],
+                                      #augments_list=self.augments,
                                       inp_key=self.inp_key)
         
         test_loader = DataLoader(test_set, batch_size=len(self.testing))
@@ -225,6 +240,11 @@ class Experiment:
         for dset in [self.training, self.testing, self.validation]:
             for ix, tree in enumerate(dset):
                 chm_mask = tree['chm'] > 1.99
+                #Theres one tree with one unaccounted for np.nan pixel from RMNP
+                #This code handles any erroneous np.nans
+                missing_data_mask = tree[self.inp_key] == tree[self.inp_key]
+                missing_data_mask = np.logical_and.reduce(missing_data_mask, axis=(2))
+                chm_mask = chm_mask * missing_data_mask
 
                 if self.apply_filters:
                     ndvi_mask = tree['ndvi'] > self.ndvi_filter
@@ -297,7 +317,6 @@ class Experiment:
             class_count = (self.training['pixel_target'] == v).sum()
             class_weights[k] = n_samples/(n_classes*class_count)
         return list(class_weights.values())
-
 
     def init_dl_model(self):
         if self.split_method != 'pixel':
@@ -384,33 +403,34 @@ class Experiment:
         
 
 
+
 if __name__ == '__main__':
 
     os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
-    parser.add_argument("logfile", help="File to log experiment results", type=str)
-    parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
-    parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
-    parser.add_argument("-f", "--fixed_seed", help="Use a fixed seed for all rngs", action="store_true")
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
+    # parser.add_argument("logfile", help="File to log experiment results", type=str)
+    # parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
+    # parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
+    # parser.add_argument("-f", "--fixed_seed", help="Use a fixed seed for all rngs", action="store_true")
 
-    args = parser.parse_args()
+    # args = parser.parse_args()
 
-    if args.fixed_seed:
-        pl.seed_everything(42, workers=True)
+    # if args.fixed_seed:
+    #     pl.seed_everything(42, workers=True)
 
-    datadir = args.datadir
-    logfile = args.logfile
-    savedir = args.savedir
-    exp_file = args.exp_file
+    # datadir = args.datadir
+    # logfile = args.logfile
+    # savedir = args.savedir
+    # exp_file = args.exp_file
 
-    #pl.seed_everything(42, workers=True)
-    # savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs'
-    # logfile = 'exp_logs.csv'
-    # datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
-    # exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
+    pl.seed_everything(42, workers=True)
+    savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/test_experiment_logs'
+    logfile = 'exp_logs.csv'
+    datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
+    exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
 
     with open(exp_file) as csvfile:
         with open(logfile, 'w') as csvlog:
