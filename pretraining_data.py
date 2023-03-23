@@ -87,8 +87,7 @@ class PreTrainingData(Dataset):
         index = self.good_idxs[index]
         grab = self.grab_chunk(index)
 
-        #TODO: Add masking and padding
-        mask = self.get_mask(self, grab)
+        mask = self.get_mask(grab)
         pad_dif = np.count_nonzero(~mask)
         grab = np.pad(grab[mask], ((0, pad_dif), (0,0)))
 
@@ -100,9 +99,9 @@ class PreTrainingData(Dataset):
         grab = torch.from_numpy(grab).float()
         if self.transforms is not None:
             grab = self.transforms(grab)
-        flat_grab = (grab, 'h w c -> (h w) c')
-        out['input'] = flat_grab
+        out['input'] = grab
         out['pad_mask'] = pad_mask
+        return out
 
 
     def get_bounds(self, sequence_index):
