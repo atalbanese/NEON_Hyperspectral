@@ -27,11 +27,12 @@ class Experiment:
         datadir,
         apply_filters,
         inp_key,
+        trial_num,
         train_prop = 0.6,
         test_prop = 0.2,
         valid_prop = 0.2,
         synth_loader = False,
-        num_epochs = 2,
+        num_epochs = 200,
         learning_rate = 5e-4,
         batch_size = 128,
         augments = ['normalize'],
@@ -40,10 +41,12 @@ class Experiment:
         mpsi_filter = 0.03,
         sequence_length = 16,
         data_dim = 4,
+        remove_taxa = '',
         **kwargs,
     ):
         self.rng = np.random.default_rng()
         self.data_dim = data_dim
+        self.trial_num = trial_num
         self.exp_number = exp_number
         self.sitename = sitename
         self.anno_method = anno_method
@@ -61,6 +64,10 @@ class Experiment:
         self.apply_filters = True if apply_filters == 'T' else False
         self.inp_key = inp_key
         self.sequence_length = sequence_length
+        if len(remove_taxa)>0:
+            self.remove_taxa = remove_taxa.split(';')
+        else:
+            self.remove_taxa = []
 
         self.synth_loader = synth_loader
         self.num_epochs = num_epochs
@@ -98,7 +105,8 @@ class Experiment:
             test = self.test_prop,
             valid = self.valid_prop,
             out_dim = self.data_dim,
-            apply_filters=self.apply_filters
+            apply_filters=self.apply_filters,
+            taxa_to_drop=self.remove_taxa
         )
         site_data.taxa_plot_counts
         if self.split_method != 'pixel':
@@ -173,6 +181,7 @@ class Experiment:
         else:
             mean = np.nanmean(self.training[self.inp_key], axis=0)
             std = np.nanstd(self.training[self.inp_key], axis=0)
+        #Hack to prevent divide by 0 in case there is a channel with 0 standard deviation - it occured once I swear it!
         std[std == 0] = 0.00001
         return {'mean': mean, 'std': std}
     
@@ -309,7 +318,8 @@ class Experiment:
             classes=self.site_data.key,
             dropout=0.2,
             savedir=self.savedir,
-            exp_number=self.exp_number
+            exp_number=self.exp_number,
+            trial_number=self.trial_num
             )
         return model
 
@@ -330,7 +340,7 @@ class Experiment:
 
         val_callback = ModelCheckpoint(
         dirpath=os.path.join(self.datadir,'ckpts'), 
-        filename=self.exp_number +'_{val_ova:.2f}_{epoch}',
+        filename=f'{self.sitename}_exp_{self.exp_number}_trial_{self.trial_num}' +'_{val_ova:.2f}_{epoch}',
         monitor='val_loss',
         save_on_train_epoch_end=True,
         mode='min',
@@ -379,28 +389,28 @@ if __name__ == '__main__':
     os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
-    # parser.add_argument("logfile", help="File to log experiment results", type=str)
-    # parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
-    # parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
-    # parser.add_argument("-f", "--fixed_seed", help="Use a fixed seed for all rngs", action="store_true")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
+    parser.add_argument("logfile", help="File to log experiment results", type=str)
+    parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
+    parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
+    parser.add_argument("-f", "--fixed_seed", help="Use a fixed seed for all rngs", action="store_true")
 
-    # args = parser.parse_args()
+    args = parser.parse_args()
 
-    # if args.fixed_seed:
-    #     pl.seed_everything(42, workers=True)
+    if args.fixed_seed:
+        pl.seed_everything(42, workers=True)
 
-    # datadir = args.datadir
-    # logfile = args.logfile
-    # savedir = args.savedir
-    # exp_file = args.exp_file
+    datadir = args.datadir
+    logfile = args.logfile
+    savedir = args.savedir
+    exp_file = args.exp_file
 
     #pl.seed_everything(42, workers=True)
-    savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs'
-    logfile = 'exp_logs.csv'
-    datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
-    exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
+    # savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs'
+    # logfile = 'exp_logs.csv'
+    # datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
+    # exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
 
     with open(exp_file) as csvfile:
         with open(logfile, 'w') as csvlog:
@@ -425,6 +435,7 @@ if __name__ == '__main__':
                         del exp_line['num_trials']
                         exp_writer.writerow(exp_line)
                         csvlog.flush()
+                        del exp['test_ova']
 
                         if 'conf_matrix' in results:
                             rows = []

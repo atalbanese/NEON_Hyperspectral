@@ -40,7 +40,8 @@ class SimpleTransformer(pl.LightningModule):
         classes,
         dropout,
         savedir,
-        exp_number
+        exp_number,
+        trial_number
         ):
         super().__init__()
         self.save_hyperparameters()
@@ -50,6 +51,7 @@ class SimpleTransformer(pl.LightningModule):
         self.classes = classes
         self.savedir = savedir
         self.exp_number = exp_number
+        self.trial_num = trial_number
 
         if weight is not None:
             self.loss = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor(weight))
@@ -165,7 +167,7 @@ class SimpleTransformer(pl.LightningModule):
             rows = rows + [[f'{num}' for num in row]]
         classes = list(self.classes.keys())
         num_classes = len(classes)
-        with open(os.path.join(self.savedir,f'{self.exp_number}_conf_matrix.csv'), 'w') as conf_file:
+        with open(os.path.join(self.savedir,f'{self.exp_number}_{self.trial_num}_conf_matrix.csv'), 'w') as conf_file:
             conf_writer = csv.writer(conf_file)
             header = ['' for x in range(num_classes+1)]
             header[1] = 'Expected'
