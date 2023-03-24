@@ -5,17 +5,21 @@ from splitting import SiteData
 from einops import rearrange
 from torch_data import PixelTreeDataSet, BasicTreeDataSet
 from torch_model import SimpleTransformer
+from torch_pretraining_model import PreTrainingModel
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, BaseFinetuning
 from sklearn.ensemble import RandomForestClassifier
 import sklearn.metrics as sm
 import traceback
 import argparse
+import copy
 
 
 def exp_builder(**kwargs):
+    if kwargs['pt_ckpt'] != '':
+        return DLPreTrainingExperiment(**kwargs)
     if kwargs['model'] == 'DL':
         if kwargs['split_method'] == 'pixel':
             return DLPixelExperiment(**kwargs)
@@ -53,7 +57,7 @@ class BaseExperiment:
         test_prop = 0.2,
         valid_prop = 0.2,
         synth_loader = False,
-        num_epochs = 1,
+        num_epochs = 100,
         learning_rate = 5e-4,
         batch_size = 128,
         augments = ['normalize'],
@@ -469,6 +473,66 @@ class RFMultiSiteExperiment(BaseMultiSiteExperiment, RFExperiment):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+class DLPreTrainingExperiment(DLExperiment):
+    def __init__(self, **kwargs):
+        self.pre_trained_ckpt = kwargs['pt_ckpt']
+        super().__init__(**kwargs)
+        
+    def init_model(self):
+        untrained = super().init_model()
+
+        pre_trained = PreTrainingModel.load_from_checkpoint(self.pre_trained_ckpt)
+        #pre_trained.freeze()
+        untrained.encoder = copy.deepcopy(pre_trained.encoder)
+        #untrained.encoder.freeze()
+        # for param in untrained.encoder.parameters():
+        #     param.requires_grad = False
+        # untrained.configure_optimizers()
+
+        return untrained
+    
+    def run(self):
+        val_callback = ModelCheckpoint(
+        dirpath=os.path.join(self.datadir,'ckpts'), 
+        filename=f'{self.sitename}_exp_{self.exp_number}_trial_{self.trial_num}' +'_{val_ova:.2f}_{epoch}',
+        monitor='val_loss',
+        save_on_train_epoch_end=True,
+        mode='min',
+        save_top_k = 3
+        )
+
+        initial_freeze = (self.num_epochs * .2)
+
+        logger = pl_loggers.TensorBoardLogger(save_dir = self.savedir, name=self.exp_number)
+        trainer = pl.Trainer(accelerator="gpu", max_epochs=self.num_epochs, logger=logger, log_every_n_steps=10, deterministic=True,
+            callbacks=[
+            val_callback,
+            FeatureExtractorFreezeUnfreeze(initial_freeze)
+            ]
+            )
+        trainer.fit(self.model, self.train_loader, val_dataloaders=self.valid_loader)
+        return trainer.test(self.model, dataloaders=self.test_loader, ckpt_path='best')
+
+
+
+class FeatureExtractorFreezeUnfreeze(BaseFinetuning):
+     def __init__(self, unfreeze_at_epoch=100):
+         super().__init__()
+         self._unfreeze_at_epoch = unfreeze_at_epoch
+
+     def freeze_before_training(self, pl_module):
+         self.freeze(pl_module.encoder)
+
+     def finetune_function(self, pl_module, current_epoch, optimizer, optimizer_idx):
+         # When `current_epoch` is 10, feature_extractor will start training.
+         if current_epoch == self._unfreeze_at_epoch:
+            self.unfreeze_and_add_param_group(
+                 modules=pl_module.encoder,
+                 optimizer=optimizer,
+                 train_bn=True,
+                 lr=5e-4
+             )
+            print('UNFREEZE')
 
 
 
@@ -477,28 +541,28 @@ if __name__ == '__main__':
     os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
-    parser.add_argument("logfile", help="File to log experiment results", type=str)
-    parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
-    parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
-    parser.add_argument("-f", "--fixed_seed", help="Use a fixed seed for all rngs", action="store_true")
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("savedir", help='Directory to save DL logs + Confusion matrices (subdirs will be generated per experiment number)', type=str)
+    # parser.add_argument("logfile", help="File to log experiment results", type=str)
+    # parser.add_argument("datadir", help='Base directory storing all NEON data', type=str)
+    # parser.add_argument('exp_file',  help='CSV file containing experiments to run', type=str)
+    # parser.add_argument("-f", "--fixed_seed", help="Use a fixed seed for all rngs", action="store_true")
 
-    args = parser.parse_args()
+    # args = parser.parse_args()
 
-    if args.fixed_seed:
-        pl.seed_everything(42, workers=True)
+    # if args.fixed_seed:
+    #     pl.seed_everything(42, workers=True)
 
-    datadir = args.datadir
-    logfile = args.logfile
-    savedir = args.savedir
-    exp_file = args.exp_file
+    # datadir = args.datadir
+    # logfile = args.logfile
+    # savedir = args.savedir
+    # exp_file = args.exp_file
 
     # pl.seed_everything(42, workers=True)
-    # savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/test_experiment_logs'
-    # logfile = 'exp_logs.csv'
-    # datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
-    # exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
+    savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/test_experiment_logs'
+    logfile = 'exp_logs.csv'
+    datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
+    exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
 
     with open(exp_file) as csvfile:
         with open(logfile, 'w') as csvlog:
