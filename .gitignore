@@ -34,3 +34,5 @@ trial_logs/*
 tuning_logs/*
 trial_runs/*
 experiment_logs*
+experiment_runner.py
+test_experiment_logs/*

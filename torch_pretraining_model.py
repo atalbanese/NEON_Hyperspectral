@@ -87,28 +87,33 @@ class PreTrainingModel(pl.LightningModule):
         Q *= B # the colomns must sum to 1 so that Q is an assignment
         return Q.t()
     
-    def training_step(self, x, batch_idx):
+    def training_step(self, inp, batch_idx):
+
+        x = inp['input']
+        pad_mask = inp['pad_mask']
+
         b = x.shape[0]
         x_s = self.transforms_main(x)
 
         inp = torch.cat((x, x_s))
-        inp = self.encoder(inp)
+        double_mask = torch.cat((pad_mask, pad_mask))
+        inp = self.encoder(inp, src_key_padding_mask = double_mask)
         inp = self.projector(inp)
         inp = torch.nn.functional.normalize(inp, dim=1, p=2)
 
         scores = self.prototypes(inp)
 
-        scores_t = scores[:b]
-        scores_s = scores[b:]
+        scores_t = scores[:b][~pad_mask]
+        scores_s = scores[b:][~pad_mask]
 
         t = scores_t.detach()
         s = scores_s.detach()
 
-        t = self.ra(t)
-        s = self.ra(s)
+        # t = self.ra(t)
+        # s = self.ra(s)
 
-        scores_t = self.ra(scores_t)
-        scores_s = self.ra(scores_s)
+        # scores_t = self.ra(scores_t)
+        # scores_s = self.ra(scores_s)
 
         b = scores_t.shape[0]
 
@@ -146,9 +151,9 @@ class PreTrainingModel(pl.LightningModule):
 
     def forward(self, batch):
         with torch.no_grad():
-            inp = batch['hs']
-            hs_pad_mask = batch['hs_pad_mask']
-            inp = self.encoder(inp, src_key_padding_mask = hs_pad_mask)
+            inp = batch['input']
+            pad_mask = batch['pad_mask']
+            inp = self.encoder(inp, src_key_padding_mask = pad_mask)
             inp = self.projector(inp)
             inp = torch.nn.functional.normalize(inp, dim=1, p=2)
 
