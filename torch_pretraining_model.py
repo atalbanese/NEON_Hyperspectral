@@ -151,9 +151,9 @@ class PreTrainingModel(pl.LightningModule):
 
     def forward(self, batch):
         with torch.no_grad():
-            inp = batch['hs']
-            hs_pad_mask = batch['hs_pad_mask']
-            inp = self.encoder(inp, src_key_padding_mask = hs_pad_mask)
+            inp = batch['input']
+            pad_mask = batch['pad_mask']
+            inp = self.encoder(inp, src_key_padding_mask = pad_mask)
             inp = self.projector(inp)
             inp = torch.nn.functional.normalize(inp, dim=1, p=2)
 
