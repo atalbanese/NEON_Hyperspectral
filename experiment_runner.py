@@ -19,7 +19,10 @@ import copy
 
 def exp_builder(**kwargs):
     if kwargs['pt_ckpt'] != '':
-        return DLPreTrainingExperiment(**kwargs)
+        if kwargs['test_site'] == '':
+            return DLPreTrainingExperiment(**kwargs)
+        else:
+            return DLPreTrainingMultiSiteExperiment(**kwargs)
     if kwargs['model'] == 'DL':
         if kwargs['split_method'] == 'pixel':
             return DLPixelExperiment(**kwargs)
@@ -57,7 +60,7 @@ class BaseExperiment:
         test_prop = 0.2,
         valid_prop = 0.2,
         synth_loader = False,
-        num_epochs = 100,
+        num_epochs = 200,
         learning_rate = 5e-4,
         batch_size = 128,
         augments = ['normalize'],
@@ -482,12 +485,7 @@ class DLPreTrainingExperiment(DLExperiment):
         untrained = super().init_model()
 
         pre_trained = PreTrainingModel.load_from_checkpoint(self.pre_trained_ckpt)
-        #pre_trained.freeze()
         untrained.encoder = copy.deepcopy(pre_trained.encoder)
-        #untrained.encoder.freeze()
-        # for param in untrained.encoder.parameters():
-        #     param.requires_grad = False
-        # untrained.configure_optimizers()
 
         return untrained
     
@@ -501,18 +499,21 @@ class DLPreTrainingExperiment(DLExperiment):
         save_top_k = 3
         )
 
-        initial_freeze = (self.num_epochs * .2)
+        initial_freeze = (self.num_epochs * 0)
 
         logger = pl_loggers.TensorBoardLogger(save_dir = self.savedir, name=self.exp_number)
         trainer = pl.Trainer(accelerator="gpu", max_epochs=self.num_epochs, logger=logger, log_every_n_steps=10, deterministic=True,
             callbacks=[
             val_callback,
-            FeatureExtractorFreezeUnfreeze(initial_freeze)
+            #FeatureExtractorFreezeUnfreeze(initial_freeze)
             ]
             )
         trainer.fit(self.model, self.train_loader, val_dataloaders=self.valid_loader)
         return trainer.test(self.model, dataloaders=self.test_loader, ckpt_path='best')
 
+class DLPreTrainingMultiSiteExperiment(BaseMultiSiteExperiment, DLPreTrainingExperiment):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
 
 
 class FeatureExtractorFreezeUnfreeze(BaseFinetuning):

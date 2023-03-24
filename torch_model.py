@@ -57,6 +57,7 @@ class SimpleTransformer(pl.LightningModule):
                                             torch.nn.Linear(num_features, num_features),
                                             torch.nn.LazyBatchNorm1d(),
                                             torch.nn.ReLU(),
+                                            #torch.nn.Dropout(dropout),
                                             torch.nn.Linear(num_features, num_features),
                                             torch.nn.LazyBatchNorm1d(),
                                             torch.nn.ReLU(),
