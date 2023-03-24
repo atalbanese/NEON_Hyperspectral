@@ -11,7 +11,6 @@ class PreTrainingData(Dataset):
                 sequence_length: int,
                 sitename: str,
                 augments_list: list,
-                stats: str,
                 file_dim: int
                 ):
 
@@ -28,15 +27,17 @@ class PreTrainingData(Dataset):
 
         self.num_entries = (len(self.data_files) * self.file_dim * self.file_dim)//sequence_length
         self.entries_in_file = self.file_dim*self.file_dim//sequence_length
-
-        if len(augments_list) > 0:
-            self.transforms = torch.nn.Sequential(*self.build_augments(stats, augments_list))
-        else:
-            self.transforms = None
-
+        
         self.columns = int(np.sqrt((self.file_dim*self.file_dim)/self.sequence_length))
         self.rows = int(np.sqrt((self.file_dim*self.file_dim)/self.sequence_length))
-        self.good_idxs = self.find_good_segments()
+        self.open_files = dict()
+        self.all_data, self.stats = self.gather_data()
+
+
+        if len(augments_list) > 0:
+            self.transforms = torch.nn.Sequential(*self.build_augments(self.stats, augments_list))
+        else:
+            self.transforms = None
 
 
     def build_augments(self, stats, augments_list):
@@ -53,14 +54,19 @@ class PreTrainingData(Dataset):
         
         return augs
     
-    def find_good_segments(self):
-        good_idxs = []
+    def gather_data(self):
+        all_data = []
         for ix in range(self.num_entries):
             chunk = self.grab_chunk(ix)
             missing_data_mask = self.get_mask(chunk)
             if missing_data_mask.sum()>self.sequence_length//2:
-                good_idxs.append(ix)
-        return good_idxs
+                all_data.append(chunk)
+        stacked_data = np.stack(all_data)
+        mean = np.nanmean(stacked_data, axis=(0,1,2))
+        std = np.nanstd(stacked_data, axis=(0,1,2))
+        #Hack to prevent divide by 0 in case there is a channel with 0 standard deviation - it occured once I swear it!
+        std[std == 0] = 0.00001
+        return all_data, {'mean': mean, 'std': std}
 
     def get_mask(self, chunk):
         missing_data_mask = chunk == chunk
@@ -74,18 +80,22 @@ class PreTrainingData(Dataset):
 
         min_y, max_y, min_x, max_x = self.get_bounds(sequence_index)
 
-        grab = np.load(open_file, mmap_mode='r')[min_y:max_y,min_x:max_x,...]
+        if open_file not in self.open_files:
+            opened = np.load(open_file, mmap_mode='r')
+            self.open_files[open_file] = opened
+        
+        grab = self.open_files[open_file][min_y:max_y,min_x:max_x,...]
+
         return grab
 
 
     def __len__(self):
-        return len(self.good_idxs)
+        return len(self.all_data)
 
     def __getitem__(self, index):
         out = dict()
 
-        index = self.good_idxs[index]
-        grab = self.grab_chunk(index)
+        grab = self.all_data[index]
 
         mask = self.get_mask(grab)
         pad_dif = np.count_nonzero(~mask)
@@ -121,7 +131,6 @@ if __name__ == "__main__":
         sitename="STEI",
         augments_list=["normalize"],
         file_dim=1000,
-        stats={'mean': np.arange(16), 'std':np.arange(16)}
     )
 
     test.__getitem__(250)
