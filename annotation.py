@@ -52,7 +52,9 @@ class Plot:
         self.hyperspectral_bands = hyperspectral_bands
         self.tree_tops = tree_tops.reset_index(drop=True)
         self.canopy_height_model = canopy_height_model
-        self.potential_trees = potential_trees
+        #self.potential_trees = potential_trees
+        #TEMP TO TEST 90 CROWN DIAM
+        self.potential_trees = potential_trees.loc[potential_trees.ninetyCrownDiameter == potential_trees.ninetyCrownDiameter]
         self.cm_affine = AffineTransformer(from_origin(self.utm_origin[0], self.utm_origin[1], .1, .1))
         self.m_affine = AffineTransformer(from_origin(self.utm_origin[0], self.utm_origin[1], 1, 1))
         #Rowcol calls yield y-x ordered coordinates tuple, we want x-y. [::-1] is the way to get a reverse view of a tuple, because python is elegant and pythonic
@@ -645,6 +647,8 @@ class TreeBuilderFiltering(TreeBuilderBase):
     def filter_trees(self):
         #Filter for trees within 1.5 std of median difference between survey observed tree height and chm observed tree height
         filtered_trees = self.plot.potential_trees.loc[(self.plot.potential_trees.chm_dif > (self.plot.chm_dif_med-self.plot.chm_dif_std*1.5)) & (self.plot.potential_trees.chm_dif < (self.plot.chm_dif_med + self.plot.chm_dif_std*1.5))].reset_index(drop=True)
+        if len(filtered_trees) == 0:
+            return filtered_trees
         #Calculate distance matrix between all trees
         dist_matrix = filtered_trees.geometry.apply(lambda g: filtered_trees.distance(g)).to_numpy()
         #Grab upper triangle of distance matrix since dist mat is symmetrical
@@ -885,13 +889,16 @@ if __name__ == "__main__":
         if args.automatic:
             plot.automatic_annotation()
 
+
+
+####DEBUG CODE
     # test = PlotBuilder(
     #     sitename='NIWO',
     #     epsg='EPSG:32618',
     #     base_dir=r'C:\Users\tonyt\Documents\Research\final_data',
     # )
     # for plot in test.build_plots():
-    #     plot.find_trees('scholl')
+    #     plot.find_trees('filtering')
     #     print('here')
 
     # niwo_57 = test.__build_plot__('NIWO_057')

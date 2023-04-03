@@ -3,10 +3,6 @@ Rscript acquire_all_data.R -s RMNP -d C:/Users/tonyt/Documents/Research/final_da
 Rscript acquire_all_data.R -s NIWO -d C:/Users/tonyt/Documents/Research/final_data -y 2020
 Rscript acquire_all_data.R -s HARV -d C:/Users/tonyt/Documents/Research/final_data -y 2019
 
-#Find treetops from CHM --note this is now integrated with the acquire all data script
-Rscript find_tree_tops.R -s NIWO -d C:/Users/tonyt/Documents/Research/final_data
-Rscript find_tree_tops.R -s RMNP -d C:/Users/tonyt/Documents/Research/final_data
-Rscript find_tree_tops.R -s HARV -d C:/Users/tonyt/Documents/Research/final_data
 
 #Create 16 channel PCA images for HS scenes using CHM as a filter for canopy pixels
 python site_pca.py RMNP C:/Users/tonyt/Documents/Research/final_data
@@ -26,3 +22,5 @@ python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:3261
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 snapping -a
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 scholl -a
 
+#Run experiments:
+python experiment_runner.py /home/tony/thesis/lidar_hs_unsup_dl_model/experiment_logs/ experiment_set_1_results.csv /home/tony/thesis/lidar_hs_unsup_dl_model/final_data/ experiments_set_1.csv

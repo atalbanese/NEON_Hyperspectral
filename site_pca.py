@@ -110,6 +110,7 @@ if __name__ == "__main__":
     parser.add_argument("sitename")
     parser.add_argument("basedir")
     parser.add_argument("-p", "--processes", type=int, default=3)
+    parser.add_argument('-a', "--alternate", help='Fit PCA model to one site but use it to compress a different site',type=str, default='')
     args = parser.parse_args()
 
 
@@ -137,9 +138,27 @@ if __name__ == "__main__":
     print(f'Fitting PCA solver for {SITENAME}')
     for hs_file, chm_file in tqdm(list(zip(HS_FILES, CHM_FILES))):
         build_inc_pca(hs_file, chm_file)
+
+    if args.alternate != '':
+        #Reset globals to reflect alternate compression site
+        old_sitename = SITENAME
+        SITENAME = args.alternate
+
+        HS_FILTERS = [[410,1320],[1450,1800],[2050,2475]]
+        CHM_DIR = os.path.join(BASEDIR, SITENAME, "CHM")
+        HS_DIR = os.path.join(BASEDIR, SITENAME, "HS")
+        PCA_DIR = os.path.join(BASEDIR, SITENAME, f"PCA_fit_to_{old_sitename}")
+
+        CHM_FILES = os.listdir(CHM_DIR)
+        HS_FILES = os.listdir(HS_DIR)
+
+        #Sort based on origin so files are paired up
+        CHM_FILES.sort(key=lambda x: x.split('_')[-3])
+        CHM_FILES.sort(key=lambda x: x.split('_')[-2])
+
+        HS_FILES.sort(key=lambda x: x.split('_')[-3])
+        HS_FILES.sort(key=lambda x: x.split('_')[-2])
     
     print(f'Generating PCA files for {SITENAME}')
     with ProcessPool(args.processes) as pool:
-         bulk_process(pool, do_inc_pca)
-
-    
+        bulk_process(pool, do_inc_pca)

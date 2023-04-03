@@ -2,7 +2,7 @@ library(dplyr)
 library(ggplot2)
 
 
-results <- read.csv('C:/Users/tonyt/Documents/Research/dl_model/lidar_hs_unsup_dl_model/experiment_set_1_results.csv')
+results <- read.csv('C:/Users/tonyt/Documents/Research/dl_model/lidar_hs_unsup_dl_model/experiment_set_2_results.csv')
 
 
 niwo_medians <- results %>%
