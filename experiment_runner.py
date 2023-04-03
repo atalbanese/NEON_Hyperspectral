@@ -18,11 +18,12 @@ import copy
 
 
 def exp_builder(**kwargs):
-    if kwargs['pt_ckpt'] != '':
-        if kwargs['test_site'] == '':
-            return DLPreTrainingExperiment(**kwargs)
-        else:
-            return DLPreTrainingMultiSiteExperiment(**kwargs)
+    if 'pt_ckpt' in kwargs:
+        if kwargs['pt_ckpt'] != '':
+            if kwargs['test_site'] == '':
+                return DLPreTrainingExperiment(**kwargs)
+            else:
+                return DLPreTrainingMultiSiteExperiment(**kwargs)
     if kwargs['model'] == 'DL':
         if kwargs['split_method'] == 'pixel':
             return DLPixelExperiment(**kwargs)
@@ -226,7 +227,10 @@ class DLExperiment(BaseExperiment):
         super().__init__(**kwargs)
 
     def init_model(self):
-        weight = list(self.site_data.class_weights.values())
+        if self.site_data.class_weights is not None:
+            weight = list(self.site_data.class_weights.values())
+        else:
+            weight = self.weights
         num_heads = 4 if self.inp_key == 'pca' else 12
         model = SimpleTransformer(
             lr = self.learning_rate,
@@ -310,6 +314,7 @@ class BasePixelExperiment(BaseExperiment):
         self.num_features = self.training[self.inp_key].shape[-1]
         self.mask_and_pad_data()
         self.train_loader, self.test_loader, self.valid_loader = self.init_dataloaders()
+        self.weights = self.pixel_weights()
         self.model = self.init_model()
     
     def gather_data(self):
@@ -368,7 +373,6 @@ class BasePixelExperiment(BaseExperiment):
         for dset in [self.training, self.testing, self.validation]:
             chm_mask = dset['chm'] > 1.99
             missing_data_mask = dset[self.inp_key] == dset[self.inp_key]
-            #TODO: test that this is the right axis
             missing_data_mask = np.logical_and.reduce(missing_data_mask, axis=(1))
             chm_mask = chm_mask * missing_data_mask
             if self.apply_filters:
@@ -563,7 +567,7 @@ if __name__ == '__main__':
     # savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/test_experiment_logs'
     # logfile = 'exp_logs.csv'
     # datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
-    # exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
+    # exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_set_3.csv'
 
     with open(exp_file) as csvfile:
         with open(logfile, 'w') as csvlog:

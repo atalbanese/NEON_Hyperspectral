@@ -410,6 +410,9 @@ class SiteData:
         if data_selection == "training and validation":
             return self.training_data + self.validation_data
 
+    # def __add__(self, other_site):
+    #     #TODO
+    #     pass
 
 # if __name__ == "__main__":
 #     test = SiteData(
