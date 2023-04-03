@@ -18,12 +18,18 @@ import copy
 
 
 def exp_builder(**kwargs):
-    if 'pt_ckpt' in kwargs:
-        if kwargs['pt_ckpt'] != '':
-            if kwargs['test_site'] == '':
-                return DLPreTrainingExperiment(**kwargs)
-            else:
-                return DLPreTrainingMultiSiteExperiment(**kwargs)
+
+    if 'test_site' not in kwargs:
+        kwargs['test_site'] = ''
+    if 'pt_ckpt' not in kwargs:
+        kwargs['pt_ckpt'] = ''
+
+
+    if kwargs['pt_ckpt'] != '':
+        if kwargs['test_site'] == '':
+            return DLPreTrainingExperiment(**kwargs)
+        else:
+            return DLPreTrainingMultiSiteExperiment(**kwargs)
     if kwargs['model'] == 'DL':
         if kwargs['split_method'] == 'pixel':
             return DLPixelExperiment(**kwargs)
@@ -421,24 +427,7 @@ class BasePixelExperiment(BaseExperiment):
 class DLPixelExperiment(BasePixelExperiment, DLExperiment):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        val_callback = ModelCheckpoint(
-        dirpath=os.path.join(self.datadir,'ckpts'), 
-        filename=f'{self.sitename}_exp_{self.exp_number}_trial_{self.trial_num}' +'_{val_ova:.2f}_{epoch}',
-        monitor='val_loss',
-        save_on_train_epoch_end=True,
-        mode='min',
-        save_top_k = 3
-        )
 
-
-        logger = pl_loggers.TensorBoardLogger(save_dir = self.savedir, name=self.exp_number)
-        trainer = pl.Trainer(accelerator="gpu", max_epochs=self.num_epochs, logger=logger, log_every_n_steps=10, deterministic=True,
-            callbacks=[
-            val_callback
-            ]
-            )
-        trainer.fit(self.model, self.train_loader, val_dataloaders=self.valid_loader)
-        return trainer.test(self.model, dataloaders=self.test_loader, ckpt_path='best')
   
 
 class RFPixelExperiment(BasePixelExperiment, RFExperiment):
