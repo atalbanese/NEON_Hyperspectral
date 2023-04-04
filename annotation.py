@@ -52,9 +52,7 @@ class Plot:
         self.hyperspectral_bands = hyperspectral_bands
         self.tree_tops = tree_tops.reset_index(drop=True)
         self.canopy_height_model = canopy_height_model
-        #self.potential_trees = potential_trees
-        #TEMP TO TEST 90 CROWN DIAM
-        self.potential_trees = potential_trees.loc[potential_trees.ninetyCrownDiameter == potential_trees.ninetyCrownDiameter]
+        self.potential_trees = potential_trees
         self.cm_affine = AffineTransformer(from_origin(self.utm_origin[0], self.utm_origin[1], .1, .1))
         self.m_affine = AffineTransformer(from_origin(self.utm_origin[0], self.utm_origin[1], 1, 1))
         #Rowcol calls yield y-x ordered coordinates tuple, we want x-y. [::-1] is the way to get a reverse view of a tuple, because python is elegant and pythonic
