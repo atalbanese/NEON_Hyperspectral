@@ -236,7 +236,7 @@ class SiteData:
         #This acts as a check if apply_filters is false, this operation should have been done when trees were made
         to_drop = []
         for ix, tree in enumerate(self.all_trees):
-            tree = tree.get_dict(['chm', 'pca', 'ndvi'])
+            tree = tree.get_dict(['chm', 'pca', 'ndvi', 'mpsi'])
             chm_mask = tree['chm'] > 1.99
 
             if apply_filters:
@@ -246,7 +246,7 @@ class SiteData:
                 chm_mask = chm_mask * ndvi_mask * mpsi_mask
             
             if chm_mask.sum() <= 0:
-                to_drop.append[ix]
+                to_drop.append(ix)
         to_drop = set(to_drop)
         filtered_trees = [i for j, i in enumerate(self.all_trees) if j not in to_drop]
         self.all_trees = filtered_trees
