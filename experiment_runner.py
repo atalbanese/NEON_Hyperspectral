@@ -32,7 +32,10 @@ def exp_builder(**kwargs):
             return DLPreTrainingMultiSiteExperiment(**kwargs)
     if kwargs['model'] == 'DL':
         if kwargs['split_method'] == 'pixel':
-            return DLPixelExperiment(**kwargs)
+            if kwargs['test_site'] == '':
+                return DLPixelExperiment(**kwargs)
+            else:
+                return DLPixelMultisiteExperiment(**kwargs)
         else:
             if kwargs['test_site'] == '':
                 return DLExperiment(**kwargs)
@@ -40,7 +43,10 @@ def exp_builder(**kwargs):
                 return DLMultiSiteExperiment(**kwargs)
     if kwargs['model'] == 'RF':
         if kwargs['split_method'] == 'pixel':
-            return RFPixelExperiment(**kwargs)
+            if kwargs['test_site'] == '':
+                return RFPixelExperiment(**kwargs)
+            else:
+                return RFPixelMultisiteExperiment(**kwargs)
         else:
             if kwargs['test_site'] == '':
                 return RFExperiment(**kwargs)
@@ -508,6 +514,41 @@ class DLPreTrainingMultiSiteExperiment(BaseMultiSiteExperiment, DLPreTrainingExp
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
 
+class DLPixelMultisiteExperiment(BaseMultiSiteExperiment, DLPixelExperiment):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+    
+    def split_data(self):
+        train, test, valid = super().split_data()
+        collated = self.collate_data(test)
+
+        flattened = dict()
+        for k, v in collated.items():
+            if len(v.shape) == 4:
+                flat = rearrange(v, 'b h w c -> (b h w) c')
+                flattened[k] = flat
+            if len(v.shape) == 3:
+                flat = rearrange(v, 'b h w -> (b h w)')
+                flattened[k] = flat
+        return train, flattened, valid
+
+class RFPixelMultisiteExperiment(BaseMultiSiteExperiment, RFPixelExperiment):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def split_data(self):
+        train, test, valid = super().split_data()
+        collated = self.collate_data(test)
+
+        flattened = dict()
+        for k, v in collated.items():
+            if len(v.shape) == 4:
+                flat = rearrange(v, 'b h w c -> (b h w) c')
+                flattened[k] = flat
+            if len(v.shape) == 3:
+                flat = rearrange(v, 'b h w -> (b h w)')
+                flattened[k] = flat
+        return train, flattened, valid
 
 class FeatureExtractorFreezeUnfreeze(BaseFinetuning):
      def __init__(self, unfreeze_at_epoch=100):
