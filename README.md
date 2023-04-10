@@ -73,6 +73,7 @@ Full requirements incoming, but general requirements are:
   - sf
   - raster
   - neonUtilities
+  - geoNEON
   - neonOS
   - dplyr
   - lidR
