@@ -1,5 +1,5 @@
 # NEON_Hyperspectral
-Scripts to train deep learning transfomer and random forest tree species classification models using hyperspectral and vegetation data from NEON science sites. All tools required to download and annotate data are included. Developed as part of my master's thesis in GeoInformatics at Hunter College, 2023.
+Scripts to train deep learning transformer and random forest tree species classification models using hyperspectral and vegetation data from NEON science sites. All tools required to download and annotate data are included. Developed as part of my master's thesis in GeoInformatics at Hunter College, 2023.
 
 The general workflow is:
 
