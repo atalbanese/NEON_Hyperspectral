@@ -73,6 +73,10 @@ Optionally, users may train and then supply a deep learning model pre-trained on
 
 python pretraining_run.py SAVEDIR DATA_DIRECTORY SITENAME
 
+## Inference
+
+Use a trained model to run inference on scenes. Coming soon!
+
 ## Requirements
 
 Full requirements incoming, but general requirements are:
