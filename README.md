@@ -36,8 +36,10 @@ python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:3261
 
 EPSG codes are not automatically generated and must be provided manually by the user. NEON sites are all UTM codes. 
 
-### Data can also be manually annotated using a GUI with the -m flag
+Pixels can also be manually included/excluded using a GUI with the -m flag. Useful if you want to hand-select for sunlit pixels.
+```
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 filtering -m
+```
 
 ## Train and evaluate models using experiments listed in a CSV file
 Note: While this project works on both Linux and Windows, model training is much faster on Linux.
@@ -60,7 +62,7 @@ python experiment_runner.py LOG_DIR RESULTS_FILE DATA_DIRECTORY EXPERIMENTS.CSV
 | exp_number | Experiment Number, used for tracking experiments | Any integer |
 | sitename | Acronym for NEON Site, ie RMNP | Any four character NEON sitecode |
 | anno_method | Annotation method used to create training data | filtering, snapping, scholl |
-| man_or_auto | Was data automatically or manually annotated? | man, auto |
+| man_or_auto | Were pixels automatically or manually annotated? | man, auto |
 | split_method | How should training, testing, and validation data be split | tree, plot, pixel |
 | model | What kind of model to train and evaluate | DL, RF |
 | apply_filters | Whether to apply vegetation and shadow filters to data | T, F |
