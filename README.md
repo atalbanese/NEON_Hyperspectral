@@ -5,6 +5,8 @@ The general workflow is:
 
 Download data -> Compress data with PCA -> Annotate data ->  Train and evaluate model
 
+acquire_all_data.R -> site_pca.py -> annotate.py -> experiment_runner.py
+
 ## Download data
 
 Rscript acquire_all_data.R -s SITENAME -d DATA_DIRECTORY -y YEAR
