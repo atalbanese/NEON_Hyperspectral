@@ -18,6 +18,13 @@ python site_pca.py SITENAME DATA_DIRECTORY
 
 ```python site_pca.py RMNP C:/Users/tonyt/Documents/Research/final_data```
 
+The --alternate option can be used to fit a PCA model to one site and then compress a different site
+
+```
+# Fit PCA to RMNP and then compress NIWO images
+python site_pca.py RMNP C:/Users/tonyt/Documents/Research/final_data --alternate NIWO
+```
+
 ## Annotate data using different tree identification algorithms
 ```
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 filtering -a
