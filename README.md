@@ -56,7 +56,7 @@ python experiment_runner.py LOG_DIR RESULTS_FILE DATA_DIRECTORY EXPERIMENTS.CSV
 | inp_key | What input from training data to train model on | pca, hs |
 | num_trials | How many times to run this experiment | Any positive integer |
 | remove_taxa | A list of taxa using NEON taxa codes to omit from training and evaluation, separated by semicolons. Leave blank to keep all | i.e. PIFL2;PICOL |
-| test_site | NEON site to test trained model on. Leave blank to test on same site. | Any four character NEON sitecode |
+| test_site | NEON site to test trained model on. Leave blank to test on same site. Used to train on one site and test on another which has overlapping taxa| Any four character NEON sitecode |
 | pt_ckpt | Model checkpoint to load trained on unlabelled data. Only usable with deep learning. Generated using pretraining_run.py. Can be left blank. | A file location ending in .ckpt |
 
 ## Pre-Training
