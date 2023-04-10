@@ -10,6 +10,7 @@ Download data -> Compress data with PCA -> Annotate data ->  Train and evaluate 
 Rscript acquire_all_data.R -s SITENAME -d DATA_DIRECTORY -y YEAR
 
 Downloading data for Rocky Mountain National Park in 2020. Will be saved in ...final_data/RMNP
+
 ```Rscript acquire_all_data.R -s RMNP -d C:/Users/tonyt/Documents/Research/final_data -y 2020```
 
 ## Create PCA Images from Hyperspectral Data
