@@ -32,7 +32,10 @@ def exp_builder(**kwargs):
             return DLPreTrainingMultiSiteExperiment(**kwargs)
     if kwargs['model'] == 'DL':
         if kwargs['split_method'] == 'pixel':
-            return DLPixelExperiment(**kwargs)
+            if kwargs['test_site'] == '':
+                return DLPixelExperiment(**kwargs)
+            else:
+                return DLPixelMultisiteExperiment(**kwargs)
         else:
             if kwargs['test_site'] == '':
                 return DLExperiment(**kwargs)
@@ -40,7 +43,10 @@ def exp_builder(**kwargs):
                 return DLMultiSiteExperiment(**kwargs)
     if kwargs['model'] == 'RF':
         if kwargs['split_method'] == 'pixel':
-            return RFPixelExperiment(**kwargs)
+            if kwargs['test_site'] == '':
+                return RFPixelExperiment(**kwargs)
+            else:
+                return RFPixelMultisiteExperiment(**kwargs)
         else:
             if kwargs['test_site'] == '':
                 return RFExperiment(**kwargs)
@@ -508,6 +514,41 @@ class DLPreTrainingMultiSiteExperiment(BaseMultiSiteExperiment, DLPreTrainingExp
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
 
+class DLPixelMultisiteExperiment(BaseMultiSiteExperiment, DLPixelExperiment):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+    
+    def split_data(self):
+        train, test, valid = super().split_data()
+        collated = self.collate_data(test)
+
+        flattened = dict()
+        for k, v in collated.items():
+            if len(v.shape) == 4:
+                flat = rearrange(v, 'b h w c -> (b h w) c')
+                flattened[k] = flat
+            if len(v.shape) == 3:
+                flat = rearrange(v, 'b h w -> (b h w)')
+                flattened[k] = flat
+        return train, flattened, valid
+
+class RFPixelMultisiteExperiment(BaseMultiSiteExperiment, RFPixelExperiment):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def split_data(self):
+        train, test, valid = super().split_data()
+        collated = self.collate_data(test)
+
+        flattened = dict()
+        for k, v in collated.items():
+            if len(v.shape) == 4:
+                flat = rearrange(v, 'b h w c -> (b h w) c')
+                flattened[k] = flat
+            if len(v.shape) == 3:
+                flat = rearrange(v, 'b h w -> (b h w)')
+                flattened[k] = flat
+        return train, flattened, valid
 
 class FeatureExtractorFreezeUnfreeze(BaseFinetuning):
      def __init__(self, unfreeze_at_epoch=100):
@@ -532,6 +573,7 @@ class FeatureExtractorFreezeUnfreeze(BaseFinetuning):
 
 if __name__ == '__main__':
 
+    #Hack to deal with tensorboard issue
     os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
 
@@ -556,7 +598,7 @@ if __name__ == '__main__':
     # savedir = '/home/tony/thesis/lidar_hs_unsup_dl_model/test_experiment_logs'
     # logfile = 'exp_logs.csv'
     # datadir = '/home/tony/thesis/lidar_hs_unsup_dl_model/final_data'
-    # exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_set_3.csv'
+    # exp_file = '/home/tony/thesis/lidar_hs_unsup_dl_model/experiments_test.csv'
 
     with open(exp_file) as csvfile:
         with open(logfile, 'w') as csvlog:
