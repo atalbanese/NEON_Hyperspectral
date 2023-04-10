@@ -6,9 +6,11 @@ The general workflow is:
 Download data -> Compress data with PCA -> Annotate data ->  Train and evaluate model
 
 ## Download data
+
 Rscript acquire_all_data.R -s SITENAME -d DATA_DIRECTORY -y YEAR
 
 Downloading data for Rocky Mountain National Park in 2020. Will be saved in ...final_data/RMNP
+
 ```Rscript acquire_all_data.R -s RMNP -d C:/Users/tonyt/Documents/Research/final_data -y 2020```
 
 ## Create PCA Images from Hyperspectral Data
@@ -16,12 +18,21 @@ python site_pca.py SITENAME DATA_DIRECTORY
 
 ```python site_pca.py RMNP C:/Users/tonyt/Documents/Research/final_data```
 
+The --alternate option can be used to fit a PCA model to one site and then compress a different site
+
+```
+# Fit PCA to RMNP and then compress NIWO images
+python site_pca.py RMNP C:/Users/tonyt/Documents/Research/final_data --alternate NIWO
+```
+
 ## Annotate data using different tree identification algorithms
 ```
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 filtering -a
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 snapping -a
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 scholl -a
 ```
+
+EPSG codes are not automatically generated and must be provided manually by the user. NEON sites are all UTM codes. 
 
 ### Data can also be manually annotated using a GUI with the -m flag
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 filtering -m
@@ -54,7 +65,7 @@ python experiment_runner.py LOG_DIR RESULTS_FILE DATA_DIRECTORY EXPERIMENTS.CSV
 | inp_key | What input from training data to train model on | pca, hs |
 | num_trials | How many times to run this experiment | Any positive integer |
 | remove_taxa | A list of taxa using NEON taxa codes to omit from training and evaluation, separated by semicolons. Leave blank to keep all | i.e. PIFL2;PICOL |
-| test_site | NEON site to test trained model on. Leave blank to test on same site. | Any four character NEON sitecode |
+| test_site | NEON site to test trained model on. Leave blank to test on same site. Used to train on one site and test on another which has overlapping taxa| Any four character NEON sitecode |
 | pt_ckpt | Model checkpoint to load trained on unlabelled data. Only usable with deep learning. Generated using pretraining_run.py. Can be left blank. | A file location ending in .ckpt |
 
 ## Pre-Training
@@ -71,6 +82,7 @@ Full requirements incoming, but general requirements are:
   - sf
   - raster
   - neonUtilities
+  - geoNEON
   - neonOS
   - dplyr
   - lidR
