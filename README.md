@@ -73,7 +73,7 @@ python experiment_runner.py LOG_DIR RESULTS_FILE DATA_DIRECTORY EXPERIMENTS.CSV
 | pt_ckpt | Model checkpoint to load trained on unlabelled data. Only usable with deep learning. Generated using pretraining_run.py. Can be left blank. | A file location ending in .ckpt |
 
 ## Pre-Training
-Optionally, users may train and then supply a deep learning model pre-trained on unlabelled NEON site data using a SWAV (SWapping Assignments between Views) model
+Optionally, users may train and then supply a deep learning model pre-trained on unlabelled NEON site data using a SwAV (Swapping Assignments between Views) model (https://arxiv.org/abs/2006.09882)
 
 python pretraining_run.py SAVEDIR DATA_DIRECTORY SITENAME
 
