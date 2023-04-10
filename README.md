@@ -84,3 +84,4 @@ Full requirements incoming, but general requirements are:
   - pytorch-lightning
   - numpy
   - scikit-image
+  - h5py
