@@ -90,7 +90,7 @@ Full requirements incoming, but general requirements are:
   - neonUtilities
   - geoNEON
   - neonOS
-  - dplyr
+  - tidyverse
   - lidR
   
 - Python:
