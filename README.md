@@ -25,6 +25,8 @@ python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:3261
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 scholl -a
 ```
 
+EPSG codes are not automatically generated and must be provided manually by the user. NEON sites are all UTM codes. 
+
 ### Data can also be manually annotated using a GUI with the -m flag
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 filtering -m
 
