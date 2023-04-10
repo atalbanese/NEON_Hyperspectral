@@ -10,12 +10,8 @@ from einops import rearrange
 import rasterio as rs
 import matplotlib.pyplot as plt
 from rasterio.windows import Window
-from skimage import morphology
-from skimage.segmentation import watershed, mark_boundaries
-from skimage.color import rgb2gray
-from skimage.filters import sobel
+from skimage.segmentation import mark_boundaries
 from skimage.color import rgb2hsv
-from skimage.transform import resize
 import argparse
 
 
