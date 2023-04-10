@@ -57,7 +57,30 @@ python experiment_runner.py LOG_DIR RESULTS_FILE DATA_DIRECTORY EXPERIMENTS.CSV
 | test_site | NEON site to test trained model on. Leave blank to test on same site. | Any four character NEON sitecode |
 | pt_ckpt | Model checkpoint to load trained on unlabelled data. Only usable with deep learning. Generated using pretraining_run.py. Can be left blank. | A file location ending in .ckpt |
 
-### Pre-Training
+## Pre-Training
 Optionally, users may train and then supply a deep learning model pre-trained on unlabelled NEON site data using a SWAV (SWapping Assignments between Views) model
 
 python pretraining_run.py SAVEDIR DATA_DIRECTORY SITENAME
+
+## Requirements
+
+Full requirements incoming, but general requirements are:
+
+- R:
+  - sp
+  - sf
+  - raster
+  - neonUtilities
+  - neonOS
+  - dplyr
+  - lidR
+  
+- Python:
+  - sklearn
+  - geopandas
+  - rasterio
+  - pytorch
+  - einops
+  - pytorch-lightning
+  - numpy
+  - scikit-image
