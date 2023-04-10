@@ -27,7 +27,7 @@ The --alternate option can be used to fit a PCA model to one site and then compr
 python site_pca.py RMNP C:/Users/tonyt/Documents/Research/final_data --alternate NIWO
 ```
 
-## Annotate data using different tree identification algorithms
+## Annotate data using different tree selection algorithms
 ```
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 filtering -a
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 snapping -a
