@@ -37,3 +37,4 @@ experiment_logs*
 experiment_runner.py
 test_experiment_logs/*
 old_code/*
+.Rhistory

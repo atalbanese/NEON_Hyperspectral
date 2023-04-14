@@ -95,40 +95,56 @@ class Plot:
         return diff_arr.argmin()
 
     def plot_me(self):
-        tree_cm = self.cm_affine.rowcol(self.potential_trees.easting_tree, self.potential_trees.northing_tree)[::-1]
-        tree_m = self.m_affine.rowcol(self.potential_trees.easting_tree, self.potential_trees.northing_tree)[::-1]
+        with plt.style.context('ggplot'):
+            tree_cm = self.cm_affine.rowcol(self.potential_trees.easting_tree, self.potential_trees.northing_tree)[::-1]
+            tree_m = self.m_affine.rowcol(self.potential_trees.easting_tree, self.potential_trees.northing_tree)[::-1]
 
 
-        fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(14, 4.25), layout="constrained")
-        ax[0].imshow(self.rgb)
-        ax[0].set_title('RGB - 10cm resolution')
-        ax[0].scatter(*tree_cm, c='red')
-        #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
-        ax[0].get_xaxis().set_visible(False)
-        ax[0].get_yaxis().set_visible(False)
+            fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(14, 5.5), layout="constrained")
+            ax[0].imshow(self.rgb)
+            ax[0].set_title('RGB - 10cm resolution')
+            ax[0].scatter(*tree_cm, c='red')
+            #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
+            ax[0].get_xaxis().set_visible(False)
+            ax[0].get_yaxis().set_visible(False)
+            ax[0].set_xlim(120,340)
+            ax[0].set_ylim(380, 140)
 
-        ax[1].imshow(self.hyperspectral[...,[self.find_nearest(x) for x in [630,532,465]]]*12)
-        ax[1].set_title('Hyperspectral - 1m resolution')
-        ax[1].scatter(*tree_m, c='red')
-        #ax[1].scatter(*self.tree_tops_local_m, c='blue')
-        ax[1].get_xaxis().set_visible(False)
-        ax[1].get_yaxis().set_visible(False)
-
-
-        im = ax[2].imshow(self.canopy_height_model)
-        ax[2].set_title('CHM - 1 m resolution')
-        ax[2].get_xaxis().set_visible(False)
-        ax[2].get_yaxis().set_visible(False)
-        cbar = fig.colorbar(im)
-        cbar.set_label('Height (m)')
-        ax[2].scatter(*tree_m, c='red', label='Survey Tree')
-        #ax[3].scatter(*self.tree_tops_local_m, c='blue', label='Treetop from Lidar')
+            ax[1].imshow(self.hyperspectral[...,[self.find_nearest(x) for x in [630,532,465]]]*12)
+            ax[1].set_title('Hyperspectral - 1m resolution')
+            ax[1].scatter(*tree_m, c='red')
+            #ax[1].scatter(*self.tree_tops_local_m, c='blue')
+            ax[1].get_xaxis().set_visible(False)
+            ax[1].get_yaxis().set_visible(False)
+            ax[1].set_xlim(12,34)
+            ax[1].set_ylim(38, 14)
 
 
-        fig.suptitle(f"Plot ID: {self.name}\n")
-        fig.legend(loc='upper right', bbox_to_anchor=(0.99,0.98))
-        
-        plt.show()
+            im = ax[2].imshow(self.canopy_height_model, cmap='Spectral_r')
+            ax[2].set_title('CHM - 1 m resolution')
+            ax[2].get_xaxis().set_visible(False)
+            ax[2].get_yaxis().set_visible(False)
+            cbar = fig.colorbar(im)
+            cbar.set_label('Height (m)')
+            ax[2].scatter(*tree_m, c='red', label='Survey Tree')
+            ax[2].set_xlim(12,34)
+            ax[2].set_ylim(38, 14)
+            #ax[3].scatter(*self.tree_tops_local_m, c='blue', label='Treetop from Lidar')
+
+
+            fig.suptitle(f"Data Sources Used\nPlot ID: {self.name}\n", fontsize=14)
+            fig.legend(loc='upper right', bbox_to_anchor=(1.0, 0.89))
+
+            plt.subplots_adjust(top=0.88,
+                                bottom=0.11,
+                                left=0.125,
+                                right=0.9,
+                                hspace=0.2,
+                                wspace=0.2)
+            
+            plt.savefig(r'C:\Users\tonyt\Documents\Research\thesis_final\Figures\Final_Figures\Data_Sources.png', dpi=300)
+            
+            plt.show()
 
     def plot_before_and_after(self):
         tree_cm = self.cm_affine.rowcol(self.potential_trees.easting_tree, self.potential_trees.northing_tree)[::-1]
@@ -447,23 +463,26 @@ class PlotBuilder:
             return self.__concat_plots__(hs_grabs, bounds_list), bands
 
     def plot_hs_spectra(self, bands, hs_filter, hs_grab):
-        mean_1 = np.mean(hs_grab, axis=(0,1))
-        mean_2 = np.mean(hs_grab[...,hs_filter], axis=(0,1))
-        bands_2 = bands[hs_filter]
+        with plt.style.context('ggplot'):
+            mean_1 = np.mean(hs_grab, axis=(0,1))
+            mean_2 = np.mean(hs_grab[...,hs_filter], axis=(0,1))
+            bands_2 = bands[hs_filter]
 
-        fig, ax = plt.subplots(2, 1, figsize=(8, 6))
-        ax[0].set_ylabel('Reflectance', loc="bottom")
-        ax[1].set_xlabel('Wavelength (nm)')
-        ax[0].plot(bands, mean_1, '.--b')
-        ax[1].plot(bands_2, mean_2, '.--g')
-        ax[0].set_title("Before de-noising")
+            fig, ax = plt.subplots(2, 1, figsize=(10, 8))
+            ax[0].set_ylabel('Reflectance')
+            ax[1].set_ylabel('Reflectance')
+            ax[1].set_xlabel('Wavelength (nm)')
+            ax[0].plot(bands, mean_1, '.--b')
+            ax[1].plot(bands_2, mean_2, '.--g')
+            ax[0].set_title("Before de-noising")
 
-        ax[0].set_ylim(-0.01, 0.4)
-        ax[1].set_ylim(-0.01, 0.4)
-        ax[1].set_title("After de-noising")
-        plt.suptitle("Mean hyperspectral reflectance from a sample plot before and after de-noising")
-        fig.tight_layout()
-        plt.show()
+            ax[0].set_ylim(-0.01, 0.2)
+            ax[1].set_ylim(-0.01, 0.2)
+            ax[1].set_title("After de-noising")
+            plt.suptitle("Mean reflectance from a sample plot before and after de-noising", size=14)
+            fig.tight_layout()
+            #plt.savefig(r'C:\Users\tonyt\Documents\Research\thesis_final\Figures\Final_Figures\Denoising.png', dpi=300)
+            plt.show()
 
     def grab_chm(self, bbox) -> np.ndarray:
         chm_grabs = []
@@ -845,59 +864,60 @@ class TreePlotter:
 
 
 if __name__ == "__main__":
-    import warnings
-    warnings.filterwarnings('ignore')
-    parser = argparse.ArgumentParser()
-    parser.add_argument("sitename", help='NEON sitename, e.g. NIWO', type=str)
-    parser.add_argument("basedir", help="Base directory storing all NEON data", type=str)
-    parser.add_argument("epsg", help='EPSG code, e.g EPSG:32613', type=str)
-    parser.add_argument("algo", help="Tree selection algorithm to use. One of: filtering, snapping, scholl", type=str)
-    parser.add_argument("-m", "--manual", help="perform manual annotation",
-                    action="store_true")
-    parser.add_argument("-a", "--automatic", help="perform automatic annotation",
-                    action="store_true")
-    parser.add_argument("--skip", help="Any plots from a study site you may want to skip, separated by spaces, eg. NIWO_057 NIWO_019", default="", type=str)
-    parser.add_argument("--min_taxa", help="Minimum number of examples of a taxa required to add to annotate", default=40, type=int)
-    args = parser.parse_args()
+    # import warnings
+    # warnings.filterwarnings('ignore')
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("sitename", help='NEON sitename, e.g. NIWO', type=str)
+    # parser.add_argument("basedir", help="Base directory storing all NEON data", type=str)
+    # parser.add_argument("epsg", help='EPSG code, e.g EPSG:32613', type=str)
+    # parser.add_argument("algo", help="Tree selection algorithm to use. One of: filtering, snapping, scholl", type=str)
+    # parser.add_argument("-m", "--manual", help="perform manual annotation",
+    #                 action="store_true")
+    # parser.add_argument("-a", "--automatic", help="perform automatic annotation",
+    #                 action="store_true")
+    # parser.add_argument("--skip", help="Any plots from a study site you may want to skip, separated by spaces, eg. NIWO_057 NIWO_019", default="", type=str)
+    # parser.add_argument("--min_taxa", help="Minimum number of examples of a taxa required to add to annotate", default=40, type=int)
+    # args = parser.parse_args()
 
 
-    if len(args.skip) > 0:
-        skips = args.skip.split(" ")
-    else: 
-        skips = []
+    # if len(args.skip) > 0:
+    #     skips = args.skip.split(" ")
+    # else: 
+    #     skips = []
 
-    BASEDIR = fr"{args.basedir}"
-    pb = PlotBuilder(
-        sitename=args.sitename,
-        epsg=args.epsg,
-        base_dir=BASEDIR,
-        completed_plots=skips,
-        min_taxa=args.min_taxa
-    )
+    # BASEDIR = fr"{args.basedir}"
+    # pb = PlotBuilder(
+    #     sitename=args.sitename,
+    #     epsg=args.epsg,
+    #     base_dir=BASEDIR,
+    #     completed_plots=skips,
+    #     min_taxa=args.min_taxa
+    # )
 
-    for plot in pb.build_plots():
-        plot.find_trees(args.algo)
-        if args.manual:
-            plot.manual_annotation()
+    # for plot in pb.build_plots():
+    #     plot.find_trees(args.algo)
+    #     if args.manual:
+    #         plot.manual_annotation()
         
-        if args.automatic:
-            plot.automatic_annotation()
+    #     if args.automatic:
+    #         plot.automatic_annotation()
 
 
 
 ####DEBUG CODE
-    # test = PlotBuilder(
-    #     sitename='NIWO',
-    #     epsg='EPSG:32618',
-    #     base_dir=r'C:\Users\tonyt\Documents\Research\final_data',
-    # )
+    test = PlotBuilder(
+        sitename='NIWO',
+        epsg='EPSG:32618',
+        base_dir=r'C:\Users\tonyt\Documents\Research\final_data',
+        plot_hs_dif=True
+    )
     # for plot in test.build_plots():
     #     plot.find_trees('filtering')
     #     print('here')
 
-    # niwo_57 = test.__build_plot__('NIWO_057')
-    # niwo_57.find_trees('snapping')
-    # niwo_57.plot_me()
-    # niwo_57.plot_before_and_after()
+    niwo_57 = test.__build_plot__('NIWO_057')
+    niwo_57.find_trees('filtering')
+    #niwo_57.plot_me()
+    niwo_57.plot_before_and_after()
     #niwo_57.automatic_annotation()
-    # print('here')
+    print('here')

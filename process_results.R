@@ -99,9 +99,9 @@ harv_results <- same_site_results %>% filter(sitename == 'HARV', apply_filters =
 
 label_dict <- as_labeller(c(
   `PIFL2` = 'Omitted Taxa: Limber Pine',
-  `Pixel`="Split Method: Pixel",
-  `Plot`="Split Method: Plot",
-  `Tree`="Split Method: Tree",
+  `Pixel`="Split Method: Random Pixel",
+  `Plot`="Split Method: Plot Divide",
+  `Tree`="Split Method: Random Tree",
   `NONE` = 'Omitted Taxa: None',
    `Filtering` = 'Label Method: Filtering',
   `Snapping` = 'Label Method: Snapping',
