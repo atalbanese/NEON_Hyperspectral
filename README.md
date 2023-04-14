@@ -1,9 +1,11 @@
 # NEON_Hyperspectral
-Scripts to train deep learning and random forest models using hyperspectral and vegetation data from NEON science sites. All tools required to download and annotate data are included. Developed as part of my master's thesis in GeoInformatics at Hunter College, 2023.
+Scripts to train deep learning transformer and random forest tree species classification models using hyperspectral and vegetation data from NEON science sites. All tools required to download and annotate data are included. Developed as part of my master's thesis in GeoInformatics at Hunter College, 2023.
 
 The general workflow is:
 
 Download data -> Compress data with PCA -> Annotate data ->  Train and evaluate model
+
+acquire_all_data.R -> site_pca.py -> annotate.py -> experiment_runner.py
 
 ## Download data
 
@@ -25,7 +27,7 @@ The --alternate option can be used to fit a PCA model to one site and then compr
 python site_pca.py RMNP C:/Users/tonyt/Documents/Research/final_data --alternate NIWO
 ```
 
-## Annotate data using different tree identification algorithms
+## Annotate data using different tree selection algorithms
 ```
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 filtering -a
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 snapping -a
@@ -34,8 +36,10 @@ python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:3261
 
 EPSG codes are not automatically generated and must be provided manually by the user. NEON sites are all UTM codes. 
 
-### Data can also be manually annotated using a GUI with the -m flag
+Pixels can also be manually included/excluded using a GUI with the -m flag. Useful if you want to hand-select for sunlit pixels.
+```
 python annotation.py RMNP C:\Users\tonyt\Documents\Research\final_data EPSG:32613 filtering -m
+```
 
 ## Train and evaluate models using experiments listed in a CSV file
 Note: While this project works on both Linux and Windows, model training is much faster on Linux.
@@ -58,7 +62,7 @@ python experiment_runner.py LOG_DIR RESULTS_FILE DATA_DIRECTORY EXPERIMENTS.CSV
 | exp_number | Experiment Number, used for tracking experiments | Any integer |
 | sitename | Acronym for NEON Site, ie RMNP | Any four character NEON sitecode |
 | anno_method | Annotation method used to create training data | filtering, snapping, scholl |
-| man_or_auto | Was data automatically or manually annotated? | man, auto |
+| man_or_auto | Were pixels automatically or manually annotated? | man, auto |
 | split_method | How should training, testing, and validation data be split | tree, plot, pixel |
 | model | What kind of model to train and evaluate | DL, RF |
 | apply_filters | Whether to apply vegetation and shadow filters to data | T, F |
@@ -69,9 +73,13 @@ python experiment_runner.py LOG_DIR RESULTS_FILE DATA_DIRECTORY EXPERIMENTS.CSV
 | pt_ckpt | Model checkpoint to load trained on unlabelled data. Only usable with deep learning. Generated using pretraining_run.py. Can be left blank. | A file location ending in .ckpt |
 
 ## Pre-Training
-Optionally, users may train and then supply a deep learning model pre-trained on unlabelled NEON site data using a SWAV (SWapping Assignments between Views) model
+Optionally, users may train and then supply a deep learning model pre-trained on unlabelled NEON site data using a SwAV (Swapping Assignments between Views) model (https://arxiv.org/abs/2006.09882)
 
 python pretraining_run.py SAVEDIR DATA_DIRECTORY SITENAME
+
+## Inference
+
+Use a trained model to run inference on scenes. Coming soon!
 
 ## Requirements
 
@@ -84,7 +92,7 @@ Full requirements incoming, but general requirements are:
   - neonUtilities
   - geoNEON
   - neonOS
-  - dplyr
+  - tidyverse
   - lidR
   
 - Python:
