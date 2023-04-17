@@ -147,27 +147,35 @@ class Plot:
             plt.show()
 
     def plot_before_and_after(self):
-        tree_cm = self.cm_affine.rowcol(self.potential_trees.easting_tree, self.potential_trees.northing_tree)[::-1]
-        filter_tree_cm = self.cm_affine.rowcol(self.filtered_trees.easting_tree, self.filtered_trees.northing_tree)[::-1]
-        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10, 4.25), layout="constrained")
-        
-        ax[0].imshow(self.rgb)
-        ax[0].set_title('Tree Locations Before Filtering')
-        ax[0].scatter(*tree_cm, c='red')
-        #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
-        ax[0].get_xaxis().set_visible(False)
-        ax[0].get_yaxis().set_visible(False)
-        #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
+        with plt.style.context('ggplot'):
+            tree_cm = self.cm_affine.rowcol(self.potential_trees.easting_tree, self.potential_trees.northing_tree)[::-1]
+            filter_tree_cm = self.cm_affine.rowcol(self.filtered_trees.easting_tree, self.filtered_trees.northing_tree)[::-1]
+            fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(8, 4.65), layout="constrained")
+            algo_type = 'Scholl'
+            ax[0].imshow(self.rgb)
+            ax[0].set_title(f'Original Tree Locations')
+            ax[0].scatter(*tree_cm, c='red', label='Tree')
+            #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
+            ax[0].get_xaxis().set_visible(False)
+            ax[0].get_yaxis().set_visible(False)
+            ax[0].set_xlim(142, 358)
+            ax[0].set_ylim(364,129)
+            
+            #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
 
-        ax[1].imshow(self.rgb)
-        ax[1].set_title('Tree Locations After Filtering')
-        ax[1].scatter(*filter_tree_cm, c='red')
-        #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
-        ax[1].get_xaxis().set_visible(False)
-        ax[1].get_yaxis().set_visible(False)
-        #ax[1].scatter(*self.tree_tops_local_cm, c='blue')
+            ax[1].imshow(self.rgb)
+            ax[1].set_title(f'Tree Locations After {algo_type}')
+            ax[1].scatter(*filter_tree_cm, c='red', label='Tree')
+            #ax[0].scatter(*self.tree_tops_local_cm, c='blue')
+            ax[1].get_xaxis().set_visible(False)
+            ax[1].get_yaxis().set_visible(False)
+            ax[1].set_xlim(142, 358)
+            ax[1].set_ylim(364,129)
+            #ax[1].scatter(*self.tree_tops_local_cm, c='blue')
+            plt.legend()
+            plt.savefig(fr'C:\Users\tonyt\Documents\Research\thesis_final\Figures\Final_Figures\Before_and_After.png', dpi=300)
 
-        plt.show()
+            plt.show()
 
 
 class Tree:
@@ -864,60 +872,59 @@ class TreePlotter:
 
 
 if __name__ == "__main__":
-    import warnings
-    warnings.filterwarnings('ignore')
-    parser = argparse.ArgumentParser()
-    parser.add_argument("sitename", help='NEON sitename, e.g. NIWO', type=str)
-    parser.add_argument("basedir", help="Base directory storing all NEON data", type=str)
-    parser.add_argument("epsg", help='EPSG code, e.g EPSG:32613', type=str)
-    parser.add_argument("algo", help="Tree selection algorithm to use. One of: filtering, snapping, scholl", type=str)
-    parser.add_argument("-m", "--manual", help="perform manual annotation",
-                    action="store_true")
-    parser.add_argument("-a", "--automatic", help="perform automatic annotation",
-                    action="store_true")
-    parser.add_argument("--skip", help="Any plots from a study site you may want to skip, separated by spaces, eg. NIWO_057 NIWO_019", default="", type=str)
-    parser.add_argument("--min_taxa", help="Minimum number of examples of a taxa required to add to annotate", default=40, type=int)
-    args = parser.parse_args()
+    # import warnings
+    # warnings.filterwarnings('ignore')
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("sitename", help='NEON sitename, e.g. NIWO', type=str)
+    # parser.add_argument("basedir", help="Base directory storing all NEON data", type=str)
+    # parser.add_argument("epsg", help='EPSG code, e.g EPSG:32613', type=str)
+    # parser.add_argument("algo", help="Tree selection algorithm to use. One of: filtering, snapping, scholl", type=str)
+    # parser.add_argument("-m", "--manual", help="perform manual annotation",
+    #                 action="store_true")
+    # parser.add_argument("-a", "--automatic", help="perform automatic annotation",
+    #                 action="store_true")
+    # parser.add_argument("--skip", help="Any plots from a study site you may want to skip, separated by spaces, eg. NIWO_057 NIWO_019", default="", type=str)
+    # parser.add_argument("--min_taxa", help="Minimum number of examples of a taxa required to add to annotate", default=40, type=int)
+    # args = parser.parse_args()
 
 
-    if len(args.skip) > 0:
-        skips = args.skip.split(" ")
-    else: 
-        skips = []
+    # if len(args.skip) > 0:
+    #     skips = args.skip.split(" ")
+    # else: 
+    #     skips = []
 
-    BASEDIR = fr"{args.basedir}"
-    pb = PlotBuilder(
-        sitename=args.sitename,
-        epsg=args.epsg,
-        base_dir=BASEDIR,
-        completed_plots=skips,
-        min_taxa=args.min_taxa
-    )
-
-    for plot in pb.build_plots():
-        plot.find_trees(args.algo)
-        if args.manual:
-            plot.manual_annotation()
-        
-        if args.automatic:
-            plot.automatic_annotation()
-
-
-
-####DEBUG AND PLOTTING 
-    # test = PlotBuilder(
-    #     sitename='NIWO',
-    #     epsg='EPSG:32618',
-    #     base_dir=r'C:\Users\tonyt\Documents\Research\final_data',
-    #     plot_hs_dif=True
+    # BASEDIR = fr"{args.basedir}"
+    # pb = PlotBuilder(
+    #     sitename=args.sitename,
+    #     epsg=args.epsg,
+    #     base_dir=BASEDIR,
+    #     completed_plots=skips,
+    #     min_taxa=args.min_taxa
     # )
-    # # for plot in test.build_plots():
-    # #     plot.find_trees('filtering')
-    # #     print('here')
 
-    # niwo_57 = test.__build_plot__('NIWO_057')
-    # niwo_57.find_trees('filtering')
-    # #niwo_57.plot_me()
-    # niwo_57.plot_before_and_after()
-    # #niwo_57.automatic_annotation()
-    # print('here')
+    # for plot in pb.build_plots():
+    #     plot.find_trees(args.algo)
+    #     if args.manual:
+    #         plot.manual_annotation()
+        
+    #     if args.automatic:
+    #         plot.automatic_annotation()
+
+
+###DEBUG AND PLOTTING 
+    test = PlotBuilder(
+        sitename='NIWO',
+        epsg='EPSG:32618',
+        base_dir=r'C:\Users\tonyt\Documents\Research\final_data',
+        plot_hs_dif=False
+    )
+    # for plot in test.build_plots():
+    #     plot.find_trees('filtering')
+    #     print('here')
+
+    niwo_57 = test.__build_plot__('NIWO_014')
+    niwo_57.find_trees('scholl')
+    #niwo_57.plot_me()
+    niwo_57.plot_before_and_after()
+    #niwo_57.automatic_annotation()
+    print('here')
